@@ -88,7 +88,7 @@ function widgetScript(req, file) {
 const latestPublished = () => episodes().filter(e => e.schedule && Date.parse(e.schedule) <= Date.now()).sort((a, b) => Date.parse(b.schedule) - Date.parse(a.schedule))[0];
 // 手机小组件：只读汇总（粉丝、涨幅、最新一期播放、站点近 7 天），用单独的 config.web.widgetToken，只能读这一个接口
 function widgetData() {
-  const ORDER = ['bilibili', 'douyin', 'xhs', 'channels', 'youtube', 'x', 'instagram'];
+  const ORDER = ['bilibili', 'douyin', 'xhs', 'wechat', 'channels', 'youtube', 'x', 'instagram'];
   const rows = db.prepare("SELECT day, platform, total FROM followers WHERE day >= date('now','localtime','-40 day') AND total IS NOT NULL ORDER BY day").all();
   const by = {}; for (const r of rows) (by[r.platform] ||= []).push(r);
   const today = new Date().toLocaleDateString('sv-SE');

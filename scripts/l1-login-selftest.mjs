@@ -18,7 +18,7 @@ if (process.argv[2] === '--fake-child') {
       sleeps++; clock += min;
     },
     async withL1Browser(_config, fn, platform = 'xhs') {
-      assert.ok(['xhs', 'x'].includes(platform));
+      assert.ok(['xhs', 'x', 'wechat'].includes(platform));
       const urls = [];
       const page = {
         async goto(url) { urls.push(url); },
@@ -34,6 +34,7 @@ if (process.argv[2] === '--fake-child') {
           const document = {
             body: { innerText: loggedIn ? '创作者首页' : '扫码登录' },
             querySelectorAll(selector) {
+              if (platform === 'wechat') return [node('Hidden', true), ...(loggedIn ? [node(scenario === 'wrong' ? 'OtherAccount' : scenario === 'case' ? 'testaccount' : 'TestAccount')] : []), ...(scenario === 'ambiguous' ? [node('SecondAccount')] : [])];
               if (platform === 'xhs') {
                 assert.equal(selector, '.account-name, .user-info .name-box, .user-info .nickname, .user-name');
                 return [node('OtherHiddenAccount', true), ...(loggedIn ? [node(name)] : []),
@@ -44,7 +45,7 @@ if (process.argv[2] === '--fake-child') {
             },
           };
           // X 登录后通常跳到 /home；不能依赖当前页面是 PeanutPair 的主页。
-          const href = platform === 'xhs' ? 'https://creator.xiaohongshu.com/new/home' : 'https://x.com/home';
+          const href = platform === 'wechat' ? 'https://mp.weixin.qq.com/' : platform === 'xhs' ? 'https://creator.xiaohongshu.com/new/home' : 'https://x.com/home';
           return vm.runInNewContext(`(${fn.toString()})()`, { document, location: { href, origin: new URL(href).origin },
             getComputedStyle: () => ({ display: 'block', visibility: 'visible' }) });
         },
@@ -61,7 +62,7 @@ if (process.argv[2] === '--fake-child') {
       source: 'export const { pause, withL1Browser } = globalThis.__l1FakeBrowser;' };
     if (url.endsWith('/l1-config.mjs')) return { format: 'module', shortCircuit: true,
       source: `export const home = 'offline', dbPath = 'forbidden/hub.db';
-        export const readConfig = () => ({}), beijingDay = () => '2026-11-17', validDay = day => day, inWindow = () => false;` };
+        export const readConfig = () => ({ l1: { wechat: { account: process.env.L1_FAKE_SCENARIO === 'missing-account' ? '' : 'TestAccount' } } }), beijingDay = () => '2026-11-17', validDay = day => day, inWindow = () => false;` };
     return next(url, context);
   } });
   process.argv = [process.execPath, fileURLToPath(runner), ...JSON.parse(process.env.L1_FAKE_ARGS)];
@@ -79,18 +80,18 @@ if (process.argv[2] === '--fake-child') {
     assert.equal(lines.length, closed ? 1 : 0, result.stdout);
     if (closed) {
       const state = JSON.parse(lines[0].slice('FAKE_CLOSED '.length));
-      const platform = args.includes('--login-xhs') ? 'xhs' : 'x';
+      const platform = args.includes('--login-wechat') ? 'wechat' : args.includes('--login-xhs') ? 'xhs' : 'x';
       assert.equal(state.platform, platform);
-      assert.deepEqual(state.urls, [platform === 'xhs' ? 'https://creator.xiaohongshu.com/new/home' : 'https://x.com/i/flow/login']);
+      assert.deepEqual(state.urls, [platform === 'wechat' ? 'https://mp.weixin.qq.com/' : platform === 'xhs' ? 'https://creator.xiaohongshu.com/new/home' : 'https://x.com/i/flow/login']);
       if (reads != null) assert.equal(state.reads, reads);
       if (scenario === 'success') assert.equal(state.sleeps, 1);
       if (scenario === 'timeout' || scenario === 'hidden-only') assert.equal(state.clock, Number(timeout));
     }
     passed++;
   }
-  for (const flag of ['--login-xhs', '--login-x']) {
+  for (const flag of ['--login-xhs', '--login-x', '--login-wechat']) {
     run([flag, '--wait-login'], { reads: 2 });
-    run([flag, '--wait-login'], { scenario: 'wrong', status: 1, message: /OtherAccount/, reads: 1 });
+    run([flag, '--wait-login'], { scenario: 'wrong', status: 1, message: /OtherAccount|账号.*不符/, reads: 1 });
     run([flag, '--wait-login'], { scenario: 'timeout', status: 1, message: /等待登录超时（5000 毫秒）/, reads: 3 });
     run([flag, '--wait-login'], { scenario: 'read-error', status: 1, message: /模拟 DOM 读取失败/, reads: 1 });
     run([flag], { status: 1, message: /需要交互终端/, closed: false });
@@ -100,6 +101,12 @@ if (process.argv[2] === '--fake-child') {
   }
   run(['--login-xhs', '--wait-login'], { scenario: 'case', status: 1, message: /实际 twopeanuts/, reads: 1 });
   run(['--login-xhs', '--wait-login'], { scenario: 'hidden-only', status: 1, message: /等待登录超时/ });
+  run(['--login-wechat', '--wait-login'], { scenario: 'hidden-only', status: 1, message: /等待登录超时/ });
+  run(['--login-wechat', '--wait-login'], { scenario: 'ambiguous', status: 1, message: /歧义/ });
+  run(['--login-wechat', '--wait-login'], { scenario: 'missing-account', status: 1, message: /请配置/, closed: false });
+  run(['--login-wechat', '--wait-login'], { scenario: 'case', status: 1, message: /不符/ });
+  run(['--login-wechat', '--login-x'], { status: 1, message: /请单独运行/, closed: false });
+  run(['--login-wechat', '--only', 'wechat'], { status: 1, message: /请单独运行/, closed: false });
   run(['--wait-login'], { status: 1, message: /必须与/, closed: false });
   run(['--login-xhs', '--login-x', '--wait-login'], { status: 1, message: /请单独运行/, closed: false });
   run(['--login-xhs', '--wait-login', '--only', 'xhs'], { status: 1, message: /请单独运行/, closed: false });
@@ -115,5 +122,5 @@ if (process.argv[2] === '--fake-child') {
     else process.env.L1_LOGIN_TIMEOUT_MS = saved;
   }
   console.log(`PASS ${passed} 个 CLI/假 DOM 场景及默认 10 分钟/超时覆盖；正确账号退出 0，错误账号/超时退出 1，均执行假浏览器关闭。`);
-  console.log('未启动真实 Chrome；未连接 9340/9341；未打开数据库；未读取真实配置或凭据。');
+  console.log('未启动真实 Chrome；未连接 9340/9341/9342；未打开数据库；未读取真实配置或凭据。');
 }

@@ -6,12 +6,12 @@ import { spawn } from 'node:child_process';
 import { home } from './l1-config.mjs';
 export const pause = (min = 1800, max = 3200) => new Promise(resolve => setTimeout(resolve, min + Math.random() * (max - min)));
 export function browserSettings(config, platform = 'xhs') {
-  if (!['x', 'xhs'].includes(platform)) throw new Error('未知 L1 浏览器平台');
+  if (!['x', 'xhs', 'wechat'].includes(platform)) throw new Error('未知 L1 浏览器平台');
   const settings = config.l1?.[platform] || {};
   // X 绝不继承旧全局的 9340/profile；小红书保留旧配置兼容。
   const expected = path.resolve(home, `chrome-profile-l1-${platform}`);
   const profile = path.resolve(settings.chromeProfile || (platform === 'xhs' ? config.chromeProfile : null) || expected);
-  const expectedPort = platform === 'x' ? 9341 : 9340;
+  const expectedPort = { x: 9341, xhs: 9340, wechat: 9342 }[platform];
   const port = settings.chromePort ?? (platform === 'xhs' ? config.chromePort : null) ?? expectedPort;
   if (port !== expectedPort || profile.toLowerCase() !== expected.toLowerCase()) throw new Error(`L1 ${platform} 仅允许端口 ${expectedPort} 和 ${expected} 专用 profile`);
   const candidates = [config.chromeBinary, process.env.PROGRAMFILES && path.join(process.env.PROGRAMFILES, 'Google/Chrome/Application/chrome.exe'), process.env['PROGRAMFILES(X86)'] && path.join(process.env['PROGRAMFILES(X86)'], 'Google/Chrome/Application/chrome.exe'), process.env.LOCALAPPDATA && path.join(process.env.LOCALAPPDATA, 'Google/Chrome/Application/chrome.exe')].filter(Boolean);
@@ -44,7 +44,9 @@ export async function withL1Browser(config, fn, platform = 'xhs') {
       catch (error) { clearTimeout(timer); pending.delete(id); reject(error); }
     });
   }
-  const shutdown = async () => {
+  let shutdownPromise;
+  const shutdown = () => shutdownPromise ||= closeOwned();
+  const closeOwned = async () => {
     if (verifiedOwner && ws?.readyState === WebSocket.OPEN && !exited) await send('Browser.close').catch(() => {});
     ws?.close();
     for (const item of pending.values()) { clearTimeout(item.timer); item.reject(new Error('L1 浏览器已关闭')); }
@@ -115,12 +117,15 @@ export function assertBrowserOwner(args, processes, { profile, port }, pid) {
   if (!Number.isInteger(pid) || !args?.includes(`--user-data-dir=${profile}`) ||
       !args.includes(`--remote-debugging-port=${port}`) ||
       !args.includes('--remote-debugging-address=127.0.0.1') ||
+      ['--user-data-dir', '--remote-debugging-port', '--remote-debugging-address'].some(flag => args.filter(arg => arg === flag || arg.startsWith(`${flag}=`)).length !== 1) ||
       !processes?.some(p => p.type === 'browser' && p.id === pid)) {
     throw new Error('浏览器 PID/profile/端口归属校验失败');
   }
 }
 export function allowedPage(value, platform) {
   try {
+    // 公众号只主动导航入口。连显式 :443、空 query/hash 都拒绝；不拼接后台 token URL。
+    if (platform === 'wechat') return typeof value === 'string' && /^https:\/\/mp\.weixin\.qq\.com\/?$/i.test(value);
     const url = new URL(value);
     if (url.protocol !== 'https:' || url.username || url.password || url.port || url.search || url.hash) return false;
     if (platform === 'xhs') return url.hostname === 'creator.xiaohongshu.com';

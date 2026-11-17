@@ -1,6 +1,6 @@
 # Windows L1：独立工作台、页面采集和本地日报
 
-在 `D:\AIInfra\maitian` 手动运行。工作台独立运行，不依赖 Grok Bot 或 inbox JSON。X 默认用专用 Chrome 读取 `@PeanutPair` 已渲染页面，小红书读取 `TwoPeanuts`（ai）创作者页面；`import-x-public.mjs` 保留为可选手工导入。没有发布、定时任务、开机自启、飞书同步或站点转化采集。原 hub 的发布与 daemon 命令不属于 L1。
+在 `D:\AIInfra\maitian` 手动运行。工作台独立运行，不依赖 Grok Bot 或 inbox JSON。X 默认用专用 Chrome 读取 `@PeanutPair` 已渲染页面，小红书读取 `TwoPeanuts`（ai）创作者页面；公众号通过 `--only wechat` 单独采集。`import-x-public.mjs` 保留为可选手工导入。没有发布、定时任务、开机自启、飞书同步或站点转化采集。原 hub 的发布与 daemon 命令不属于 L1。
 
 ## 配置与隔离
 
@@ -124,6 +124,60 @@ node scripts/l1-regression-selftest.mjs
 ```
 
 第一条用自构造 document 执行实际 DOM 函数，覆盖粉丝、目标帖指标/缺项、原创/引用/转推/回复/作者、30 天及未知日期、错误账号零写入、模拟采集、入口分流及临时库合并。后两条回归导入、日报和现有页面兼容性。均不启动真实 Chrome，不连接 9340/9341，不打开正式库，不安装依赖。命令及关键输出保存在 `_l1-selftest-x-output.txt`、`_l1-selftest-output.txt`、`_l1-selftest-regression-output.txt`，临时库和日志不进 Git。
+
+## 公众号只读采集（wechat）
+
+平台 ID 为 `wechat`，显示名称为「公众号」，与视频号 `channels` 分开。默认无参数命令仍采 X 和小红书；公众号必须显式选择。X 的发布仍交给 Grok Bot，本功能不发布任何内容。保留项目原 MIT LICENSE；新增消息图形由本项目绘制，不复制第三方品牌 Logo。
+
+在现有配置的 `l1` 中合并以下片段（不要覆盖整个 `config.json`）：
+
+```json
+{
+  "wechat": {
+    "account": "你的公众号可见名称",
+    "chromePort": 9342
+  }
+}
+```
+
+`account` 必填，精确匹配可见账号名称，区分大小写；缺失、未登录、名称不符、出现多个可见名称或来源不符都停止，不写库。不从文章作者推断登录身份。不要配置 Cookie、token、AppSecret 或其它凭据。本次代码变更只修改 `config.example.json`，不读取或改写你的实际配置。
+
+默认 profile 为 `D:\AIInfra\maitian\chrome-profile-l1-wechat`；设定 `MAITIAN_HOME` 时变为该目录下的 `chrome-profile-l1-wechat`。也可在 `l1.wechat.chromeProfile` 显式填写同一绝对路径，其他路径会被拒绝。公众号不继承全局 `chromePort` / `chromeProfile`；只允许 `127.0.0.1:9342`，不会复用 9333–9336 的发布浏览器、9340 的小红书、9341 的 X 或日常 Chrome。
+
+```powershell
+# 请先在配置中填写预期的公众号可见名称
+node scripts/l1-run.mjs --login-wechat --wait-login
+# 之后手动运行采集；以下日期仅作命令示例
+node scripts/l1-run.mjs --only wechat --date 2026-11-17
+```
+
+登录只打开 `https://mp.weixin.qq.com/`，由 Liu 在专用可见窗口扫码。`--wait-login` 支持非 TTY，每隔随机 1.8–3.2 秒读取可见账号，不刷新二维码、不要求回车；默认超时 600000 毫秒，沿用 `L1_LOGIN_TIMEOUT_MS` 正整数覆盖。正确账号退出 0；错号、歧义、读取失败或超时退出 1。省略 `--wait-login` 时需要 TTY，扫码后回车校验。三种 `--login-*` 互斥且只能附加 `--wait-login`；单独使用 `--wait-login` 会报错。登录不导入存储模块、不建库、不采集和不生成日报。
+
+本功能始终显示窗口，不加 `--headless`，启动使用 `windowsHide:false`。若 9342 已占用，启动前直接失败，绝不连接或关闭已有浏览器。连接后核验本次子进程 PID、专用 profile、9342 和 loopback 参数，再进行 DOM 操作；重复或冲突的启动参数也拒绝。成功、异常、超时、Ctrl+C 均走同一幂等清理流程；只关闭通过归属校验的会话，必要时仅终止持有的本次子进程树，不按 Chrome 名称或端口杀进程。
+
+采集先校验账号，再低频点击可见的「用户分析/用户增长」及「内容分析/发表记录/已发表」只读菜单。粉丝只接受明确的总用户/总粉丝标签；歧义或不可见保持 NULL。文章使用可见卡片或表格、可见完整年月日、可见指标标签或列标题；不猜测指标列顺序。不主动请求 `cgi-bin/appmsg`、`getuseranalyse` 或任何内部接口，不拦截 XHR/fetch，不读 Cookie、token、storage、profile 文件或框架内部状态。Chrome 自身为显示页面产生的请求不由采集器读取。
+
+主动导航白名单只允许精确的 HTTPS 公众号根入口；后台路径、query、hash、用户名密码、显式端口（包括 :443）、其它域名和跨平台 URL 均拒绝。登录后仅通过可见菜单操作后台，不构造 token URL，也不把后台地址、整页 DOM 或整页文本存入数据库/日志。公开文章链接仅保存无 query/hash 的 `https://mp.weixin.qq.com/s/{id}`；含查询参数的文章链接只提取可靠 mid/appmsgid 与 idx，不保存原 URL，无法取得安全公开链接时 URL 为 NULL。数据属性 ID、mid/appmsgid 或公开短链 ID 都可用于稳定去重；同一多图文的 idx 会区分文章。
+
+每轮等待、核验账号并批量读取卡片，按 ID 去重。窗口由 `--date` 控制：该北京时间自然日及之前 29 日，包含截止日，排除未来和第 30 日以前的文章。无完整可靠日期、非法日期、草稿/未发表/审核中文章跳过计数；旧置顶不会截断遍历。最多 120 轮，通过滚动或可见「下一页」继续，必须看到明确末页；空作品页或上限仍未确认完成则失败，不写入本轮观测。选择器或菜单不匹配时，请先调整 DOM 适配，不能把离线测试当作真实页面验收。
+
+阅读/浏览 → `views`，点赞 → `likes`，留言/评论 → `comments`，分享/转发 → `shares`。只记录实际可见数值，支持逗号与万/亿/K/M，数值可能四舍五入；缺项、破折号或相互冲突的值保持 NULL，明确的 0 保留。收藏 `favorites` 保持 NULL；在看存于 `metrics.extra.watching`，其观测时间为 `field_observed_at.watching`。
+
+整个浏览器阶段结束并再次确认账号、关闭专用 Chrome 后，才打开数据库事务写入。复用 episodes/tasks/metrics/samples/followers/snapshots，不清表。文章 ID 为 `external:wechat:{id}`；快照包含 account、appmsgId/postId 和 platforms.wechat，来源为 `wechat-visible-dom`。同 ID 幂等，旧观测不覆盖新观测，NULL 保留已有非空值及原字段时间，粉丝 NULL 不写；gain/loss 不估算。观测 day 始终取 captured_at 的北京时间日期，不由 `--date` 改写。已有文章若属于另一账号则整轮回滚。
+
+日报列出已观测公众号账号、总粉丝、较上次实测新增、文章阅读/点赞/留言/分享/在看及观测时间。缺项和没有基线的新增显示「暂无」，不把累计粉丝当作新增；沿用历史值时说明原字段时间。工作台和小组件平台顺序中，公众号位于小红书之后，与视频号分列。
+
+### 公众号离线验收
+
+```powershell
+node scripts/l1-login-selftest.mjs
+node scripts/l1-wechat-selftest.mjs
+node scripts/l1-x-selftest.mjs
+node scripts/l1-selftest.mjs
+node scripts/l1-regression-selftest.mjs
+```
+
+公众号自测使用手工构造的 document 执行真实 DOM 函数、内存假浏览器、实际 CLI 分流与隔离临时 SQLite，覆盖身份/超时/隐藏与歧义/日期窗口/NULL与0/在看/敏感链接过滤/端口profile归属/幂等和历史值/日报/API overview 与 detail/大屏模板。登录自测覆盖三个平台的非 TTY 轮询，不启动真实 Chrome，不连接任何调试端口，不打开正式 `data\hub.db`，不读取实际配置或 profile。公众号结果保存到 `_l1-selftest-wechat-output.txt`，已有 `.gitignore` 的 `_l1-selftest*` 同时忽略该日志和临时文件。真实公众号页面需另由 Liu 手动登录后验收，本次不操作已登录 Chrome。
 
 ## 回退
 
