@@ -93,14 +93,16 @@ try {
     finally { closes++; }
   };
   const options = { withBrowser: fakeBrowser(base), wait, now: () => new Date('2026-11-17T16:30:00Z'), persist: async observation => { writes++; assert.equal(closes, writes + 3); return observation; } };
-  assert.throws(() => wechatAccount({}), /请配置/);
-  await assert.rejects(collectWechat({}, '2026-11-17', options), /请配置/); assert.equal(closes, 0);
+  assert.equal(wechatAccount({}), null);
+  assert.throws(() => wechatAccount({ l1: { wechat: { account: ' x' } } }), /可见名称/);
   for (const names of [['Wrong'], [], ['TestAccount', 'Second']]) {
     await assert.rejects(collectWechat(config, '2026-11-17', { ...options, withBrowser: fakeBrowser(doc([], names)) }), /停止/);
     assert.equal(writes, 0); assert.equal(fs.existsSync(process.env.MAITIAN_DB), false);
   }
   const observation = await collectWechat(config, '2026-11-17', options);
   assert.deepEqual(observation.posts.map(p => p.id), ['101', '102']);
+  const unconfigured = await collectWechat({}, '2026-11-17', { ...options, persist: async value => value });
+  assert.equal(unconfigured.account, 'TestAccount');
   assert.equal(observation.posts[0].favorites, null); assert.equal(observation.source, 'wechat-visible-dom'); assert.ok(waits > 0);
   let identityReads = 0;
   await assert.rejects(collectWechat(config, '2026-11-17', { ...options, withBrowser: async (_c, fn) => fn({ goto: async () => {}, evaluate: async (fn, ...args) => {

@@ -140,7 +140,7 @@ node scripts/l1-regression-selftest.mjs
 }
 ```
 
-`account` 必填，精确匹配可见账号名称，区分大小写；缺失、未登录、名称不符、出现多个可见名称或来源不符都停止，不写库。不从文章作者推断登录身份。不要配置 Cookie、token、AppSecret 或其它凭据。本次代码变更只修改 `config.example.json`，不读取或改写你的实际配置。
+可选 `account`：若配置则必须与可见公众号名称精确匹配（区分大小写）；未配置时只要已进入后台且可见唯一公众号名称即视为成功，并把该名称写入观测。未登录、名称不符、出现多个可见名称或来源不符都停止，不写库。不从文章作者推断登录身份。不要配置 Cookie、token、AppSecret 或其它凭据。本次代码变更只修改 `config.example.json`，不读取或改写你的实际配置。
 
 默认 profile 为 `D:\AIInfra\maitian\chrome-profile-l1-wechat`；设定 `MAITIAN_HOME` 时变为该目录下的 `chrome-profile-l1-wechat`。也可在 `l1.wechat.chromeProfile` 显式填写同一绝对路径，其他路径会被拒绝。公众号不继承全局 `chromePort` / `chromeProfile`；只允许 `127.0.0.1:9342`，不会复用 9333–9336 的发布浏览器、9340 的小红书、9341 的 X 或日常 Chrome。
 

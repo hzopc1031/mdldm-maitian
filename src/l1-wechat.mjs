@@ -6,13 +6,14 @@ import { visibleWechatIdentity, visibleWechatFollowers, visibleWechatArticles, c
 const HOME = 'https://mp.weixin.qq.com/';
 export function wechatAccount(config) {
   const account = config.l1?.wechat?.account;
-  if (typeof account !== 'string' || !account.trim() || account !== account.trim() || /[\r\n]/.test(account)) throw new Error('请配置 l1.wechat.account 为预期公众号可见名称；未启动 Chrome、未写库');
+  if (account == null || account === '') return null;
+  if (typeof account !== 'string' || account !== account.trim() || !account || /[\r\n]/.test(account)) throw new Error('l1.wechat.account 必须是不含首尾空格或换行的公众号可见名称');
   return account;
 }
 export function checkWechatIdentity(identity, account) {
   if (!identity.trustedOrigin) throw new Error('停止：公众号页面来源不符；未采集、未写库');
   if (identity.names.length > 1) throw new Error('停止：可见公众号账号有歧义；未采集、未写库');
-  if (identity.names.length === 1 && identity.names[0] !== account) throw new Error('停止：可见公众号账号与 l1.wechat.account 不符；未采集、未写库');
+  if (identity.names.length === 1 && account && identity.names[0] !== account) throw new Error(`停止：可见公众号账号 ${identity.names[0]} 与 l1.wechat.account 不符；未采集、未写库`);
   return identity.names.length === 1 && !identity.login;
 }
 export async function assertWechatAccount(page, account, wait = pause) {
@@ -29,15 +30,18 @@ export async function loginWechat(config, { waitLogin = false } = {}) {
   await withL1Browser(config, async page => {
     await page.goto(HOME);
     if (waitLogin) {
-      console.log(`请 Liu 在公众号专用窗口扫码登录；按配置名称校验，超时 ${timeoutMs} 毫秒。`);
+      console.log(account
+        ? `请 Liu 在公众号专用窗口扫码登录 ${account}；自动轮询可见名称，无需回车，超时 ${timeoutMs} 毫秒。`
+        : `请 Liu 在公众号专用窗口扫码登录；未配置 l1.wechat.account，将确认已进入后台且可见唯一公众号名称，超时 ${timeoutMs} 毫秒。`);
       await waitForVisibleLogin(page, visibleWechatIdentity, identity => checkWechatIdentity(identity, account), timeoutMs);
     } else {
       const terminal = createInterface({ input: process.stdin, output: process.stdout });
-      try { await terminal.question('请 Liu 在本次公众号专用窗口扫码登录预期账号，完成后回车校验：'); }
+      try { await terminal.question('请 Liu 在本次公众号专用窗口扫码登录，完成后回车校验：'); }
       finally { terminal.close(); }
       await assertWechatAccount(page, account);
     }
-    console.log('公众号登录校验成功；随后关闭本次专用 Chrome。');
+    const identity = await page.evaluate(visibleWechatIdentity);
+    console.log(`公众号登录校验成功：${identity.names[0]}；随后关闭本次专用 Chrome。`);
   }, 'wechat');
 }
 async function persistWechat(observation) {
@@ -45,9 +49,10 @@ async function persistWechat(observation) {
   return store.transaction(() => store.saveObservation(observation));
 }
 export async function collectWechat(config, date, { withBrowser = withL1Browser, wait = pause, persist = persistWechat, now = () => new Date() } = {}) {
-  const account = wechatAccount(config); validDay(date);
+  const expected = wechatAccount(config); validDay(date);
   const observation = await withBrowser(config, async page => {
-    await page.goto(HOME); await assertWechatAccount(page, account, wait);
+    await page.goto(HOME); await assertWechatAccount(page, expected, wait);
+    const account = expected || (await page.evaluate(visibleWechatIdentity)).names[0];
     await wait(); await page.evaluate(clickWechatSection, 'followers');
     let followers = null;
     for (let i = 0; i < 6; i++) {

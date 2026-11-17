@@ -102,7 +102,7 @@
       "account": "",
       "chromeProfile": "D:\\AIInfra\\maitian\\chrome-profile-l1-wechat",
       "chromePort": 9342,
-      "note": "account 必填精确的可见公众号名称；只读DOM，不配置Cookie/token。MAITIAN_HOME迁移后省略profile以使用新HOME下的专用目录。"
+      "note": "account 可选；填写则必须与可见公众号名称精确匹配。只读DOM，不配置Cookie/token。MAITIAN_HOME迁移后省略profile以使用新HOME下的专用目录。"
     }
   }
 }

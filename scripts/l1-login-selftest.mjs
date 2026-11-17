@@ -90,7 +90,7 @@ if (process.argv[2] === '--fake-child') {
     passed++;
   }
   for (const flag of ['--login-xhs', '--login-x', '--login-wechat']) {
-    run([flag, '--wait-login'], { reads: 2 });
+    run([flag, '--wait-login'], { reads: flag === '--login-wechat' ? 3 : 2 });
     run([flag, '--wait-login'], { scenario: 'wrong', status: 1, message: /OtherAccount|账号.*不符/, reads: 1 });
     run([flag, '--wait-login'], { scenario: 'timeout', status: 1, message: /等待登录超时（5000 毫秒）/, reads: 3 });
     run([flag, '--wait-login'], { scenario: 'read-error', status: 1, message: /模拟 DOM 读取失败/, reads: 1 });
@@ -103,7 +103,7 @@ if (process.argv[2] === '--fake-child') {
   run(['--login-xhs', '--wait-login'], { scenario: 'hidden-only', status: 1, message: /等待登录超时/ });
   run(['--login-wechat', '--wait-login'], { scenario: 'hidden-only', status: 1, message: /等待登录超时/ });
   run(['--login-wechat', '--wait-login'], { scenario: 'ambiguous', status: 1, message: /歧义/ });
-  run(['--login-wechat', '--wait-login'], { scenario: 'missing-account', status: 1, message: /请配置/, closed: false });
+  run(['--login-wechat', '--wait-login'], { scenario: 'missing-account', message: /登录校验成功/ });
   run(['--login-wechat', '--wait-login'], { scenario: 'case', status: 1, message: /不符/ });
   run(['--login-wechat', '--login-x'], { status: 1, message: /请单独运行/, closed: false });
   run(['--login-wechat', '--only', 'wechat'], { status: 1, message: /请单独运行/, closed: false });
