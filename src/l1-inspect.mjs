@@ -19,9 +19,15 @@ export function preparationTarget(record,job,date) {
 }
 function validateProof(platform,result) {
   if(!result?.ok || result.platform!==platform || !result.account || !result.checkedAt)throw new Error('缺少本次可见身份/链接核验回执');
+  if(platform==='xhs' && (!result.postId || new URL(result.url).pathname.split('/').at(-1)!==result.postId))throw new Error('缺少与公开链接一致的稳定笔记ID');
   selectPublishedLink(platform,[{id:result.url?.split('/').at(-1),url:result.url,state:'published',kind:'original',author:result.account,permalinkAuthor:result.account}],{postId:result.url?.split('/').at(-1),account:result.account});
 }
 function writeTask(db,episodeId,platform,result) {
+  if(platform==='xhs') {
+    const snapshot=db.prepare('SELECT project FROM snapshots WHERE episode_id=?').get(episodeId);
+    const target=publishedTarget(platform,{},JSON.parse(snapshot?.project || '{}'));
+    if(!target.postId || target.postId!==result.postId)throw new Error('回写目标稳定ID已变化或缺失；不写入其他笔记链接');
+  }
   const changed=db.prepare('UPDATE tasks SET url=?,state=?,detail=?,updated_at=? WHERE episode_id=? AND platform=?').run(result.url,'published','L1 可见已发布列表唯一匹配公开链接',result.checkedAt,episodeId,platform);
   if(changed.changes!==1)throw new Error('作品平台任务不存在或不唯一；不回写');
 }
@@ -112,10 +118,20 @@ export async function inspectPlatform(config, platform, target, { withBrowser, w
     }
     if(platform==='xhs') {
       const candidates=[...cards.values()].filter(c=>c.state==='published'&&(target.postId?c.id===target.postId:c.date===target.date&&c.text?.trim()===target.text?.trim()));
-      await page.goto('https://creator.xiaohongshu.com/new/home');
       if(candidates.length===1&&!candidates[0].url) {
+        let share=await page.evaluate(h.visibleNoteShare,candidates[0].id,true);
+        if(share.opened){await wait();share=await page.evaluate(h.visibleNoteShare,candidates[0].id,false);}
+        if(share.ok && share.postId===candidates[0].id)candidates[0].url=share.url;
+        if(!candidates[0].url) {
+          await page.goto('https://creator.xiaohongshu.com/new/home');
+          await identity();
+          throw new Error(`已匹配真实已发布笔记，但未读到可核验公开分享链接（${share.reason}）；未回写，不按ID拼造`);
+        }
+      }
+      await page.goto('https://creator.xiaohongshu.com/new/home');
+      if(candidates.length===1) {
         await identity();
-        throw new Error('已匹配真实已发布笔记，但该可见列表未提供公开链接；不按ID拼造。需要从本人实际分享页取得可核验公开地址');
+        return {ok:true,platform,account,postId:candidates[0].id,url:selectPublishedLink(platform,candidates,{...target,account}),checkedAt:new Date().toISOString(),scope:'稳定ID唯一匹配；仅可见卡片或明确分享操作提供的公开链接'};
       }
     }
     await identity();

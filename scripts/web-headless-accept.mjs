@@ -40,9 +40,15 @@ function browserChecks(test, image) {
       if(login) {login.value='isolated-render-fixture';document.querySelector('form').requestSubmit();return;}
       await wait(()=>test==='home'?!!document.querySelector('.hero'):!!document.querySelector('.h1'));
       check(!document.body.innerText.includes('出错了：'),'no render error');
-      const expected=test==='home'?'/':test.endsWith('system')?'/p#/system':'/p#/prepare';
+      const expected=test==='home'?'/':test==='traffic'?'/p#/traffic':test.endsWith('system')?'/p#/system':'/p#/prepare';
       check(location.pathname+location.hash===expected,'POST preserved route');
       if(!sessionStorage.getItem('qa-reloaded')){sessionStorage.setItem('qa-reloaded','1');location.reload();return;}
+      if(test==='home'||test==='traffic') {
+        const summary=document.querySelector('.account-summary');check(!!summary,'account summary visible');
+        for(const label of ['当日发文累计','当前作品累计','跨日快照增量','暂无','未证明全账号完整历史'])check(summary.innerText.includes(label),label);
+        check(summary.querySelectorAll('tbody tr').length===9,'three platforms, three scopes');
+        check(summary.scrollHeight<=summary.clientHeight+2,'summary not vertically clipped');
+      }
       if(test.endsWith('system')) {
         for(const label of ['手动操作','采流量','采粉丝','体检','取链接','最近动态','平台登录与校验'])check(document.body.innerText.includes(label),label);
         check(document.querySelectorAll('[data-act]').length===(test==='enabled-system'?15:12),'manual actions retained');
@@ -96,11 +102,11 @@ const binary=process.env.CHROME_PATH || [
 const evidence={at:new Date().toISOString(),mode:'Chrome headless CLI; isolated real handler and test data; no platform access or remote debugging',results:[]};
 try {
   if(!binary)throw new Error('Chrome not found');
-  for(const test of ['unauth','invalid','home','system','prepare','prepare-flow','enabled-system']) {
+  for(const test of ['unauth','invalid','home','traffic','system','prepare','prepare-flow','enabled-system']) {
     current=test;report=null;
     config.publishPrep.browserExecution=test==='enabled-system';
     for(const p of ['x','xhs','wechat'])config.l1[p].browserExecution=test==='enabled-system';
-    const target=test==='home'?'/':test==='unauth'||test.endsWith('system')?'/p#/system':'/p#/prepare';
+    const target=test==='home'?'/':test==='traffic'?'/p#/traffic':test==='unauth'||test.endsWith('system')?'/p#/system':'/p#/prepare';
     const shot=path.join(output,test+'.png');
     const child=spawn(binary,['--headless=new','--incognito','--no-first-run','--no-default-browser-check','--disable-extensions','--disable-background-networking',
       '--window-size=1440,1800','--user-data-dir='+path.join(folder,'profile-'+test),'--screenshot='+shot,'--dump-dom','--timeout=18000',

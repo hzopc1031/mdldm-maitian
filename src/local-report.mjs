@@ -2,6 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { home, beijingDay, validDay, readConfig } from './l1-config.mjs';
 import { l1Account } from './l1-account.mjs';
+import { configuredSummaries } from './l1-summary.mjs';
 const show = value => value == null ? '暂无' : String(value);
 const cell = value => String(value ?? '暂无').replace(/\|/g, '\\|').replace(/[\r\n]+/g, ' ').replace(/</g, '&lt;');
 export async function writeLocalReport({ date = beijingDay(), reportDir = path.join(home, 'reports') } = {}) {
@@ -9,6 +10,17 @@ export async function writeLocalReport({ date = beijingDay(), reportDir = path.j
   const { db } = await import('./l1-store.mjs');
   const lines = [`# L1 本地日报 ${date}`, '', '账号按本地已核验观测记录展示；没有观测时不猜测账号。', '', '数据按北京时间日期截取；暂无表示没有观测。此日报不发送飞书。', ''];
   let example = false;
+  for(const s of configuredSummaries(db,readConfig(),l1Account,date)) {
+    example ||= s.example;
+    lines.push(`## 账号今日汇总 · ${cell(s.platform)} / ${cell(s.account)}`, '', s.coverage,
+      `观测时间：${show(s.observedAt.from)} 至 ${show(s.observedAt.to)}；发布日期未知：${s.unknownPublicationDates} 篇。`, '',
+      '| 口径 | 作品数 | 浏览 / 阅读 | 点赞 | 评论 / 留言 | 收藏 | 分享 |', '| --- | ---: | ---: | ---: | ---: | ---: | ---: |');
+    for(const key of ['publishedToday','currentWorks','crossDayDelta']) {const r=s[key];
+      lines.push(`| ${r.label} | ${key==='crossDayDelta'?`${r.matchedWorks}/${s.observedWorks} 同ID双日`:show(r.count)} | ${['views','likes','comments','favorites','shares'].map(k=>show(r.metrics[k])).join(' | ')} |`);
+    }
+    lines.push('',s.publishedToday.meaning+'。',s.currentWorks.meaning+'。',s.crossDayDelta.meaning+'。',
+      `跨日区间：${s.crossDayDelta.from} → ${date}；基线观测：${show(s.crossDayDelta.baselineAt.from)} 至 ${show(s.crossDayDelta.baselineAt.to)}。`, '');
+  }
   const wechatAccounts = db.prepare("SELECT DISTINCT extra FROM metrics WHERE platform='wechat' AND day<=?").all(date).map(row => JSON.parse(row.extra || '{}').account);
   const wechatFans = db.prepare("SELECT value FROM meta WHERE key LIKE 'l1:followers:wechat:%'").all().map(row => JSON.parse(row.value)).filter(row => beijingDay(row.captured_at) <= date).map(row => row.account);
   const observedAccount=platform=>{

@@ -62,3 +62,32 @@ export function parseVisibleNumber(value) {
   if (!m) return null;
   return Math.round(Number(m[1]) * ({ 万: 1e4, 亿: 1e8, k: 1e3, m: 1e6 }[(m[2] || '').toLowerCase()] || 1));
 }
+
+// Only an explicitly labelled, visible share control on the exact stable-ID card.
+// Do not guess icon positions, read clipboard/storage, or synthesize a permalink.
+export function visibleNoteShare(postId, open = false) {
+  const visible=el=>{const r=el.getBoundingClientRect(),s=getComputedStyle(el);return r.width>0&&r.height>0&&s.visibility!=='hidden'&&s.display!=='none';};
+  const cards=[...document.querySelectorAll('.note-card')].filter(visible).filter(card=>{
+    try{return String(JSON.parse(card.getAttribute('data-impression')).noteTarget.value.noteId)===postId;}catch{return false;}
+  });
+  if(cards.length!==1)return {ok:false,reason:'stable-id-card-not-unique'};
+  const card=cards[0];
+  if(/审核中|未通过|草稿/.test(card.innerText))return {ok:false,reason:'not-published'};
+  const dialogs=[...document.querySelectorAll('[role="dialog"], .el-dialog, .ant-modal, [role="tooltip"], .el-popover')].filter(visible).filter(el=>/分享|复制链接|笔记链接/.test(el.innerText));
+  const urls=new Set();
+  for(const root of [card,...dialogs]) {
+    const values=[...[...root.querySelectorAll('a[href]')].filter(visible).map(a=>a.href), ...[...root.querySelectorAll('input,textarea')].filter(visible).map(a=>a.value),root.innerText];
+    for(const value of values)for(const match of String(value || '').matchAll(/https:\/\/(?:www\.)?xiaohongshu\.com\/explore\/[\w-]+(?:[^\s<>"']*)/g)) {
+      try{const u=new URL(match[0]);if(u.pathname===`/explore/${postId}`&&!u.search&&!u.hash&&!u.username&&!u.password)urls.add(u.href);}catch{}
+    }
+  }
+  if(urls.size===1)return {ok:true,postId,url:[...urls][0],source:'visible-share-or-card'};
+  if(urls.size>1)return {ok:false,reason:'ambiguous-share-links'};
+  if(!open)return {ok:false,reason:'no-verifiable-public-link'};
+  const controls=[...card.querySelectorAll('button,[role="button"],a,.note-card__action-btn')].filter(visible).filter(el=>{
+    const labels=[el.innerText,el.getAttribute('aria-label'),el.getAttribute('title')].map(v=>String(v || '').trim());
+    return labels.some(v=>/^(分享|分享笔记|复制链接|复制笔记链接)$/.test(v));
+  });
+  if(controls.length!==1)return {ok:false,reason:'visible-share-control-not-unique'};
+  controls[0].click();return {ok:false,opened:true,reason:'share-opened'};
+}

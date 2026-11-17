@@ -166,6 +166,7 @@ try {
     document: { hidden: true, body: element('body'), querySelector: element, createElement: () => element('new'), addEventListener() {} },
     fetch() { return new Promise(() => {}); }, setInterval() {}, clearInterval() {}, setTimeout() {}, addEventListener() {}, scrollTo() {} });
   vm.runInContext(fs.readFileSync(path.join(root, 'src/web/mt.js'), 'utf8'), context);
+  vm.runInContext(fs.readFileSync(path.join(root, 'src/web/health.js'), 'utf8'), context);
   vm.runInContext(fs.readFileSync(path.join(root, 'src/web/pages.html'), 'utf8').match(/<script>([\s\S]*?)<\/script>/)[1], context);
   vm.runInContext(fs.readFileSync(path.join(root, 'src/web/publish-prep.js'), 'utf8'), context);
   context.input = (await request('/api/overview')).json();

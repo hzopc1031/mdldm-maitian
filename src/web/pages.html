@@ -37,11 +37,11 @@ const samplesOf = (e) => PL.map(p => ({ name: PN[p], pts: O.samples.filter(s => 
 let after = () => {};
 
 function vTraffic() {
-  const eps = O.episodes.filter(e => e.views > 1); if (!eps.length) return `<div class="h1">流量</div><p class="lead">还没采到流量。先到系统页登录，再选择平台采集。</p><div class="btns">${collectButtons()}<a class="btn" href="#/system">登录与采集状态</a></div>`;
+  const eps = O.episodes.filter(e => e.views > 1); if (!eps.length) return `<div class="h1">流量</div>${accountSummaryHTML(O.accountSummaries)}<p class="lead">还没采到流量。先到系统页登录，再选择平台采集。</p><div class="btns">${collectButtons()}<a class="btn" href="#/system">登录与采集状态</a></div>`;
   const all = sum(eps, 'views'), it = sum(eps, 'inter'), byP = PL.map(p => ({ p, v: eps.reduce((s, e) => s + ((M(e, p) || {}).views || 0), 0) })).sort((a, b) => b.v - a.v);
   const e = eps.find(x => x.id === pick) || eps[0], rows = PL.map(p => ({ p, m: M(e, p), t: e.tasks.find(t => t.platform === p) })).filter(r => r.m), mx = Math.max(...rows.map(r => r.m.views || 0), 1);
   after = () => { const el = $('#c-line'); if (el) drawLines(el, samplesOf(e)); };
-  return `<div class="h1">流量</div><p class="lead">各平台已采到的播放和互动。采集需手动发起，日报保存在本机。</p>
+  return `<div class="h1">流量</div>${accountSummaryHTML(O.accountSummaries)}<p class="lead">各平台已采到的播放和互动。采集需手动发起，日报保存在本机。</p>
   <div class="grid g4">${tile('累计播放', fmt(all), `${eps.length} 期合计`)}${tile('累计互动', fmt(it), `互动率 ${pct(it, all, 1)}`)}${tile('平均每期播放', fmt(all / eps.length))}${tile('播放最多的平台', PN[byP[0].p], `${fmt(byP[0].v)}，占 ${pct(byP[0].v, all)}`)}</div>
   ${sec('每期 × 平台', '格子里是播放数，细条是这一期里的占比')}
   <div class="panel"><div class="tw"><table><thead><tr><th>期</th>${PL.map(p => `<th class="n">${logo(p)}${PN[p]}</th>`).join('')}<th class="n">合计</th><th class="n">互动率</th></tr></thead><tbody>

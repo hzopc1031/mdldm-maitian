@@ -92,10 +92,17 @@ try {
   assert.equal(selectPublishedLink('xhs',[{id:'abc',state:'published',url,date:'2026-11-17',text:'完整标题'}],{text:'完整标题',date:'2026-11-17'}),url);
   assert.throws(()=>selectPublishedLink('xhs',[{id:'abc',state:'published',url,date:'2026-11-17',text:'完整标题片段'}],{text:'完整标题',date:'2026-11-17'}));
   db.exec('CREATE TABLE logs (ts TEXT,episode_id TEXT,platform TEXT,action TEXT,result TEXT)');
-  const proof={ok:true,platform:'xhs',account:'TwoPeanuts',url,checkedAt:new Date().toISOString()};
+  db.exec('CREATE TABLE snapshots (episode_id TEXT PRIMARY KEY,project TEXT)');
+  db.prepare('INSERT INTO snapshots VALUES (?,?)').run('ep',JSON.stringify({noteId:'abc'}));
+  const proof={ok:true,platform:'xhs',postId:'abc',account:'TwoPeanuts',url,checkedAt:new Date().toISOString()};
   writePublishedLink(db,'ep','xhs',proof);
   assert.equal(db.prepare('SELECT url FROM tasks WHERE episode_id=?').get('ep').url,url);
   assert.equal(db.prepare('SELECT COUNT(*) AS n FROM logs').get().n,1);
+  assert.throws(()=>writePublishedLink(db,'ep','xhs',{...proof,postId:'other'}));
+  db.prepare('UPDATE snapshots SET project=? WHERE episode_id=?').run(JSON.stringify({noteId:'changed-after-inspection'}),'ep');
+  assert.throws(()=>writePublishedLink(db,'ep','xhs',proof),/稳定ID已变化/);
+  assert.equal(db.prepare('SELECT COUNT(*) AS n FROM logs').get().n,1);
+  db.prepare('UPDATE snapshots SET project=? WHERE episode_id=?').run(JSON.stringify({noteId:'abc'}),'ep');
   const prepRecord=enabled.create({platform:'x',content:'完整正文'});
   assert.deepEqual(preparationTarget(prepRecord,{content:'完整正文',submit:false},'2026-11-17'),{text:'完整正文',date:'2026-11-17'});
   assert.throws(()=>preparationTarget(prepRecord,{content:'完整正文',submit:false},''));

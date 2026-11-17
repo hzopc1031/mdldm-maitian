@@ -11,6 +11,7 @@ import { home } from './l1-config.mjs';
 import { authPage, cleanTarget } from './web-auth.mjs';
 import { createPrepService, BROWSER_BLOCK } from './publish-prep.mjs';
 import { l1Account } from './l1-account.mjs';
+import { configuredSummaries } from './l1-summary.mjs';
 
 const DIR = path.dirname(fileURLToPath(import.meta.url)), ROOT = path.resolve(DIR, '..');
 const W = config.web || { port: 8787, key: '' };
@@ -88,6 +89,7 @@ export function l1Status() {
 export function overviewData() {
   const at = e => Date.parse(e.publishedAt || e.observedAt || e.createdAt) || 0;
   return {
+    accountSummaries: configuredSummaries(db, config, l1Account),
     episodes: episodes().map(e => episodeView(e)).sort((a, b) => at(b) - at(a) || a.id.localeCompare(b.id)),
     site: { days: db.prepare('SELECT * FROM site_daily ORDER BY day').all(), channels: db.prepare('SELECT * FROM site_channels ORDER BY revenue DESC').all(),
       campaigns: db.prepare('SELECT * FROM site_campaigns ORDER BY reg DESC').all(), campaignsOn: getMeta('siteCampaigns') === 'on' },

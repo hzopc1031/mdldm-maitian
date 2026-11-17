@@ -15,6 +15,7 @@
 <body>
 <div class="bgfx"><i></i><i></i><i></i></div>
 <div class="screen" id="screen"><div class="empty">加载中…</div></div>
+<div id="account-summary" style="padding:0 22px 20px"></div>
 <div id="tip"></div>
 <a class="btn" href="/p#/system" style="position:fixed;right:18px;bottom:18px;z-index:20">登录与采集</a>
 <script src="/static/health.js"></script>
@@ -191,6 +192,7 @@ function render() {
 
   ${O.siteOn ? `  <a class="panel strip" href="/p#/convert"><h3>${esc(PN.zsz)} · 近 7 天</h3><span>新注册<b>${fmt(sum(l7, 'reg'))}</b></span><span>新会员<b>${fmt(sum(l7, 'vip'))}</b></span><span>订单<b>${fmt(sum(l7, 'orders'))}</b></span><span>收入<b>¥${fmt(sum(l7, 'revenue'))}</b></span>
     <span class="feedline">${f0 ? `最近动态：${pad(new Date(f0.ts).getHours())}:${pad(new Date(f0.ts).getMinutes())} ${f0.nick ? '「' + esc(f0.nick) + '」' : ''}${esc(f0.platform)} ${esc(f0.action)}${f0.result ? ' · ' + esc(f0.result) : ''}` : ''}</span><span class="go">转化详情 ›</span></a>` : ''}`;
+  $('#account-summary').innerHTML = accountSummaryHTML(O.accountSummaries);
   draw(); tick(); fixTabs(); if (!render.done) { render.done = true; countUp(); }
 }
 function draw() { if (!O) return; const ins = document.querySelector('.ins'); if (ins && innerWidth > 1100) { [...ins.children].forEach(c => c.style.display = ''); for (let k = ins.children.length - 1; k > 0 && ins.scrollHeight > ins.clientHeight + 2; k--) ins.children[k].style.display = 'none'; } const el = $('#c-fans'); if (!el) return; drawFans(el, daysBack(30), Object.fromEntries(O.episodes.filter(e => e.schedule).map(e => [e.schedule.slice(0, 10), e.nick]))); }
