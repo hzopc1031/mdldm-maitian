@@ -1,6 +1,6 @@
 # Windows L1：独立工作台、页面采集和本地日报
 
-2026-11-17夜间更新：下文个人账号为本机示例，通用L1代码已改为读取预期身份配置。X使用`xHandle`或`l1.x.account`，小红书使用`l1.xhs.account`；也可另建被git忽略的`MAITIAN_HOME/l1-accounts.local.json`，例如`{"x":"YourHandle","xhs":"Your Creator Name"}`。此文件只放公开名称，不放登录数据；用`MAITIAN_ACCOUNTS`可另指定位置。仍只支持每平台单账号，发布别名固定ai。网页已增加[X文图包与发布准备](docs/publish-preparation.md)，平台浏览器执行仍禁用。无调试端口的[真实页面验收脚本](scripts/web-headless-accept.mjs)可运行；它使用隔离数据，不代表真实平台登录/采集已通过。
+2026-11-17夜间更新：下文个人账号为本机示例，通用L1代码已改为读取预期身份配置。X使用`xHandle`或`l1.x.account`，小红书使用`l1.xhs.account`；也可另建被git忽略的`MAITIAN_HOME/l1-accounts.local.json`，例如`{"x":"YourHandle","xhs":"Your Creator Name"}`。此文件只放公开名称，不放登录数据；用`MAITIAN_ACCOUNTS`可另指定位置。仍只支持每平台单账号，发布别名固定ai。网页已增加[X文图包与发布准备](docs/publish-preparation.md)，本轮已实际打通小红书ai上传填写及留窗；X/公众号真实确认待本人登录，正向取链接仍未通过。无调试端口的[真实页面验收脚本](scripts/web-headless-accept.mjs)可运行；它使用隔离数据，不代表真实平台登录/采集已通过。
 
 在 `D:\AIInfra\maitian` 手动运行。工作台独立运行，不依赖 Grok Bot 或 inbox JSON。X 默认用专用 Chrome 读取 `@PeanutPair` 已渲染页面，小红书读取 `TwoPeanuts`（ai）创作者页面；公众号通过 `--only wechat` 单独采集。`import-x-public.mjs` 保留为可选手工导入。没有发布、定时任务、开机自启、飞书同步或站点转化采集。原 hub 的发布与 daemon 命令不属于 L1。
 
