@@ -16,6 +16,7 @@
 <body>
 <div class="bgfx"><i></i><i></i><i></i></div>
 <div class="page" id="app"><div class="empty" style="height:60vh">加载中…</div></div>
+<script src="/static/health.js"></script>
 <script src="/static/mt.js"></script>
 <script>
 let O = null, F = {}, timer = null, pick = null;
@@ -119,8 +120,8 @@ async function vEpisode(id) {
 
 function vSystem() {
   const h = O.health;
-  return `<div class="h1">系统</div><p class="lead">L1 手动登录和采集。登录时由 Liu 在本次打开的专用窗口完成扫码或验证；网页会等待结果，完成后关闭该窗口。</p>
-  <div class="grid g3">${Object.entries(h.platforms).map(([platform, s]) => `<div class="panel"><h3>${logo(platform)} ${esc(PN[platform])}</h3><p>${esc(s.account)}</p><p>${s.state === 'running' ? '操作进行中' : '当前空闲'}</p><p class="note">${esc(s.login)}</p><div class="btns">${abtn({ type: 'login', platform }, '登录 / 校验', 'pri')}${abtn({ type: 'collect', platform }, '采集数据')}</div><p class="note">${s.last ? `最近${s.last.type === 'login' ? '登录校验' : '采集'}：${s.last.done ? s.last.ok ? '成功' : '失败' : '未确认结束'} · ${esc(when(s.last.endedAt || s.last.startedAt))}` : '暂无操作记录'}</p>${s.last?.error ? `<div class="copy">${esc(s.last.error)}</div>` : ''}</div>`).join('')}</div>
+  return `<div class="h1">系统</div><p class="lead">L1 手动登录和采集。登录时由用户在本次打开的专用窗口完成扫码或验证；网页会等待结果，完成后关闭该窗口。</p>
+  <div class="grid g3">${Object.entries(h?.platforms || {}).map(([platform, s]) => `<div class="panel"><h3>${logo(platform)} ${esc(PN[platform])}</h3><p>${esc(s.account)}</p><p>${s.state === 'running' ? '操作进行中' : '当前空闲'}</p><p class="note">${esc(s.login)}</p><div class="btns">${abtn({ type: 'login', platform }, '登录 / 校验', 'pri')}${abtn({ type: 'collect', platform }, '采集数据')}</div><p class="note">${s.last ? `最近${s.last.type === 'login' ? '登录校验' : '采集'}：${s.last.done ? s.last.ok ? '成功' : '失败' : '未确认结束'} · ${esc(when(s.last.endedAt || s.last.startedAt))}` : '暂无操作记录'}</p>${s.last?.error ? `<div class="copy">${esc(s.last.error)}</div>` : ''}</div>`).join('')}</div>
   ${sec('操作记录', '同一时间只跑一个；失败后可重新登录或采集')}
   <div class="panel">
     ${O.actions.length ? `<div style="margin-top:14px">${O.actions.map(a => `<div class="prow"><span class="st-chip ${a.done ? (a.ok ? 'published' : 'failed') : 'scheduled'}"><i>${a.done ? (a.ok ? '✓' : '✕') : '…'}</i>${a.done ? (a.ok ? '完成' : '出错') : '进行中'}</span><span>${esc(a.label)}</span><span class="d">${ago(a.startedAt)}</span></div>${a.done && !a.ok ? `<div class="copy">${esc(a.tail)}</div>` : ''}`).join('')}</div>` : ''}</div>
@@ -135,7 +136,7 @@ async function render() {
 }
 async function load() {
   try { O = await api('/api/overview'); if (!O.siteOn) PL = PL.filter(p => p !== 'zsz'); else { if (O.siteName) PN.zsz = O.siteName; if (O.siteLogo) LOGO.zsz = { img: '/site-logo' }; } F = {}; for (const r of O.followers) (F[r.platform] ||= {})[r.day] = r.total; await render(); }
-  catch (e) { if (!O) $('#app').innerHTML = `<div class="empty" style="height:60vh">连不上麦田服务（${esc(e.message)}）</div>`; }
+  catch (e) { $('#app').innerHTML = `<div class="empty" role="alert" style="height:60vh">页面加载失败，请刷新重试（${esc(e.message)}）</div>`; console.error(e); }
 }
 function poll() { clearInterval(timer); timer = setInterval(async () => { await load(); if (!busy()) { clearInterval(timer); timer = null; } }, 4000); }
 document.addEventListener('click', async (e) => {

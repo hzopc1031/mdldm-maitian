@@ -8,6 +8,7 @@ import { accessEmail } from './access.mjs';
 import { initLogin, sessionOk, handleLogin } from './login.mjs';
 import { L1_PLATFORMS, L1_PORTS, planL1Action, launchL1, redactL1 } from './l1-web.mjs';
 import { home } from './l1-config.mjs';
+import { authPage, cleanTarget } from './web-auth.mjs';
 
 const DIR = path.dirname(fileURLToPath(import.meta.url)), ROOT = path.resolve(DIR, '..');
 const W = config.web || { port: 8787, key: '' };
@@ -163,10 +164,25 @@ export async function handle(req, res) {
   const LOGIN = W.login === 'feishu' && config.feishuWebhook;
   if (LOGIN && await handleLogin(req, res, u, send)) return;
   const cookieKey = ((req.headers.cookie || '').match(/mt_key=([^;]+)/) || [])[1];
+  const authCookie = { 'set-cookie': `mt_key=${W.key}; Path=/; Max-Age=31536000; HttpOnly; SameSite=Lax`, 'referrer-policy': 'no-referrer' };
+  if (u.pathname === '/auth' && req.method === 'POST') {
+    if (req.headers.origin && req.headers.origin !== `http://${req.headers.host}`) return send(res, 403, { error: '请求来源不符' });
+    let body = '';
+    for await (const chunk of req) {
+      body += chunk;
+      if (Buffer.byteLength(body) > 4096) return send(res, 413, { error: '请求过大' });
+    }
+    const form = new URLSearchParams(body);
+    if (!W.key || !tokenEq(form.get('key'), W.key)) return send(res, 401, authPage(true, form.get('returnTo')), 'text/html; charset=utf-8');
+    return send(res, 303, '', 'text/plain', { ...authCookie, location: cleanTarget(form.get('returnTo')) });
+  }
+  // 无 fragment 的重定向由浏览器继承原 hash，保留 /p#/system。
+  if (W.key && u.searchParams.has('key') && (tokenEq(u.searchParams.get('key'), W.key) || tokenEq(cookieKey, W.key))) {
+    return send(res, 302, '', 'text/plain', { ...authCookie, location: cleanTarget(u.pathname + u.search) });
+  }
   if (W.key && !tokenEq(req.headers['x-maitian-key'], W.key) && cookieKey !== W.key && !(LOGIN && sessionOk(req)) && !(await accessEmail(req, W.access))) {
-    if (u.searchParams.get('key') === W.key) return send(res, 302, '', 'text/plain', { 'set-cookie': `mt_key=${W.key}; Path=/; Max-Age=31536000; HttpOnly; SameSite=Lax`, location: '/' });
     if (LOGIN) return u.pathname.startsWith('/api/') ? send(res, 401, { error: '需要登录' }) : send(res, 302, '', 'text/plain', { location: '/login' });
-    return send(res, 401, '<meta charset="utf-8"><body style="font:16px system-ui;padding:40px">需要访问口令。请用带 <code>?key=…</code> 的地址打开一次。</body>', 'text/html; charset=utf-8');
+    return u.pathname.startsWith('/api/') ? send(res, 401, { error: '需要登录' }) : send(res, 401, authPage(), 'text/html; charset=utf-8', { 'referrer-policy': 'same-origin' });
   }
   if (u.pathname.startsWith('/static/')) { const f = path.join(DIR, 'web', path.basename(u.pathname)); if (!/\.(css|js|png)$/.test(f) || !fs.existsSync(f)) return send(res, 404, ''); return send(res, 200, fs.readFileSync(f), f.endsWith('.css') ? 'text/css; charset=utf-8' : f.endsWith('.png') ? 'image/png' : 'text/javascript; charset=utf-8'); }
   if (u.pathname === '/p') return send(res, 200, fs.readFileSync(path.join(DIR, 'web', 'pages.html')), 'text/html; charset=utf-8');
