@@ -1,5 +1,22 @@
 # 问题清单
 
+## 2026-11-18 隔离二分与可验证修复（起点 1aa5c66）
+
+隔离数据与组件二分定位流量页崩溃
+
+本节优先于历史状态；保留原因六类原样。
+
+| 项目 | 分类 | 原因 / 本轮推进 |
+| --- | --- | --- |
+| I20 流量页Chrome原生崩溃触发条件 | 上游原生 | 修复前原因：工具错误。`312a51f:src/web.mjs`已有按UTF-16截断16单元的nickOf；实际第140行生成孤立U+D83D。同隔离环境单行失败、相邻行通过，独立精简页孤立字符失败、完整emoji通过，269行只换nick通过。不是单纯行数、accountSummaries或9行汇总问题；折线/汇总去除不消除昵称触发。已修为Unicode码点截断和导入昵称toWellFormed；正式库副本真实handler/Chrome通过，原观测未变。浏览器内部CHECK未符号化，不声称修复Chrome本体。部署结果另记。 |
+| I19 分享负向错误含糊 | 改造引入 | 旧not-unique混用0/多个。已拆为visible-share-control-zero / multiple / unlabelled / no-explicit-label，并附控件数与逐控件tag/role/text/title/ariaLabel；调用方保留code/evidence；离线0、5无标签、多个及唯一明确控件分支通过。 |
+| I19 真实公开链接回写 | 待核实 | 真实测试未做（正向成功）。本轮仅一次9340只读：10卡、目标1、可见控件5/明确分享0/无标示5/公开URL0；五个span均无文字/title/aria/role。精确失败visible-share-control-unlabelled；无点击、无公开界面、无回写。不能仅据统计图标形状确认分享。 |
+| X/公众号后续链路 | 环境配置 | 未登录；继续等待本人，不重复检查。 |
+| 扩展UI / native pipe | 环境配置 | 工具错误；继续等待本人启用；不重试。 |
+| 9368 | 环境配置 | 明确安全拒绝；不重试或变形绕过。 |
+
+最小验证：web-text、l1-share、l1-web三个第一方自测及语法/diff通过；真实Chrome只跑隔离二分和两个流量相关候选场景，没有11+8完整回归。无需身份的其余已列范围简短对照未发现新增缺口。详细新矩阵见[本轮交付](focus-delivery.md)，本机原始证据仅 `_local-bisect-evidence/`，最终简报 `D:\AIInfra\maitian-bisect-out.md`。8788/PID6364、9333/PID12064受保护；不开发知识站或多账号。
+
 ## 聚焦诊断更新（起点 4d2acb7）
 
 流量页3221225501与分享控件范围诊断

@@ -12,13 +12,14 @@ import { authPage, cleanTarget } from './web-auth.mjs';
 import { createPrepService, BROWSER_BLOCK } from './publish-prep.mjs';
 import { l1Account } from './l1-account.mjs';
 import { configuredSummaries } from './l1-summary.mjs';
+import { displayNick } from './web-text.mjs';
 
 const DIR = path.dirname(fileURLToPath(import.meta.url)), ROOT = path.resolve(DIR, '..');
 const W = config.web || { port: 8787, key: '' };
 const send = (res, code, body, type = 'application/json; charset=utf-8', extra = {}) => { res.writeHead(code, { 'content-type': type, 'cache-control': 'no-store', ...extra }); res.end(typeof body === 'string' || Buffer.isBuffer(body) ? body : JSON.stringify(body)); };
 const readPj = (dir) => { if (!dir) return null; try { return JSON.parse(fs.readFileSync(path.join(dir, 'publish.json'), 'utf8')); } catch { return null; } };
 const short = (n) => (n || '').split(/[｜|]/)[0].trim();
-const nickOf = (name, pj) => (pj && pj.nick) || (short(name).split(/[，,？?！!：:。]/)[0].trim() || short(name)).slice(0, 16);
+const nickOf = (name, pj) => displayNick(name, pj?.nick);
 const latest = db.prepare('SELECT * FROM metrics WHERE episode_id=? AND platform=? ORDER BY day DESC LIMIT 1');
 const actions = [];   // 最近的操作（内存里）
 const prep = createPrepService({ db, config, home, root: ROOT, secrets: [W.key, W.widgetToken] });

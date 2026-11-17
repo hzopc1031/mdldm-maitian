@@ -125,7 +125,8 @@ export async function inspectPlatform(config, platform, target, { withBrowser, w
         if(!candidates[0].url) {
           await page.goto('https://creator.xiaohongshu.com/new/home');
           await identity();
-          throw new Error(`已匹配真实已发布笔记，但未读到可核验公开分享链接（${share.reason}）；未回写，不按ID拼造`);
+          const counts=share.evidence;
+          throw Object.assign(new Error(`已匹配真实已发布笔记，但未读到可核验公开分享链接（${share.reason}${counts?`；可见控件${counts.visibleControlCount}，明确分享${counts.labelledShareCount}，无标示${counts.unlabelledControlCount}`:''}）；未回写，不按ID拼造`),{code:share.reason,evidence:counts});
         }
       }
       await page.goto('https://creator.xiaohongshu.com/new/home');

@@ -70,7 +70,7 @@ export function visibleNoteShare(postId, open = false) {
   const cards=[...document.querySelectorAll('.note-card')].filter(visible).filter(card=>{
     try{return String(JSON.parse(card.getAttribute('data-impression')).noteTarget.value.noteId)===postId;}catch{return false;}
   });
-  if(cards.length!==1)return {ok:false,reason:'stable-id-card-not-unique'};
+  if(cards.length!==1)return {ok:false,reason:'stable-id-card-not-unique',evidence:{cardCount:cards.length}};
   const card=cards[0];
   if(/审核中|未通过|草稿/.test(card.innerText))return {ok:false,reason:'not-published'};
   const dialogs=[...document.querySelectorAll('[role="dialog"], .el-dialog, .ant-modal, [role="tooltip"], .el-popover')].filter(visible).filter(el=>/分享|复制链接|笔记链接/.test(el.innerText));
@@ -81,13 +81,16 @@ export function visibleNoteShare(postId, open = false) {
       try{const u=new URL(match[0]);if(u.pathname===`/explore/${postId}`&&!u.search&&!u.hash&&!u.username&&!u.password)urls.add(u.href);}catch{}
     }
   }
-  if(urls.size===1)return {ok:true,postId,url:[...urls][0],source:'visible-share-or-card'};
-  if(urls.size>1)return {ok:false,reason:'ambiguous-share-links'};
-  if(!open)return {ok:false,reason:'no-verifiable-public-link'};
-  const controls=[...card.querySelectorAll('button,[role="button"],a,.note-card__action-btn')].filter(visible).filter(el=>{
-    const labels=[el.innerText,el.getAttribute('aria-label'),el.getAttribute('title')].map(v=>String(v || '').trim());
-    return labels.some(v=>/^(分享|分享笔记|复制链接|复制笔记链接)$/.test(v));
-  });
-  if(controls.length!==1)return {ok:false,reason:'visible-share-control-not-unique'};
-  controls[0].click();return {ok:false,opened:true,reason:'share-opened'};
+  const candidates=[...card.querySelectorAll('button,[role="button"],a,.note-card__action-btn')].filter(visible);
+  const attributes=candidates.map(el=>({tag:el.tagName?.toLowerCase() || null,role:el.getAttribute('role'),text:String(el.innerText || '').trim().slice(0,80),ariaLabel:el.getAttribute('aria-label'),title:el.getAttribute('title')}));
+  const labelled=a=>[a.text,a.ariaLabel,a.title].some(v=>/^(分享|分享笔记|复制链接|复制笔记链接)$/.test(String(v || '').trim()));
+  const controls=candidates.filter((el,i)=>labelled(attributes[i]));
+  const unlabelled=attributes.filter(a=>![a.text,a.ariaLabel,a.title].some(v=>String(v || '').trim())).length;
+  const evidence={cardCount:1,visibleControlCount:candidates.length,labelledShareCount:controls.length,unlabelledControlCount:unlabelled,publicLinkCount:urls.size,controls:attributes};
+  if(urls.size===1)return {ok:true,postId,url:[...urls][0],source:'visible-share-or-card',evidence};
+  if(urls.size>1)return {ok:false,reason:'ambiguous-share-links',evidence};
+  if(!controls.length)return {ok:false,reason:!candidates.length?'visible-share-control-zero':unlabelled?'visible-share-control-unlabelled':'visible-share-control-no-explicit-label',evidence};
+  if(controls.length>1)return {ok:false,reason:'visible-share-control-multiple',evidence};
+  if(!open)return {ok:false,reason:'no-verifiable-public-link',evidence};
+  controls[0].click();return {ok:false,opened:true,reason:'share-opened',evidence};
 }

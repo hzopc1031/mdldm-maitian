@@ -10,10 +10,16 @@ globalThis.getComputedStyle=()=>({visibility:'visible',display:'block'});
 globalThis.document={querySelectorAll:s=>s==='.note-card'?[card]:dialogs};
 try {
   assert.equal(visibleNoteShare('wrong',true).reason,'stable-id-card-not-unique');
-  assert.equal(visibleNoteShare('stable',true).reason,'visible-share-control-not-unique');assert.equal(clicks,0);
+  assert.equal(visibleNoteShare('stable',true).reason,'visible-share-control-zero');assert.equal(clicks,0);
+  controls=Array.from({length:5},()=>node(''));
+  const unnamed=visibleNoteShare('stable',true);
+  assert.equal(unnamed.reason,'visible-share-control-unlabelled');
+  assert.equal(unnamed.evidence.visibleControlCount,5);assert.equal(unnamed.evidence.unlabelledControlCount,5);
+  assert.equal(unnamed.evidence.labelledShareCount,0);assert.equal(unnamed.evidence.controls.length,5);assert.equal(clicks,0);
+  controls=[node('编辑')];assert.equal(visibleNoteShare('stable',true).reason,'visible-share-control-no-explicit-label');
   controls=[node('编辑'),node('',{'title':'分享'})];
   assert.equal(visibleNoteShare('stable',true).opened,true);assert.equal(clicks,1);
-  controls.push(node('复制链接'));assert.equal(visibleNoteShare('stable',true).ok,false);assert.equal(clicks,1);
+  controls.push(node('复制链接'));const multiple=visibleNoteShare('stable',true);assert.equal(multiple.reason,'visible-share-control-multiple');assert.equal(multiple.evidence.labelledShareCount,2);assert.equal(clicks,1);
   links=[node('',{href:'https://www.xiaohongshu.com/explore/other'})];assert.equal(visibleNoteShare('stable').ok,false);
   links=[node('',{href:'https://www.xiaohongshu.com/explore/stable?token=fixture'})];assert.equal(visibleNoteShare('stable').ok,false);
   links=[node('',{href:'https://www.xiaohongshu.com/explore/stable'})];assert.equal(visibleNoteShare('stable').postId,'stable');
@@ -32,7 +38,7 @@ try {
   assert.equal(reads.filter(x=>x==='visibleNoteShare').length,1);
   share={ok:true,postId:'other',url};
   await assert.rejects(inspectPlatform(config,'xhs',{postId:'stable'},options),/未回写/);
-  share={ok:false,reason:'visible-share-control-not-unique'};
-  await assert.rejects(inspectPlatform(config,'xhs',{postId:'stable'},options),/visible-share-control-not-unique/);
+  share={ok:false,reason:'visible-share-control-unlabelled',evidence:unnamed.evidence};
+  await assert.rejects(inspectPlatform(config,'xhs',{postId:'stable'},options),e=>e.code==='visible-share-control-unlabelled'&&e.evidence.visibleControlCount===5&&/明确分享0/.test(e.message));
   console.log('L1 SHARE OFFLINE PASS: exact stable ID, labelled share only, review/ambiguity/foreign ID/query rejection, fallback success and explicit failure.');
 }finally{delete globalThis.document;delete globalThis.getComputedStyle;}
