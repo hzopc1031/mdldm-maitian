@@ -186,7 +186,8 @@ export function createPrepService({ db, home, root, config, secrets = [], spawnC
     window: async (id, activate) => {
       const r=get(id);
       if(r.platform!=='xhs' || !['awaiting_user','unknown'].includes(r.state)) throw new Error('仅已有小红书填写回执可核对留窗');
-      const result=await xhsWindow({activate,env});
+      if(r.windowReleased)throw new Error('此回执已由本人解除占用，不再关联当前窗口');
+      const result=await xhsWindow({activate,expectedTitle:r.evidence?.titleFinal || r.title,env});
       r.windowEvidence={...result,checkedAt:new Date().toISOString()}; save(r); return result;
     }, busy: () => list().some(r => r.state === 'running'),
     bundle: id => { if (get(id).platform !== 'x') throw new Error('仅 X 提供文图包'); return xDraftBundle(JSON.parse(fs.readFileSync(jobFile(id),'utf8'))); },

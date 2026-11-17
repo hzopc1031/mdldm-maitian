@@ -11,7 +11,7 @@ function browserCommand(url,method,params={}) {
     ws.addEventListener('error',()=>finish(true));
   });
 }
-export async function xhsWindow({ activate = false, env = process.env } = {}) {
+export async function xhsWindow({ activate = false, expectedTitle, env = process.env } = {}) {
   const { execFile } = await import('node:child_process');
   const exec = promisify(execFile);
   if (process.platform !== 'win32') throw new Error('当前仅支持 Windows 专用窗口切换');
@@ -23,6 +23,9 @@ export async function xhsWindow({ activate = false, env = process.env } = {}) {
   const targets = await (await fetch('http://127.0.0.1:9333/json/list', { signal: AbortSignal.timeout(3000) })).json();
   const pages = targets.filter(t => { try { const u = new URL(t.url); return t.type === 'page' && u.origin === 'https://creator.xiaohongshu.com' && u.pathname === '/publish/publish'; } catch { return false; } });
   if (pages.length !== 1 || !/^[A-Za-z0-9-]+$/.test(pages[0].id)) throw new Error('专用窗口中没有唯一可核实的新建编辑页；请手工核对，不新开页面');
+  if(!expectedTitle)throw new Error('缺少回执标题，无法对应当前编辑页');
+  const title=await browserCommand(pages[0].webSocketDebuggerUrl,'Runtime.evaluate',{expression:'document.querySelector(\'input[placeholder*="标题"]\')?.value',returnByValue:true});
+  if(title.result?.value!==expectedTitle)throw new Error('当前编辑页标题与该回执不一致，未切换；请本人核对现稿');
   const again=JSON.parse((await exec('powershell.exe',['-NoProfile','-EncodedCommand',Buffer.from(ps,'utf16le').toString('base64')],{windowsHide:true})).stdout);
   if(again.pid!==processInfo.pid || again.profile!==processInfo.profile)throw new Error('核验期间专用窗口变化，未切换');
   const version=await(await fetch('http://127.0.0.1:9333/json/version',{signal:AbortSignal.timeout(3000)})).json();
@@ -34,5 +37,5 @@ export async function xhsWindow({ activate = false, env = process.env } = {}) {
     await browserCommand(version.webSocketDebuggerUrl,'Browser.setWindowBounds',{windowId:window.windowId,bounds:{windowState:'normal'}});
     await browserCommand(pages[0].webSocketDebuggerUrl,'Page.bringToFront');
   }
-  return { verified: true, port: 9333, pid: processInfo.pid, targetId: pages[0].id, windowId:window.windowId, activated: activate, note: activate ? '浏览器已确认激活并置前 ai 专用编辑页；若系统未置前，可用 Alt+Tab 选择小红书创作服务平台。未导航、改写或上传，当前内容请本人核对。' : '已核实 ai 专用 profile、唯一编辑页和真实窗口 ID；当前表单内容未核对。' };
+  return { verified: true, titleMatched:true, port: 9333, pid: processInfo.pid, targetId: pages[0].id, windowId:window.windowId, activated: activate, note: activate ? '浏览器已确认激活并置前与回执标题一致的 ai 专用编辑页；若系统未置前，可用 Alt+Tab 选择小红书创作服务平台。未导航、改写或上传，正文图片请本人核对。' : '已核实 ai 专用 profile、回执标题、唯一编辑页和真实窗口 ID；正文图片未核对。' };
 }

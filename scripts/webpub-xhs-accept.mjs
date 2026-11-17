@@ -74,7 +74,7 @@ const results=[];
 try{
   for(scene of ['prepare-page',formal?'xhs-prep-status':'isolated-flow']){
     report=null;const shot=path.join(out,scene+'.png');
-    const child=spawn(process.env.CHROME_PATH||'C:/Program Files/Google/Chrome/Application/chrome.exe',['--headless=new','--incognito','--no-first-run','--no-default-browser-check','--disable-extensions','--disable-background-networking','--window-size=1440,2200','--user-data-dir='+path.join(temp,scene),'--screenshot='+shot,'--dump-dom','--timeout=24000','--virtual-time-budget=18000','http://127.0.0.1:'+server.address().port+'/p#/prepare'],{windowsHide:true,stdio:['ignore','pipe','pipe']});
+    const child=spawn(process.env.CHROME_PATH||'C:/Program Files/Google/Chrome/Application/chrome.exe',['--headless=new','--incognito','--no-first-run','--no-default-browser-check','--disable-extensions','--disable-background-networking','--window-size=1440,'+(scene==='prepare-page'?2200:1000),'--user-data-dir='+path.join(temp,scene),'--screenshot='+shot,'--dump-dom','--timeout=24000','--virtual-time-budget=18000','http://127.0.0.1:'+server.address().port+'/p#/prepare'],{windowsHide:true,stdio:['ignore','pipe','pipe']});
     child.stdout.resume();child.stderr.resume();const timer=setTimeout(()=>child.kill(),35000);const [code]=await once(child,'close');clearTimeout(timer);
     results.push({scene,ok:code===0&&report?.ok===true&&fs.existsSync(shot),report,screenshot:shot});
   }
