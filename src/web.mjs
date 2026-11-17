@@ -1,11 +1,13 @@
 // 麦田：本地网页。播种（发布）、长势（流量）、收成（转化）、粮仓（档案）
-import http from 'node:http'; import crypto from 'node:crypto'; import fs from 'node:fs'; import path from 'node:path'; import { spawn, execFileSync } from 'node:child_process'; import { fileURLToPath } from 'node:url';
+import http from 'node:http'; import crypto from 'node:crypto'; import fs from 'node:fs'; import path from 'node:path'; import { execFileSync } from 'node:child_process'; import { fileURLToPath } from 'node:url';
 import { db, NAMES, STATE_CN, episodes, getEpisode, getTasks, recentLogs, getSnapshot, getMeta } from './db.mjs';
 import { config } from './feishu.mjs';
 import { SITE } from './site.mjs';
 import { review } from './review.mjs';
 import { accessEmail } from './access.mjs';
 import { initLogin, sessionOk, handleLogin } from './login.mjs';
+import { L1_PLATFORMS, L1_PORTS, planL1Action, launchL1, redactL1 } from './l1-web.mjs';
+import { home } from './l1-config.mjs';
 
 const DIR = path.dirname(fileURLToPath(import.meta.url)), ROOT = path.resolve(DIR, '..');
 const W = config.web || { port: 8787, key: '' };
@@ -65,9 +67,19 @@ export function feed(n = 14) {
     return { ts: l.ts, episode: names[l.episode_id] || '', nick: nicks[l.episode_id] || '', platform: NAMES[l.platform] || l.platform || '', action: ACT[l.action] || l.action, result: STATE_CN[r] || String(r).slice(0, 40) };
   });
 }
-async function chromeUp() { try { const r = await fetch(`http://127.0.0.1:${config.chromePort || 9333}/json/version`, { signal: AbortSignal.timeout(800) }); return r.ok; } catch { return false; } }
+export function l1Status() {
+  return Object.fromEntries(L1_PLATFORMS.map(platform => {
+    let last = null;
+    try { last = JSON.parse(getMeta(`l1:web:${platform}`) || 'null'); } catch {}
+    const active = actions.find(a => a.platform === platform && !a.done);
+    return [platform, { account: platform === 'x' ? '@PeanutPair' : platform === 'xhs' ? 'TwoPeanuts' : config.l1?.wechat?.account || '登录后确认可见公众号名称',
+      port: L1_PORTS[platform], profile: path.join(home, `chrome-profile-l1-${platform}`),
+      state: active ? 'running' : 'idle', last: active || last,
+      login: '未实时检查；登录和采集均校验可见身份，完成后关闭本次专用窗口' }];
+  }));
+}
 
-// 纯本地数据读取，可离线验证；浏览器健康检查由 HTTP 层单独执行。
+// 纯本地数据读取；overview/status 均不连接浏览器。
 export function overviewData() {
   const at = e => Date.parse(e.publishedAt || e.observedAt || e.createdAt) || 0;
   return {
@@ -108,7 +120,7 @@ function widgetData() {
     site: SITE && { name: SITE.name, users: zsz && zsz.total, reg: days.reduce((n, d) => n + (d.reg || 0), 0), vip: days.reduce((n, d) => n + (d.vip || 0), 0), revenue: days.reduce((n, d) => n + (d.revenue || 0), 0) },
     metricsDay: getMeta('metricsDay') || '', now: new Date().toISOString() };
 }
-const tokenEq = (a, b) => typeof a === 'string' && typeof b === 'string' && a.length === b.length && crypto.timingSafeEqual(Buffer.from(a), Buffer.from(b));
+const tokenEq = (a, b) => typeof a === 'string' && typeof b === 'string' && Buffer.byteLength(a) === Buffer.byteLength(b) && crypto.timingSafeEqual(Buffer.from(a), Buffer.from(b));
 
 const widgetPage = (code) => `<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>麦田小组件</title>
 <style>body{font-family:-apple-system,'PingFang SC',sans-serif;margin:0;padding:22px 18px 40px;background:#f6f1e6;color:#1c1a16;line-height:1.6}h1{font-size:24px;margin:0 0 6px}ol{padding-left:20px;font-size:15px}li{margin:6px 0}
@@ -151,7 +163,7 @@ export async function handle(req, res) {
   const LOGIN = W.login === 'feishu' && config.feishuWebhook;
   if (LOGIN && await handleLogin(req, res, u, send)) return;
   const cookieKey = ((req.headers.cookie || '').match(/mt_key=([^;]+)/) || [])[1];
-  if (W.key && cookieKey !== W.key && !(LOGIN && sessionOk(req)) && !(await accessEmail(req, W.access))) {
+  if (W.key && !tokenEq(req.headers['x-maitian-key'], W.key) && cookieKey !== W.key && !(LOGIN && sessionOk(req)) && !(await accessEmail(req, W.access))) {
     if (u.searchParams.get('key') === W.key) return send(res, 302, '', 'text/plain', { 'set-cookie': `mt_key=${W.key}; Path=/; Max-Age=31536000; HttpOnly; SameSite=Lax`, location: '/' });
     if (LOGIN) return u.pathname.startsWith('/api/') ? send(res, 401, { error: '需要登录' }) : send(res, 302, '', 'text/plain', { location: '/login' });
     return send(res, 401, '<meta charset="utf-8"><body style="font:16px system-ui;padding:40px">需要访问口令。请用带 <code>?key=…</code> 的地址打开一次。</body>', 'text/html; charset=utf-8');
@@ -167,8 +179,9 @@ export async function handle(req, res) {
   if (u.pathname === '/api/overview') {
     return send(res, 200, { name: config.name || '麦田', siteOn: !!SITE, siteName: SITE ? SITE.name : '', siteLogo: !!(SITE && config.site.logo), board: config.board && config.board.url, driver: config.driver,
       ...overviewData(), actions: actions.slice(-8).reverse(),
-      health: { nas: fs.existsSync(config.rootPath), chrome: await chromeUp(), metricsDay: getMeta('metricsDay') || '', doctorDay: getMeta('doctorDay') || '', login: Object.fromEntries((config.keepAlive || []).map(k => [k, getMeta(`login:${k}`) || '']) ) }, now: new Date().toISOString() });
+      health: { mode: 'l1', daemon: false, platforms: l1Status() }, now: new Date().toISOString() });
   }
+  if (u.pathname === '/api/l1/status' && req.method === 'GET') return send(res, 200, { platforms: l1Status(), actions: actions.slice(-8).reverse() });
   if (u.pathname === '/site-logo') { const f = SITE && config.site.logo && path.resolve(ROOT, config.site.logo); return f && fs.existsSync(f) ? send(res, 200, fs.readFileSync(f), /\.svg$/.test(f) ? 'image/svg+xml' : /\.jpe?g$/.test(f) ? 'image/jpeg' : 'image/png', { 'cache-control': 'max-age=3600' }) : send(res, 404, ''); }
   if (u.pathname === '/api/episode') { const ep = getEpisode(u.searchParams.get('id')); return ep ? send(res, 200, episodeView(ep, true)) : send(res, 404, { error: '没有这一期' }); }
   if (u.pathname === '/cover' || u.pathname === '/shot') {
@@ -180,29 +193,30 @@ export async function handle(req, res) {
     return send(res, 200, fs.readFileSync(f), /\.png$/.test(f) ? 'image/png' : /\.svg$/.test(f) ? 'image/svg+xml' : 'image/jpeg', { 'cache-control': 'max-age=300' });
   }
   if (u.pathname === '/api/action' && req.method === 'POST') {
-    let body = ''; req.on('data', d => body += d); req.on('end', () => {
+    const remote = req.socket.remoteAddress;
+    if (!['127.0.0.1', '::1', '::ffff:127.0.0.1'].includes(remote)) return send(res, 403, { error: 'L1 操作只允许本机请求' });
+    if (!W.key) return send(res, 503, { error: '请先由 Liu 配置网页口令' });
+    if (req.headers.origin && req.headers.origin !== `http://${req.headers.host}`) return send(res, 403, { error: '请求来源不符' });
+    let body = '', tooLarge = false;
+    req.on('data', d => { body += d; if (Buffer.byteLength(body) > 4096) { tooLarge = true; body = ''; } }); req.on('end', () => {
+      if (tooLarge) return send(res, 413, { error: '请求过大' });
       let a; try { a = JSON.parse(body); } catch { return send(res, 400, { error: '请求格式不对' }); }
-      const map = { sync: ['sync', a.id], metrics: a.id ? ['metrics', a.id] : ['metrics'], doctor: ['doctor', '--notify'], board: ['board'], followers: ['followers'],
-        mark: ['mark', a.id, a.platform, a.state, a.note || '在麦田里标记', ...(a.url ? ['--url', a.url] : [])] };
-      const argv = map[a.type];
-      if (!argv || argv.some(x => x === undefined || x === null || x === '')) return send(res, 400, { error: '不支持的操作' });
-      if (a.type === 'mark' && (a.state !== 'published' || !getEpisode(a.id) || !NAMES[a.platform])) return send(res, 400, { error: '状态不对' });
-      if (actions.some(x => !x.done && x.type !== 'mark') && a.type !== 'mark') return send(res, 409, { error: '上一个操作还在跑，等它结束' });
-      const rec = { type: a.type, label: { sync: '取链接', metrics: '采流量', doctor: '体检', board: '同步知识站数据', followers: '采粉丝', mark: '标记状态', retry: '重跑平台' }[a.type] + (a.platform ? ` · ${NAMES[a.platform] || a.platform}` : ''), startedAt: new Date().toISOString(), done: false, ok: null, tail: '' };
+      try { planL1Action(a); } catch (error) { return send(res, 400, { error: error.message }); }
+      if (a.type === 'status') return send(res, 200, l1Status()[a.platform]);
+      if (actions.some(x => !x.done)) return send(res, 409, { error: '上一个 L1 操作还在跑，等它结束' });
+      const rec = launchL1(a, { root: ROOT, secrets: [W.key, W.widgetToken],
+        save: record => db.prepare('INSERT OR REPLACE INTO meta (key,value) VALUES (?,?)').run(`l1:web:${a.platform}`, JSON.stringify(record)) });
       actions.push(rec);
-      const ch = spawn(process.execPath, [path.join(DIR, 'hub.mjs'), ...argv], { cwd: ROOT, env: { ...process.env, HUB_NO_WEB: '1' } });
-      const on = (d) => { rec.tail = (rec.tail + d).slice(-600); }; ch.stdout.on('data', on); ch.stderr.on('data', on);
-      ch.on('close', (code) => { rec.done = true; rec.ok = code === 0; rec.endedAt = new Date().toISOString(); });
-      send(res, 200, { ok: true });
+      send(res, rec.done && !rec.ok ? 500 : 200, { ok: !rec.done || rec.ok, ...(rec.error ? { error: rec.error } : {}) });
     });
     return;
   }
   send(res, 404, { error: 'not found' });
 }
 export function startWeb() {
-  const srv = http.createServer((req, res) => { handle(req, res).catch((e) => { try { send(res, 500, { error: e.message }); } catch {} }); });
+  const srv = http.createServer((req, res) => { handle(req, res).catch((e) => { try { send(res, 500, { error: redactL1(e.message, [W.key, W.widgetToken]) }); } catch {} }); });
   initLogin(ROOT);
-  srv.listen(W.port, W.host || '127.0.0.1', () => { const a = srv.address(); console.log(`麦田网页：http://${a.family === 'IPv6' ? `[${a.address}]` : a.address}:${a.port}/?key=${W.key}`); });
+  srv.listen(W.port || 8787, '127.0.0.1', () => { const a = srv.address(); console.log(`麦田网页：http://127.0.0.1:${a.port}/`); });
   srv.on('error', (e) => console.error('麦田网页没起来：' + e.message));
   return srv;
 }
