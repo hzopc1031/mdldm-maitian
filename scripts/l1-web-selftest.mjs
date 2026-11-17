@@ -195,6 +195,10 @@ try {
   assert.match(prepHtml,/生成准备任务/); assert.match(prepHtml,/打开 X 文字草稿/); assert.match(prepHtml,/保存公众号草稿/);
   assert.match(prepHtml,/disabled/); assert.doesNotMatch(prepHtml,/data-prep="submit"/);
   assert.match(prepHtml,/实际发表日期/);assert.match(prepHtml,/data-prep="links"/);
+  context.input.health.platforms.x.last={type:'doctor',done:true,ok:true,endedAt:new Date().toISOString()};
+  assert.match(vm.runInContext('vSystem()',context),/最近体检：成功/);
+  context.input.health.platforms.x.last.type='sync';
+  assert.match(vm.runInContext('vSystem()',context),/最近取链接：成功/);
   const {config:mutableConfig}=await import('../src/feishu.mjs');
   mutableConfig.l1.x.browserExecution=true;
   const preparationId=context.prepData.records.find(r=>r.platform==='x').id;
