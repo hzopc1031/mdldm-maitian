@@ -9,6 +9,7 @@ const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 if (process.cwd().toLowerCase() !== root.toLowerCase()) throw new Error(`请在 ${root} 运行`);
 const folder = path.join(root, '_l1-selftest', new Date().toISOString().replace(/[:.]/g, '-'));
 fs.mkdirSync(folder, { recursive: true });
+fs.writeFileSync(path.join(folder,'l1-accounts.local.json'),JSON.stringify({x:'PeanutPair',xhs:'TwoPeanuts'}));
 const database = path.join(folder, 'hub.db'), config = path.join(folder, 'config.json'), reports = path.join(folder, 'reports');
 fs.writeFileSync(config, '{}');
 const env = { ...process.env, MAITIAN_HOME: folder, MAITIAN_DB: database, MAITIAN_CONFIG: config };

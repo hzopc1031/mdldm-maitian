@@ -11,7 +11,7 @@ import { selectPublishedLink, inspectPlatform } from '../src/l1-inspect.mjs';
 globalThis.fetch = () => { throw new Error('offline: no network'); };
 globalThis.WebSocket = class { constructor() { throw new Error('offline: no browser'); } };
 const folder = fs.mkdtempSync(path.join(os.tmpdir(), 'maitian-prep-'));
-const image = path.join(folder, 'image.png'); fs.writeFileSync(image, 'offline-fixture');
+const image = path.join(folder, 'image.png'); fs.writeFileSync(image, Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Wl6WQAAAABJRU5ErkJggg==','base64'));
 for (const p of ['xhs','wechat']) {
   const dir = path.join(folder,p === 'xhs' ? 'xhs-publish' : 'wechat-publish','scripts'); fs.mkdirSync(dir,{recursive:true});
   fs.writeFileSync(path.join(dir,`${p}.mjs`), "// offline fixture only: opts['keep-browser']");
@@ -28,6 +28,7 @@ try {
   const j = normalizePrep(input).job; assert.equal(j.submit,false); assert.equal(j.account,'ai');
   for (const bad of [{...input,submit:true},{...input,account:'house'},{...input,images:[]},{...input,platform:'youtube'},{...input,images:['C:/not-a-picture.key']},{...input,command:'anything'}]) assert.throws(() => normalizePrep(bad));
   assert.deepEqual(prepCommand('xhs','execute',{script:'s',jobFile:'j'}),['s','post','--job','j','--account','ai','--keep-browser']);
+  assert.deepEqual(prepCommand('xhs','check',{script:'s',jobFile:'j'}),['s','preflight','--job','j','--kind','post','--account','ai']);
   assert.equal(prepCommand('wechat','execute',{script:'s',jobFile:'j'}).includes('--submit'),false);
   assert.throws(() => acceptPrepResult('xhs','execute',0,{ok:true,submitted:true}));
   assert.throws(() => acceptPrepResult('wechat','execute',0,{ok:true,submitted:false,savedAsDraft:false}));
@@ -59,6 +60,17 @@ try {
   const x = enabled.create({platform:'x',content:'文字草稿',test:true});
   assert.match(JSON.parse(fs.readFileSync(enabled.jobFile(x.id))).content,/测试稿/);
   assert.throws(() => enabled.start(x.id,'execute'),/不运行自动化/);
+  const imageBytes=fs.readFileSync(image), xp=enabled.create({platform:'x',content:'完整正文\n第二段',images:[image]});
+  fs.writeFileSync(image,'changed after creation');
+  const zip=enabled.bundle(xp.id);
+  assert.equal(zip.readUInt32LE(),0x04034b50); assert.ok(zip.includes(imageBytes));
+  assert.ok(zip.includes(Buffer.from('完整正文\n第二段'))); assert.equal(zip.includes(Buffer.from('changed after creation')),false);
+  assert.equal(zip.includes(Buffer.from(folder)),false); // Portable manifest must not expose local paths.
+  assert.throws(()=>enabled.bundle(w.id),/仅 X/);
+  assert.throws(()=>normalizePrep({platform:'x',content:'x',images:[image]}),/文件头/);
+  fs.writeFileSync(image,imageBytes);
+  assert.throws(()=>normalizePrep({platform:'x',content:'x',images:Array(5).fill(image)}));
+  assert.throws(()=>normalizePrep({platform:'wechat',title:'x',content:'x',caption:'x'.repeat(121)}));
   const url = 'https://www.xiaohongshu.com/explore/abc';
   assert.equal(selectPublishedLink('xhs',[{id:'abc',state:'published',url}],{postId:'abc'}),url);
   for (const cards of [[],[{id:'abc',state:'reviewing',url}],[{id:'abc',state:'published',url:null}],[{id:'abc',state:'published',url:url+'?token=not-allowed'}],[{id:'abc',state:'published',url},{id:'abc',state:'published',url}]]) assert.throws(() => selectPublishedLink('xhs',cards,{postId:'abc'}));

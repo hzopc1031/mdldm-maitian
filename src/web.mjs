@@ -10,6 +10,7 @@ import { L1_PLATFORMS, L1_PORTS, planL1Action, launchL1, redactL1 } from './l1-w
 import { home } from './l1-config.mjs';
 import { authPage, cleanTarget } from './web-auth.mjs';
 import { createPrepService, BROWSER_BLOCK } from './publish-prep.mjs';
+import { l1Account } from './l1-account.mjs';
 
 const DIR = path.dirname(fileURLToPath(import.meta.url)), ROOT = path.resolve(DIR, '..');
 const W = config.web || { port: 8787, key: '' };
@@ -75,7 +76,8 @@ export function l1Status() {
     let last = null;
     try { last = JSON.parse(getMeta(`l1:web:${platform}`) || 'null'); } catch {}
     const active = actions.find(a => a.platform === platform && !a.done);
-    return [platform, { account: platform === 'x' ? '@PeanutPair' : platform === 'xhs' ? 'TwoPeanuts' : config.l1?.wechat?.account || '登录后确认可见公众号名称',
+    let account; try { account=l1Account(config,platform); if(platform==='x')account='@'+account; } catch { account='尚未配置预期可见账号'; }
+    return [platform, { account,
       port: L1_PORTS[platform], profile: path.join(home, `chrome-profile-l1-${platform}`),
       state: active ? 'running' : 'idle', last: active || last,
       login: '未实时检查；登录和采集均校验可见身份，完成后关闭本次专用窗口' }];
@@ -201,6 +203,10 @@ export async function handle(req, res) {
   }
   if (u.pathname === '/api/l1/status' && req.method === 'GET') return send(res, 200, { platforms: l1Status(), actions: actions.slice(-8).reverse() });
   if (u.pathname === '/api/prep' && req.method === 'GET') return send(res, 200, { capabilities: prep.publicCapabilities(), records: prep.list() });
+  if (u.pathname === '/api/prep/bundle' && req.method === 'GET') {
+    try { return send(res, 200, prep.bundle(u.searchParams.get('id')), 'application/zip', { 'content-disposition': 'attachment; filename="x-draft.zip"', 'x-content-type-options':'nosniff' }); }
+    catch { return send(res, 404, {error:'文图包不存在或素材不可用'}); }
+  }
   if (u.pathname === '/api/prep/x' && req.method === 'GET') {
     try {
       const r = prep.get(u.searchParams.get('id'));

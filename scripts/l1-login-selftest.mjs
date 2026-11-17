@@ -62,7 +62,7 @@ if (process.argv[2] === '--fake-child') {
       source: 'export const { pause, withL1Browser } = globalThis.__l1FakeBrowser;' };
     if (url.endsWith('/l1-config.mjs')) return { format: 'module', shortCircuit: true,
       source: `export const home = 'offline', dbPath = 'forbidden/hub.db';
-        export const readConfig = () => ({ l1: { wechat: { account: process.env.L1_FAKE_SCENARIO === 'missing-account' ? '' : 'TestAccount' } } }), beijingDay = () => '2026-11-17', validDay = day => day, inWindow = () => false;` };
+        export const readConfig = () => ({ xHandle:'PeanutPair', l1: { xhs:{account:'TwoPeanuts'}, wechat: { account: process.env.L1_FAKE_SCENARIO === 'missing-account' ? '' : 'TestAccount' } } }), beijingDay = () => '2026-11-17', validDay = day => day, inWindow = () => false;` };
     return next(url, context);
   } });
   process.argv = [process.execPath, fileURLToPath(runner), ...JSON.parse(process.env.L1_FAKE_ARGS)];

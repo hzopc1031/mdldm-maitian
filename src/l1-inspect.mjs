@@ -1,5 +1,6 @@
 // 只读体检 / 按期取链接；可见 DOM，无旧 hub，无平台内部 API。
 import { beijingDay } from './l1-config.mjs';
+import { l1Account } from './l1-account.mjs';
 export function selectPublishedLink(platform, cards, target) {
   const eligible = cards.filter(c => {
     if (platform !== 'x' && c.state !== 'published') return false;
@@ -22,7 +23,7 @@ export function selectPublishedLink(platform, cards, target) {
 
 export async function inspectPlatform(config, platform, target, { withBrowser, wait } = {}) {
   if (!['x', 'xhs', 'wechat'].includes(platform)) throw new Error('平台未适配');
-  const expected = config.l1?.[platform]?.account || (platform === 'x' ? config.xHandle : null);
+  const expected = l1Account(config,platform);
   if (typeof expected !== 'string' || !expected.trim()) throw new Error(`请配置 l1.${platform}.account 为预期可见账号；不使用隐含账号`);
   if (platform === 'x' && !/^[A-Za-z0-9_]{1,15}$/.test(expected)) throw new Error('X 预期账号格式不对');
   const browser = await import('./l1-browser.mjs');
@@ -34,7 +35,7 @@ export async function inspectPlatform(config, platform, target, { withBrowser, w
     async function identity() {
       const i = await page.evaluate(identityFn);
       const account = platform === 'x' ? i.handle?.replace(/^@/, '') : platform === 'xhs' ? i.nickname : i.names?.length === 1 ? i.names[0] : null;
-      if (!account || i.login || (platform === 'wechat' && !i.trustedOrigin) || account.toLowerCase() !== expected.toLowerCase()) throw new Error('未确认预期可见账号；请在专用窗口完成人工登录后再校验');
+      if (!account || i.login || (platform === 'wechat' && !i.trustedOrigin) || (platform==='x' ? account.toLowerCase() !== expected.toLowerCase() : account !== expected)) throw new Error('未确认预期可见账号；请在专用窗口完成人工登录后再校验');
       return account;
     }
     const account = await identity();

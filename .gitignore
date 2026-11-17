@@ -1,4 +1,5 @@
 config.json
+l1-accounts.local.json
 data/
 node_modules/
 chrome-profile*

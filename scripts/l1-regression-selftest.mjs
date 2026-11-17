@@ -11,6 +11,7 @@ import { fileURLToPath } from 'node:url';
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const folder = fs.mkdtempSync(path.join(os.tmpdir(), 'maitian-l1-regression-'));
 process.env.MAITIAN_HOME = folder;
+fs.writeFileSync(path.join(folder,'l1-accounts.local.json'),JSON.stringify({x:'PeanutPair',xhs:'TwoPeanuts'}));
 process.env.MAITIAN_DB = path.join(folder, 'hub.db');
 process.env.MAITIAN_CONFIG = path.join(folder, 'config.json');
 fs.writeFileSync(process.env.MAITIAN_CONFIG, JSON.stringify({ rootPath: folder }));

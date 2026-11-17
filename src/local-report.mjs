@@ -1,16 +1,23 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import { home, beijingDay, validDay } from './l1-config.mjs';
+import { home, beijingDay, validDay, readConfig } from './l1-config.mjs';
+import { l1Account } from './l1-account.mjs';
 const show = value => value == null ? '暂无' : String(value);
 const cell = value => String(value ?? '暂无').replace(/\|/g, '\\|').replace(/[\r\n]+/g, ' ').replace(/</g, '&lt;');
 export async function writeLocalReport({ date = beijingDay(), reportDir = path.join(home, 'reports') } = {}) {
   validDay(date);
   const { db } = await import('./l1-store.mjs');
-  const lines = [`# L1 本地日报 ${date}`, '', '账号：X @PeanutPair / 小红书 TwoPeanuts（ai）/ 公众号（按已核验观测账号）', '', '数据按北京时间日期截取；暂无表示没有观测。此日报不发送飞书。', ''];
+  const lines = [`# L1 本地日报 ${date}`, '', '账号按本地已核验观测记录展示；没有观测时不猜测账号。', '', '数据按北京时间日期截取；暂无表示没有观测。此日报不发送飞书。', ''];
   let example = false;
   const wechatAccounts = db.prepare("SELECT DISTINCT extra FROM metrics WHERE platform='wechat' AND day<=?").all(date).map(row => JSON.parse(row.extra || '{}').account);
   const wechatFans = db.prepare("SELECT value FROM meta WHERE key LIKE 'l1:followers:wechat:%'").all().map(row => JSON.parse(row.value)).filter(row => beijingDay(row.captured_at) <= date).map(row => row.account);
-  for (const [platform, account] of [['x', 'PeanutPair'], ['xhs', 'TwoPeanuts'], ...[...new Set([...wechatAccounts, ...wechatFans].filter(Boolean))].map(account => ['wechat', account])]) {
+  const observedAccount=platform=>{
+    try {return l1Account(readConfig(),platform);} catch { /* No configured identity: show only observed data. */ }
+    const metric=db.prepare('SELECT extra FROM metrics WHERE platform=? AND day<=? ORDER BY collected_at DESC LIMIT 1').get(platform,date);
+    if(metric)return JSON.parse(metric.extra || '{}').account;
+    return db.prepare('SELECT value FROM meta WHERE key LIKE ? ORDER BY key DESC').all(`l1:followers:${platform}:%`).map(r=>JSON.parse(r.value)).find(r=>beijingDay(r.captured_at)<=date)?.account;
+  };
+  for (const [platform, account] of [['x', observedAccount('x') || '暂无 X 观测'], ['xhs', observedAccount('xhs') || '暂无小红书观测'], ...[...new Set([...wechatAccounts, ...wechatFans].filter(Boolean))].map(account => ['wechat', account])]) {
     const observations = db.prepare('SELECT value FROM meta WHERE key LIKE ?').all(`l1:followers:${platform}:%`).map(row => JSON.parse(row.value)).filter(row => row.account === account && beijingDay(row.captured_at) <= date).sort((a,b) => Date.parse(b.captured_at) - Date.parse(a.captured_at));
     const current = observations[0], previous = observations.find(row => current && Date.parse(row.captured_at) < Date.parse(current.captured_at));
     example ||= !!current?.example;

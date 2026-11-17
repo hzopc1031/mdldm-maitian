@@ -5,8 +5,9 @@ import os from 'node:os';
 import crypto from 'node:crypto';
 import { spawn } from 'node:child_process';
 import { redactL1 } from './l1-web.mjs';
+import { xDraftBundle } from './prep-bundle.mjs';
 
-export const BROWSER_BLOCK = '浏览器执行未启用：上一轮独立 profile + 远程调试启动仅返回 blocked by policy，没有更细原因；native pipe 另报 os error 2。本轮不换入口重试。等待用户认可的可用通道后由维护者配置，不代表已获批准。';
+export const BROWSER_BLOCK = '平台浏览器操作暂不可用：此前调试启动 blocked by policy，Computer Use 工具也异常；填写、上传和保存草稿保持禁用。工作台本机页面测试通过不代表平台执行已获准或可用。';
 export function prepCapabilities(config = {}, env = process.env) {
   const root = env.MAITIAN_LOCAL_SKILLS || path.join(os.homedir(), '.dsh', 'skills');
   return Object.fromEntries(['x', 'xhs', 'wechat'].map(platform => {
@@ -16,8 +17,8 @@ export function prepCapabilities(config = {}, env = process.env) {
     const keepWindow = platform !== 'xhs' || (installed && fs.readFileSync(script, 'utf8').includes("opts['keep-browser']"));
     const enabled = config.publishPrep?.browserExecution === true && installed && keepWindow;
     return [platform, { script, installed, browserEnabled: enabled,
-      mode: platform === 'x' ? '文字草稿链接；用户自行打开并核对，不自动提交' : platform === 'xhs' ? '本地 xhs-publish，固定 --account ai，填图文后保留窗口' : '本地 wechat-publish，只保存草稿并核对成功提示',
-      reason: !installed ? '本地 DSH skill 未安装；不回退旧 hub' : !keepWindow ? '本地 skill 不支持保留窗口，未适配' : enabled ? '执行通道由维护者启用；仍未代表真实验收通过' : BROWSER_BLOCK }];
+      mode: platform === 'x' ? '正文与最多4张图片打包下载；由本人手工附图并核对，不自动发布' : platform === 'xhs' ? '本地 xhs-publish，固定 --account ai，填图文后保留窗口' : '本地 wechat-publish，只保存草稿并核对成功提示',
+      reason: platform === 'x' ? '文图包可直接生成和下载；文字链接不会附图，也不能证明平台草稿已保存。体检与取链接另受浏览器执行限制。' : !installed ? '本地 DSH skill 未安装；不回退旧 hub' : !keepWindow ? '本地 skill 不支持保留窗口，未适配' : enabled ? '执行通道由维护者启用；仍未代表真实验收通过' : BROWSER_BLOCK }];
   }));
 }
 function text(value, name, max, required = false) {
@@ -26,15 +27,21 @@ function text(value, name, max, required = false) {
 }
 export function normalizePrep(input) {
   if (!input || typeof input !== 'object' || Array.isArray(input) || !['x', 'xhs', 'wechat'].includes(input.platform)) throw new Error('仅支持 X、小红书图文、公众号');
-  if (Object.keys(input).some(k => !['platform', 'title', 'content', 'images', 'topics', 'promotionReview', 'episodeId', 'test'].includes(k))) throw new Error('发布准备包含不支持的字段（不接受 submit、命令或凭据）');
+  if (Object.keys(input).some(k => !['platform', 'title', 'content', 'caption', 'images', 'topics', 'promotionReview', 'episodeId', 'test'].includes(k))) throw new Error('发布准备包含不支持的字段（不接受 submit、命令或凭据）');
   const platform = input.platform;
   const title = text(input.title ?? '', '标题', platform === 'wechat' ? 64 : 100, platform !== 'x');
   const content = text(input.content, '正文', platform === 'xhs' ? 1000 : platform === 'x' ? 2000 : 50000, true);
   const images = input.images ?? [], topics = input.topics ?? [];
-  if (!Array.isArray(images) || images.length > (platform === 'x' ? 0 : 9) || (platform === 'xhs' && !images.length)) throw new Error('小红书需要 1–9 张本地图；X 本入口仅文字草稿；公众号最多 9 图');
+  if (!Array.isArray(images) || images.length > (platform === 'x' ? 4 : 9) || (platform === 'xhs' && !images.length)) throw new Error('小红书需要 1–9 张本地图；X 最多4张；公众号最多9张');
+  let totalBytes=0;
   const files = images.map(file => {
-    if (typeof file !== 'string' || !path.isAbsolute(file) || !/\.(png|jpe?g|webp)$/i.test(file)) throw new Error('图片必须为本机绝对路径 PNG/JPEG/WebP');
-    if (!fs.statSync(file).isFile()) throw new Error('图片文件不存在');
+    if (typeof file !== 'string' || !path.isAbsolute(file) || /^(?:\\\\|\/\/)/.test(file) || !/\.(png|jpe?g|webp)$/i.test(file)) throw new Error('图片必须为本机绝对路径 PNG/JPEG/WebP，不接受网络共享路径');
+    const stat=fs.statSync(file); totalBytes+=stat.size;
+    if (!stat.isFile() || !stat.size || stat.size>32*1024*1024 || totalBytes>64*1024*1024) throw new Error('图片必须为非空文件，单图不超过32MB、整组不超过64MB');
+    const fd=fs.openSync(file,'r'), head=Buffer.alloc(12);
+    try { fs.readSync(fd,head,0,12,0); } finally { fs.closeSync(fd); }
+    const ext=path.extname(file).toLowerCase();
+    if (!(ext==='.png' ? head.subarray(0,8).equals(Buffer.from([137,80,78,71,13,10,26,10])) : ext==='.webp' ? head.toString('ascii',0,4)==='RIFF' && head.toString('ascii',8,12)==='WEBP' : head[0]===255 && head[1]===216 && head[2]===255)) throw new Error('图片扩展名与文件头不符');
     return path.resolve(file);
   });
   if (!Array.isArray(topics) || topics.length > 10 || topics.some(t => typeof t !== 'string' || t.length > 40)) throw new Error('话题格式不对');
@@ -43,6 +50,7 @@ export function normalizePrep(input) {
   // 审阅声明原样交给本地 skill 验证，不补造“已看图”记录。
   if (input.promotionReview != null && (typeof input.promotionReview !== 'object' || Array.isArray(input.promotionReview))) throw new Error('promotionReview 格式不对');
   const job = { title, content, images: files, topics, submit: false,
+    ...(platform === 'wechat' ? {caption:text(input.caption ?? '', '摘要',120)} : {}),
     ...(platform === 'xhs' ? { account: 'ai', promotionReview: input.promotionReview ?? {} } : {}) };
   if (input.test && !/^【测试稿】/.test(job.title)) job.title = `【测试稿】${job.title}`;
   if (input.test) job.content = `【测试稿，勿发表】\n${content}`;
@@ -52,7 +60,7 @@ export function normalizePrep(input) {
 export function prepCommand(platform, kind, { script, jobFile }) {
   if (!['xhs', 'wechat'].includes(platform) || !['check', 'execute'].includes(kind)) throw new Error('该平台 / 动作无本地 skill 命令');
   return [script, kind === 'check' ? platform === 'xhs' ? 'preflight' : 'check' : 'post', '--job', jobFile,
-    ...(platform === 'xhs' ? kind === 'check' ? ['--kind', 'post'] : ['--account', 'ai', '--keep-browser'] : [])];
+    ...(platform === 'xhs' ? kind === 'check' ? ['--kind', 'post', '--account', 'ai'] : ['--account', 'ai', '--keep-browser'] : [])];
 }
 export function acceptPrepResult(platform, kind, code, result) {
   if (code !== 0 || result?.ok !== true || result?.submitted === true) throw new Error('本地 skill 失败或回执不符合只准备约束；先人工核对页面，勿直接重跑');
@@ -83,9 +91,14 @@ export function createPrepService({ db, home, root, config, secrets = [], spawnC
     }
     const id = crypto.randomUUID(), folder = path.join(home, 'data', 'publish-prep', id);
     fs.mkdirSync(folder, { recursive: true });
+    // X 下载包冻结素材，源文件后来改动不会改变已经准备的草稿。
+    if (data.platform === 'x') data.job.images = data.job.images.map((file,i) => {
+      const target=path.join(folder,`${String(i+1).padStart(2,'0')}${path.extname(file).toLowerCase()}`);
+      fs.copyFileSync(file,target); return target;
+    });
     fs.writeFileSync(path.join(folder, 'job.json'), JSON.stringify(data.job, null, 2));
     const r = { id, platform: data.platform, episodeId: data.episodeId, test: data.test, title: data.job.title,
-      state: 'prepared', createdAt: new Date().toISOString(), note: '本地任务已生成；未操作平台、未上传、未存平台草稿' };
+      imageCount:data.job.images.length, state: 'prepared', createdAt: new Date().toISOString(), note: '本地任务已生成；未操作平台、未上传、未存平台草稿' };
     save(r); return r;
   }
   const jobFile = id => { get(id); return path.join(home, 'data', 'publish-prep', id, 'job.json'); };
@@ -132,5 +145,6 @@ export function createPrepService({ db, home, root, config, secrets = [], spawnC
     return get(id);
   }
   return { create, get, list, start, jobFile, busy: () => list().some(r => r.state === 'running'),
+    bundle: id => { if (get(id).platform !== 'x') throw new Error('仅 X 提供文图包'); return xDraftBundle(JSON.parse(fs.readFileSync(jobFile(id),'utf8'))); },
     publicCapabilities: () => Object.fromEntries(Object.entries(prepCapabilities(config, env)).map(([p, { script, ...cap }]) => [p, cap])) };
 }

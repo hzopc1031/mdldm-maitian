@@ -1,0 +1,24 @@
+// Public configuration and pure DOM-selection tests. No Chrome, account/session or network.
+import fs from 'node:fs';import os from 'node:os';import path from 'node:path';import assert from 'node:assert/strict';
+const folder=fs.mkdtempSync(path.join(os.tmpdir(),'maitian-identity-'));
+process.env.MAITIAN_HOME=folder;
+const {l1Account}=await import('../src/l1-account.mjs');
+const {allowedPage}=await import('../src/l1-browser.mjs');
+const {selectXPosts}=await import('../src/l1-x-dom.mjs');
+const {assertXAccount}=await import('../src/l1-x.mjs');
+assert.throws(()=>l1Account({},'x'),/请配置/);
+fs.writeFileSync(path.join(folder,'l1-accounts.local.json'),JSON.stringify({x:'ConfiguredUser',xhs:'Configured Creator'}));
+assert.equal(l1Account({},'x'),'ConfiguredUser');assert.equal(l1Account({},'xhs'),'Configured Creator');
+assert.equal(l1Account({xHandle:'OverrideUser'},'x'),'OverrideUser');
+assert.throws(()=>l1Account({xHandle:'One',l1:{x:{account:'Two'}}},'x'),/冲突/);
+assert.throws(()=>l1Account({xHandle:'bad/handle'},'x'));
+assert.equal(allowedPage('https://x.com/ConfiguredUser/status/123','x','ConfiguredUser'),true);
+assert.equal(allowedPage('https://x.com/Other/status/123','x','ConfiguredUser'),false);
+assert.equal(allowedPage('https://x.com/ConfiguredUser/status/123?anything=1','x','ConfiguredUser'),false);
+await assertXAccount({evaluate:async()=>({handle:'@ConfiguredUser',url:'https://x.com/ConfiguredUser'})},'ConfiguredUser');
+await assert.rejects(assertXAccount({evaluate:async()=>({handle:'@Other',url:'https://x.com/ConfiguredUser'})},'ConfiguredUser'),/不是/);
+const card={id:'123',author:'ConfiguredUser',permalinkAuthor:'ConfiguredUser',kind:'original',created_at:new Date().toISOString()};
+assert.equal(selectXPosts([card],new Date(),'ConfiguredUser').posts[0].url,'https://x.com/ConfiguredUser/status/123');
+assert.equal(selectXPosts([card],new Date(),'Other').posts.length,0);
+assert.throws(()=>selectXPosts([card]));
+console.log('L1 ACCOUNT PASS: configurable single identities, conflicts/missing account fail before browser, exact account navigation and post filtering. No real platform access.');

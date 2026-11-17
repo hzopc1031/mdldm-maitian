@@ -14,7 +14,10 @@ export function saveObservation({ platform, account, captured_at, source, posts,
   for (const post of posts) {
     if (platform === 'wechat' && (!/^[\w-]+$/.test(post.id) || (post.url != null && !/^https:\/\/mp\.weixin\.qq\.com\/s\/[\w-]+$/.test(post.url)))) throw new Error('公众号文章 ID/公开 URL 不安全；回滚本次观测');
     // 同一 statusId 兼容原有登记 id；不要求所有历史 episode 都采用 external 前缀。
-    const registered = platform === 'x' ? db.prepare("SELECT episode_id,url FROM tasks WHERE platform='x'").all().find(row => row.url?.match(/^https:\/\/(?:x|twitter)\.com\/PeanutPair\/status\/(\d+)\/?$/i)?.[1] === post.id) : null;
+    const registered = platform === 'x' ? db.prepare("SELECT episode_id,url FROM tasks WHERE platform='x'").all().find(row => {
+      const match=row.url?.match(/^https:\/\/(?:x|twitter)\.com\/([A-Za-z0-9_]+)\/status\/(\d+)\/?$/i);
+      return match?.[1].toLowerCase()===account.toLowerCase() && match?.[2]===post.id;
+    }) : null;
     const eid = registered?.episode_id || `external:${platform}:${post.id}`;
     const oldSnapshot = db.prepare('SELECT * FROM snapshots WHERE episode_id=?').get(eid);
     if (platform === 'wechat' && oldSnapshot && JSON.parse(oldSnapshot.project).account !== account) throw new Error('公众号文章 ID 已属于其他账号；回滚本次观测');

@@ -4,6 +4,7 @@ import path from 'node:path';
 import net from 'node:net';
 import { spawn } from 'node:child_process';
 import { home } from './l1-config.mjs';
+import { l1Account } from './l1-account.mjs';
 export const pause = (min = 1800, max = 3200) => new Promise(resolve => setTimeout(resolve, min + Math.random() * (max - min)));
 export function browserSettings(config, platform = 'xhs') {
   if (!['x', 'xhs', 'wechat'].includes(platform)) throw new Error('未知 L1 浏览器平台');
@@ -99,7 +100,7 @@ export async function withL1Browser(config, fn, platform = 'xhs') {
     await send('Page.enable', {}, session);
     const page = {
       async goto(url) {
-        if (!allowedPage(url, platform)) throw new Error('L1 拒绝非本平台只读页面');
+        if (!allowedPage(url, platform, platform==='x'?l1Account(config,'x'):null)) throw new Error('L1 拒绝非本平台只读页面');
         const result = await send('Page.navigate', { url }, session);
         if (result.errorText) throw new Error(result.errorText);
         await pause(5000, 7000);
@@ -122,13 +123,13 @@ export function assertBrowserOwner(args, processes, { profile, port }, pid) {
     throw new Error('浏览器 PID/profile/端口归属校验失败');
   }
 }
-export function allowedPage(value, platform) {
+export function allowedPage(value, platform, account) {
   try {
     // 公众号只主动导航入口。连显式 :443、空 query/hash 都拒绝；不拼接后台 token URL。
     if (platform === 'wechat') return typeof value === 'string' && /^https:\/\/mp\.weixin\.qq\.com\/?$/i.test(value);
     const url = new URL(value);
     if (url.protocol !== 'https:' || url.username || url.password || url.port || url.search || url.hash) return false;
     if (platform === 'xhs') return url.hostname === 'creator.xiaohongshu.com';
-    return platform === 'x' && url.hostname === 'x.com' && /^(?:\/PeanutPair\/?|\/PeanutPair\/status\/\d+|\/i\/flow\/login)$/i.test(url.pathname);
+    return platform === 'x' && url.hostname === 'x.com' && (url.pathname==='/i/flow/login' || /^[A-Za-z0-9_]{1,15}$/.test(account || '') && new RegExp(`^/${account}(?:/status/\\d+)?/?$`,'i').test(url.pathname));
   } catch { return false; }
 }

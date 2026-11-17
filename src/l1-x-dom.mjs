@@ -13,10 +13,10 @@ export function visibleXIdentity() {
   return { handle: handles.length === 1 ? handles[0] : null, url: location.href };
 }
 
-export function visibleXFollowers() {
+export function visibleXFollowers(account) {
   const visible = el => { const r = el.getBoundingClientRect(), s = getComputedStyle(el); return r.width > 0 && r.height > 0 && s.display !== 'none' && s.visibility !== 'hidden'; };
   return [...document.querySelectorAll('a[href$="/verified_followers"],a[href$="/followers"]')]
-    .filter(visible).filter(a => /^\/PeanutPair\/(?:verified_followers|followers)$/i.test(new URL(a.href, location.href).pathname))
+    .filter(visible).filter(a => new RegExp(`^/${account}/(?:verified_followers|followers)$`,'i').test(new URL(a.href, location.href).pathname))
     .map(a => a.innerText.trim());
 }
 
@@ -49,7 +49,7 @@ export function visibleXPosts() {
   return result;
 }
 
-export function visibleXMetricLabel(id) {
+export function visibleXMetricLabel(id, account) {
   const visible = el => { const r = el.getBoundingClientRect(), s = getComputedStyle(el); return r.width > 0 && r.height > 0 && s.display !== 'none' && s.visibility !== 'hidden'; };
   for (const article of document.querySelectorAll('article')) {
     if (!visible(article)) continue;
@@ -58,7 +58,7 @@ export function visibleXMetricLabel(id) {
     const matched = times.some(el => {
       const a = el.closest('a[href]'); if (!a) return false;
       const u = new URL(a.href, location.href);
-      return ['x.com', 'www.x.com', 'twitter.com'].includes(u.hostname) && u.pathname.toLowerCase() === `/peanutpair/status/${id}`;
+      return ['x.com', 'www.x.com', 'twitter.com'].includes(u.hostname) && u.pathname.toLowerCase() === `/${account}/status/${id}`.toLowerCase();
     });
     if (!matched) continue;
     return [...article.querySelectorAll('[role="group"][aria-label]')].find(el => visible(el) && el.closest('article') === article && !el.closest('[data-testid="quoteTweet"],div[role="link"]'))?.getAttribute('aria-label') || null;
@@ -84,14 +84,15 @@ export function parseXLabel(label) {
   return Object.fromEntries(Object.entries(fields).map(([key, names]) => [key, xNumber((String(label || '').match(new RegExp(`([\\d,.]+\\s*[KMW万亿]?)\\s*(?:${names})(?=\\b|[,，]|$|\\s)`, 'i')) || [])[1])]));
 }
 
-export function selectXPosts(cards, now = new Date()) {
+export function selectXPosts(cards, now = new Date(), account) {
+  if(!/^[A-Za-z0-9_]{1,15}$/.test(account || ''))throw new Error('需要已校验的 X 预期账号');
   const posts = new Map(), skipped = { unknownTime: 0, outsideWindow: 0, excluded: 0 };
   for (const card of cards) {
-    if (!/^\d+$/.test(card.id || '') || card.author?.toLowerCase() !== 'peanutpair' || card.permalinkAuthor?.toLowerCase() !== 'peanutpair' || !['original', 'quote'].includes(card.kind)) { skipped.excluded++; continue; }
+    if (!/^\d+$/.test(card.id || '') || card.author?.toLowerCase() !== account?.toLowerCase() || card.permalinkAuthor?.toLowerCase() !== account?.toLowerCase() || !['original', 'quote'].includes(card.kind)) { skipped.excluded++; continue; }
     if (!card.created_at || !/T.*(?:Z|[+-]\d{2}:\d{2})$/.test(card.created_at) || !Number.isFinite(Date.parse(card.created_at))) { skipped.unknownTime++; continue; }
     const age = new Date(now).getTime() - Date.parse(card.created_at);
     if (age < 0 || age > 30 * 86400000) { skipped.outsideWindow++; continue; }
-    posts.set(card.id, { ...card, url: `https://x.com/PeanutPair/status/${card.id}` });
+    posts.set(card.id, { ...card, url: `https://x.com/${account}/status/${card.id}` });
   }
   return { posts: [...posts.values()], skipped };
 }

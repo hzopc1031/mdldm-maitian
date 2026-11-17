@@ -11,7 +11,7 @@ export function readConfig() {
     return {};
   }
   const config = JSON.parse(fs.readFileSync(file, 'utf8').replace(/^\uFEFF/, ''));
-  if (config.xHandle != null && config.xHandle !== 'PeanutPair') throw new Error('L1 xHandle 必须为 PeanutPair');
+  if (config.xHandle != null && !/^[A-Za-z0-9_]{1,15}$/.test(config.xHandle)) throw new Error('L1 xHandle 格式无效');
   return config;
 }
 export function beijingDay(value = new Date()) {

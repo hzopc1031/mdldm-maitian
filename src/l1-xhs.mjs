@@ -1,41 +1,44 @@
+import { l1Account } from './l1-account.mjs';
 import { createInterface } from 'node:readline/promises';
 import { withL1Browser, pause } from './l1-browser.mjs';
 import { visibleIdentity, visibleFans, visibleNoteCards, scrollNotes, nextNotesPage, parseVisibleNumber } from './l1-xhs-dom.mjs';
 import { inWindow, validDay } from './l1-config.mjs';
 import { loginTimeoutMs, waitForVisibleLogin } from './l1-login.mjs';
 const HOME = 'https://creator.xiaohongshu.com/new/home';
-export async function assertTwoPeanuts(page) {
+export async function assertXhsAccount(page, account) {
   let identity;
   for (let i = 0; i < 6; i++) {
     identity = await page.evaluate(visibleIdentity);
     if (identity.login || identity.nickname) break;
     await pause();
   }
-  if (identity.login || identity.nickname !== 'TwoPeanuts') throw new Error(`停止：期望可见昵称 TwoPeanuts，实际 ${identity.nickname || '暂无/未登录'}；未写入本次小红书数据`);
+  if (identity.login || identity.nickname !== account) throw new Error(`停止：期望可见昵称 ${account}，实际 ${identity.nickname || '暂无/未登录'}；未写入本次小红书数据`);
 }
 export async function loginXhs(config, { waitLogin = false } = {}) {
+  const account=l1Account(config,'xhs');
   if (!waitLogin && !process.stdin.isTTY) throw new Error('扫码登录需要交互终端');
   const timeoutMs = waitLogin ? loginTimeoutMs() : null;
   await withL1Browser(config, async page => {
     await page.goto(HOME);
     if (waitLogin) {
-      console.log(`请 Liu 在专用窗口扫码登录 TwoPeanuts；自动轮询可见昵称，无需回车，超时 ${timeoutMs} 毫秒。`);
+      console.log(`请 Liu 在专用窗口扫码登录 ${account}；自动轮询可见昵称，无需回车，超时 ${timeoutMs} 毫秒。`);
       await waitForVisibleLogin(page, visibleIdentity, identity => {
-        if (identity.nickname && identity.nickname !== 'TwoPeanuts') throw new Error(`停止：期望可见昵称 TwoPeanuts，实际 ${identity.nickname}；未采集、未写库`);
-        return !identity.login && identity.nickname === 'TwoPeanuts';
+        if (identity.nickname && identity.nickname !== account) throw new Error(`停止：期望可见昵称 ${account}，实际 ${identity.nickname}；未采集、未写库`);
+        return !identity.login && identity.nickname === account;
       }, timeoutMs);
     } else {
       const terminal = createInterface({ input: process.stdin, output: process.stdout });
-      try { await terminal.question('请 Liu 在该窗口扫码登录 TwoPeanuts，不要登录其他号。扫码完成后回车校验并关闭专用 Chrome：'); }
+      try { await terminal.question(`请在该窗口扫码登录 ${account}，不要登录其他号。扫码完成后回车校验并关闭专用 Chrome：`); }
       finally { terminal.close(); }
-      await page.goto(HOME); await assertTwoPeanuts(page);
+      await page.goto(HOME); await assertXhsAccount(page, account);
     }
-    console.log('登录校验成功：TwoPeanuts；随后关闭本次专用 Chrome，登录状态由 Chrome 自行保存在专用 profile。');
+    console.log(`登录校验成功：${account}；随后关闭本次专用 Chrome，登录状态由 Chrome 自行保存在专用 profile。`);
   });
 }
 export async function collectXhs(config, date) {
+  const account=l1Account(config,'xhs');
   const observation = await withL1Browser(config, async page => {
-    await page.goto(HOME); await assertTwoPeanuts(page);
+    await page.goto(HOME); await assertXhsAccount(page, account);
     await page.goto('https://creator.xiaohongshu.com/statistics/fans-data');
     let total = null;
     for (let i = 0; i < 6 && total == null; i++) { await pause(); total = parseVisibleNumber(await page.evaluate(visibleFans)); }
@@ -71,9 +74,9 @@ export async function collectXhs(config, date) {
     if (!sawCards) throw new Error('note-manager 未读到作品卡片，可能页面结构变化；不写入本次小红书数据');
     if (!complete) throw new Error('达到低频遍历上限；本次未确认遍历完成，不写入本次小红书数据');
     // 写库前再回首页核验，整个浏览器阶段结束后才打开数据库。
-    await page.goto(HOME); await assertTwoPeanuts(page);
-    console.log(`TwoPeanuts：近30天 ${posts.size} 篇；日期未知 ${unknown.size} 篇已跳过（未当成近期作品）`);
-    return { platform: 'xhs', account: 'TwoPeanuts', source: 'xhs-visible-dom', captured_at: new Date().toISOString(), followers: total, posts: [...posts.values()] };
+    await page.goto(HOME); await assertXhsAccount(page, account);
+    console.log(`${account}：近30天 ${posts.size} 篇；日期未知 ${unknown.size} 篇已跳过（未当成近期作品）`);
+    return { platform: 'xhs', account, source: 'xhs-visible-dom', captured_at: new Date().toISOString(), followers: total, posts: [...posts.values()] };
   });
   const store = await import('./l1-store.mjs');
   return store.transaction(() => store.saveObservation(observation));
