@@ -1,76 +1,107 @@
-# Windows L1：公开导入、只读采集和本地日报
+# Windows L1：独立工作台、页面采集和本地日报
 
-在 `D:\AIInfra\maitian` 手动运行，只使用 X `@PeanutPair` 和小红书 `TwoPeanuts`（ai）。X 由 Grok 读取公开数据，人工保存 JSON 后导入；L1 不打开 X 网页。小红书只读取已渲染页面，禁止内部指标接口、发布、关注或改设置。没有定时任务、开机自启、飞书通知、多维表格同步或站点转化采集。原 hub 的发布与 daemon 命令不属于此流程。
+在 `D:\AIInfra\maitian` 手动运行。工作台独立运行，不依赖 Grok Bot 或 inbox JSON。X 默认用专用 Chrome 读取 `@PeanutPair` 已渲染页面，小红书读取 `TwoPeanuts`（ai）创作者页面；`import-x-public.mjs` 保留为可选手工导入。没有发布、定时任务、开机自启、飞书同步或站点转化采集。原 hub 的发布与 daemon 命令不属于 L1。
 
-## 配置与数据隔离
+## 配置与隔离
 
-需要已安装的 Node.js 22.5+（内置 `node:sqlite`）和本机 Chrome。无需发布助手插件，也无需 npm install。首次配置可复制 `config.example.json` 为 `config.json`；已有配置不要直接覆盖，修改这些字段即可：
+需要已安装的 Node.js 22.5+（内置 SQLite、WebSocket）和本机 Chrome，无需发布插件或 npm install。首次配置可复制 `config.example.json` 为 `config.json`；已有配置不要覆盖。L1 分平台配置：
 
 ```json
 {
   "xHandle": "PeanutPair",
-  "chromeProfile": "D:\\AIInfra\\maitian\\chrome-profile-l1-xhs",
-  "chromePort": 9340,
+  "l1": {
+    "x": {
+      "chromeProfile": "D:\\AIInfra\\maitian\\chrome-profile-l1-x",
+      "chromePort": 9341
+    },
+    "xhs": {
+      "chromeProfile": "D:\\AIInfra\\maitian\\chrome-profile-l1-xhs",
+      "chromePort": 9340
+    }
+  },
   "web": { "host": "127.0.0.1", "port": 8787 }
 }
 ```
 
-Chrome 不在常见安装路径时可增加 `chromeBinary`，值为 chrome.exe 的完整路径。L1 强制检查端口为 9340，profile 为 `MAITIAN_HOME\chrome-profile-l1-xhs`；拒绝复用已被占用的端口，不连接 9333/9334/9335。调试地址仅限 127.0.0.1。每次只关闭本次启动且核验归属的浏览器；异常时仅对子进程 PID 做清理，不按 Chrome 名称杀进程。
+Chrome 不在常见位置时配置 `chromeBinary` 为 chrome.exe 完整路径。X 强制使用 `MAITIAN_HOME\chrome-profile-l1-x` 和 9341，绝不继承全局 chromePort/chromeProfile。小红书强制使用 `MAITIAN_HOME\chrome-profile-l1-xhs` 和 9340，兼容旧全局配置，优先使用 l1.xhs 配置。省略字段时采用对应专用默认值。9333/9334/9335 不用于 L1。
 
-默认正式库为 `D:\AIInfra\maitian\data\hub.db`，与 `demo\` 完全分开。`MAITIAN_HOME` 改变默认数据、inbox、报告和 profile 的根目录；`MAITIAN_DB` 单独指定库；`MAITIAN_CONFIG` 单独指定配置文件。显式指定的配置文件必须存在。没有正式配置时，X 导入仍能运行。示例 JSON 只导入临时库，不要放入正式数据目录。
+每次启动前检查本平台端口空闲，拒绝复用现有浏览器。调试地址仅 `127.0.0.1`，连接后核验本次子进程 PID、profile、端口和地址。采完关闭本次专用 Chrome；成功、失败或 Ctrl+C 均清理，仅针对持有的本次子进程，不按 Chrome 名称杀进程，不关闭日常 Chrome 或另一个平台的浏览器。程序不读取 cookie、token、profile 文件内容、storage 或框架内部状态。
 
-`data/`、`config.json`、`demo/`、`chrome-profile*/`、`inbox/` 中的真实文件和 `reports/daily/`、`reports/latest.md` 均不进 Git。目录按需自动创建。配置示例中的 `l1` 块是路径说明，运行路径以环境变量和入口参数为准。
+默认库为 `D:\AIInfra\maitian\data\hub.db`。MAITIAN_HOME 改变默认数据、报告和专用 profile 根目录；MAITIAN_DB 单独指定库；MAITIAN_CONFIG 单独指定配置文件，显式指定时必须存在。无配置文件也能采用 L1 默认值。配置示例中的 database/xInbox/reports 仅为路径说明，实际以环境变量及入口参数为准。
 
-## 导入 X 公开数据
+config.json、data/、inbox/、reports/ 下的运行数据及 chrome-profile*、_local-*、_l1-selftest*、_chrome-shot* 不提交。MIT LICENSE 保持原样。
 
-请 Grok 只读取 PeanutPair 近 30 天的公开作品，包含各帖链接、原文或摘要、实际发布时间、观测时间和公开统计；不可见的数字必须为 null，不要估算。保存为 `inbox\x\x-YYYY-MM-DD.json`。字段契约见 [示例 JSON](examples/x-sample.json)，它明确是假数据，sample 链接不对应真实帖子。真实帖子必须使用真实 statusId。
+## Liu 登录 X（单独手动运行）
+
+本轮交付没有运行登录命令，没有启动真实 Chrome。Liu 验收后在交互式 PowerShell 运行：
 
 ```powershell
 Set-Location D:\AIInfra\maitian
-node scripts/import-x-public.mjs inbox/x/x-2026-11-17.json
-# 只导入 X 并生成日报，不加载或启动 Chrome：
-node scripts/l1-run.mjs --only x --date 2026-11-17 --x-json inbox/x/x-2026-11-17.json
+node scripts/l1-run.mjs --login-x
 ```
 
-省略文件参数时，独立导入脚本查找今天北京时间日期的 JSON；L1 入口查找 `--date` 指定日期的 JSON。指标的 day 永远取 `captured_at` 的北京时间日期，不由 `--date` 改写。`--date` 用于近 30 个自然日筛选和日报截止日。已知发布时间超出窗口的帖子跳过；X 发布时间未知时保留并标记 unknown。观测时间必须含时区，URL 必须与 PeanutPair 和 id 严格一致。整个输入先校验，再以事务写入；非数字、负数和错误账号会失败。
+仅启动 `127.0.0.1:9341` 对应的 `D:\AIInfra\maitian\chrome-profile-l1-x`，打开 `https://x.com/i/flow/login`。终端提示「请 Liu 在该窗口登录 @PeanutPair，不要登录其他号」。登录完成后回车，程序打开主页，从当前账号切换器读取可见账号，必须是 PeanutPair（允许带 @、不区分大小写）。浏览中的主页作者不作为登录身份。无法确认或账号不符立即失败；成功或失败都关闭本次浏览器。登录命令不打开数据库、不采集、不写日报，Chrome 自行保存会话。
 
-同一个 id 不复制 episode/task；旧观测不覆盖新观测。同日新观测中的 null 保留已有非空值，并保留该字段原观测时间；quotes 存入 extra。粉丝非 null 才写，gain/loss 不推算。相同 UTC 分钟的 samples 幂等。公开数据可能有舍入，数据库和日报均标注来源、精度与观测时间。
-
-## Liu 首次扫码登录（需手动运行）
-
-本轮代码交付没有运行此命令。验收后由 Liu 在交互式 PowerShell 运行：
+小红书登录保持原样，独立执行：
 
 ```powershell
-Set-Location D:\AIInfra\maitian
 node scripts/l1-run.mjs --login-xhs
 ```
 
-只启动 9340 对应的专用 Chrome，并打开小红书创作者首页/登录页。终端会提示「请 Liu 在该窗口扫码登录 TwoPeanuts，不要登录其他号」。Liu 扫码完成后回车，程序返回首页读取可见昵称；必须严格等于 TwoPeanuts。成功或失败都会关闭本次浏览器。登录状态由 Chrome 自行保存于专用 profile，程序不读取 cookie、token 或 storage。登录命令不打开数据库、不生成日报。
+只启动 9340 的专用 Chrome，提示 Liu 登录 TwoPeanuts；回车后返回首页核验可见昵称。成功或失败均关闭本次浏览器，不打开数据库或写日报。两个登录参数都必须单独运行。
 
-## 跑 L1
+## 默认采集与日报
 
 ```powershell
-# X JSON → TwoPeanuts 只读采集 → 本地日报
-node scripts/l1-run.mjs --date 2026-11-17
-# 仅小红书 → 本地日报
-node scripts/l1-run.mjs --only xhs --date 2026-11-17
+Set-Location D:\AIInfra\maitian
+# X Chrome：发现 + 粉丝 + 逐帖 → 小红书 → 日报
+node scripts/l1-run.mjs
+# 只做 X Chrome 采集和日报，不启动小红书 Chrome
+node scripts/l1-run.mjs --only x
+# 只做小红书和日报
+node scripts/l1-run.mjs --only xhs
 ```
 
-采集前和写库前校验可见昵称。粉丝从 `statistics/fans-data` 页的「粉丝总数」等可见标签读取，无法可靠识别就失败，不写 0。作品在 note-manager 同一页批量读取卡片，按随机间隔滚动/翻页，noteId 去重；只接受页面可见的完整年月日和近 30 天窗口。日期不明的作品跳过并打印数量，不当成近期作品。只采卡片五项统计（浏览、评论、点赞、收藏、分享），缺失写 NULL。只有页面确实出现的不带签名公开链接才保存 URL，否则仅保留 noteId 和状态。
+X 采集前验证当前可见登录账号为 @PeanutPair。低频滚动主页，从主帖作者、时间及 permalink 判断，按 statusId 去重，只登记距采集开始时刻近 30×24 小时内 PeanutPair 的原创帖和引用帖。排除转推、回复及其他作者；引用卡片的作者、时间和指标不作为主帖信息。没有可靠时间的跳过并计数，不推断为近期帖。遇到旧置顶继续滚动；连续三轮都是窗口外帖子且无近期帖，或到末尾连续三轮无新卡片时结束。最多 120 轮；主页为空或到上限仍无法确认结束则失败，不落库。
 
-页面结构变化、空卡片页或达到 120 轮上限会失败，本次小红书观测不落库；不会把读不到解释成 0。此版本 DOM 选择器尚待 Liu 登录后实测验收。若小红书阶段失败，先前成功的 X 导入会保留；修复后可安全重跑。
+粉丝沿用原 followers 页面方法：读取主页 `a[href$="/verified_followers"]` 或 `a[href$="/followers"]` 的渲染文本并换算数值。新发现和已登记的 PeanutPair 帖子 URL 合并去重，逐帖打开，读取第一个主帖 permalink 匹配目标的 article 中 `[role="group"][aria-label]`。解析 views/likes/replies/bookmarks/reposts，映射为 views/likes/comments/favorites/shares。缺项保持 NULL；明确显示 0 才记录 0。粉丝读不到保持 NULL。只导航主页、登录页和单帖页，不主动调用 X 内部接口，不点赞、关注、回复或转发。操作及补读之间均随机等待，导航后等待渲染。
 
-日报写入 `reports\daily\YYYY-MM-DD.md` 并更新 `reports\latest.md`。包含两个账号粉丝、较上次实测的新增、每篇可得统计和观测时间；没有基线写「暂无」，不会把累计粉丝当今日新增。粉丝基线是最近一次更早的观测，可跨日；当日没有观测会展示截止日期前最新值及其时间。`--report-dir` 可改变报告目录。成功退出 0，任一阶段失败退出 1；Ctrl+C 退出 130。入口打印实际库路径。
+每轮滚动、逐帖及写库前再次校验账号，失败则整次 X 观测不写库。初次账号验证前不打开数据库，最终校验成功并关闭专用 Chrome 后才事务落库。不可读的单帖指标为空，不把未匹配结果当 0。
+
+与现有 226 条 grok-public 公开数据按 statusId 幂等合并，不清表、不删除、不复制 episode，保留原登记。当前来源为 chrome/page，快照和指标 extra 的 sources 同时保留历史 grok-public 与新来源。同日旧观测不覆盖更新观测；NULL 保留已有非空值及字段观测时间，跨日可沿用已有值，字段时间仍标明旧时间。samples 按 UTC 分钟幂等，粉丝非 NULL 才更新，gain/loss 不估算。
+
+小红书继续只读创作者页面，采集前和写库前核验 TwoPeanuts。粉丝从 statistics/fans-data 的可见「粉丝总数」标签读取；作品从 note-manager 批量读卡片，随机间隔滚动/翻页，noteId 去重。只接受可靠完整年月日和近 30 个北京时间自然日，日期未知跳过计数，五项统计缺项保持 NULL。空卡片页或达到遍历上限会失败；先前成功的 X 观测保留，可安全重跑。
+
+日报写入 `reports\daily\YYYY-MM-DD.md` 并更新 `reports\latest.md`。--date YYYY-MM-DD 控制日报截止日期和手工导入/小红书自然日窗口；X 发现始终以实际采集时刻计算近 30 天。指标 day 取观测时间的北京时间日期，不由 --date 改写。日报展示粉丝、较上次实测新增、可得指标和观测时间；无基线写「暂无」，不把累计粉丝当新增。--report-dir 可另设目录。成功退出 0，失败退出 1，Ctrl+C 退出 130。
+
+DOM 选择器已用模拟页面验证，真实页面仍待 Liu 登录后验收；页面变化时失败或保留缺项，不伪造结果。
+
+## 可选手工 JSON 导入
+
+不要求 Grok Bot，可将人工整理的公开数据存为 JSON。字段契约见 [示例 JSON](examples/x-sample.json)，明确是假数据，sample 链接不是真实帖子。真实数据必须使用真实 statusId，不可见字段为 null，观测时间必须含时区，账号和 URL 必须匹配 PeanutPair。
+
+```powershell
+# 导入替代 X Chrome，随后只写日报
+node scripts/l1-run.mjs --only x --import-x inbox/x/x-2026-11-17.json --date 2026-11-17
+# 导入后继续采集小红书和写日报
+node scripts/l1-run.mjs --import-x inbox/x/x-2026-11-17.json
+# 独立脚本保留
+node scripts/import-x-public.mjs inbox/x/x-2026-11-17.json
+```
+
+L1 仅显式传 --import-x（兼容旧别名 --x-json）时导入，不自动查找 inbox JSON。独立导入脚本省略路径时仍查找当天文件。整体先校验再事务写入；已知窗口外帖子跳过，未知日期保留并标记 unknown（Chrome 新帖发现则必须有可靠时间）。JSON 来源标记 grok-public，quotes 存在 extra，合并规则与页面观测一致。
 
 ## 离线自测
 
 ```powershell
 Set-Location D:\AIInfra\maitian
+node scripts/l1-x-selftest.mjs
 node scripts/l1-selftest.mjs
+node scripts/l1-regression-selftest.mjs
 ```
 
-只运行新写的导入与日报代码；使用 `examples/x-sample.json` 和 `_l1-selftest\hub.db`，不启动 Chrome、不连接 9340、不打开正式库。覆盖幂等、NULL、时间映射、错误输入零写入和日报示例标识。命令及关键输出保存在 `_l1-selftest-output.txt`，这些临时文件均被 gitignore 排除。
+第一条用自构造 document 执行实际 DOM 函数，覆盖粉丝、目标帖指标/缺项、原创/引用/转推/回复/作者、30 天及未知日期、错误账号零写入、模拟采集、入口分流及临时库合并。后两条回归导入、日报和现有页面兼容性。均不启动真实 Chrome，不连接 9340/9341，不打开正式库，不安装依赖。命令及关键输出保存在 `_l1-selftest-x-output.txt`、`_l1-selftest-output.txt`、`_l1-selftest-regression-output.txt`，临时库和日志不进 Git。
 
 ## 回退
 
-先停止手动运行的 L1，再执行 `git switch main`。不删除远程 main，不改 SSH 密钥或全局 Git 配置。切分支不会删除被忽略的本地库、profile 和报告；确认不再需要后可手动备份或删除，保留库则以后可继续幂等导入。MIT LICENSE 保持原样。
+先停止手动运行的 L1，再执行 `git switch main`。不删除远程 main，不改 SSH 密钥或全局 Git 配置。切分支不会删除被忽略的本地库、profile 和报告；需要时手动备份。保留现有库，以后仍可按 id 继续合并。

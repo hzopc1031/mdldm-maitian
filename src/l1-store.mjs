@@ -12,27 +12,31 @@ export function saveObservation({ platform, account, captured_at, source, posts,
   const day = beijingDay(captured_at), imported = new Date().toISOString();
   let saved = 0, skipped = 0;
   for (const post of posts) {
-    const eid = `external:${platform}:${post.id}`;
+    // 同一 statusId 兼容原有登记 id；不要求所有历史 episode 都采用 external 前缀。
+    const registered = platform === 'x' ? db.prepare("SELECT episode_id,url FROM tasks WHERE platform='x'").all().find(row => row.url?.match(/^https:\/\/(?:x|twitter)\.com\/PeanutPair\/status\/(\d+)\/?$/i)?.[1] === post.id) : null;
+    const eid = registered?.episode_id || `external:${platform}:${post.id}`;
     const oldSnapshot = db.prepare('SELECT * FROM snapshots WHERE episode_id=?').get(eid);
     const updateSnapshot = !oldSnapshot || Date.parse(oldSnapshot.taken_at) <= Date.parse(captured_at);
     if (updateSnapshot) {
-      db.prepare(`INSERT INTO episodes (id,name,dir,created_at) VALUES (?,?,'',?) ON CONFLICT(id) DO UPDATE SET name=excluded.name`).run(eid, post.text.slice(0, 100) || post.id, imported);
-      db.prepare(`INSERT INTO tasks (episode_id,platform,state,detail,url,updated_at) VALUES (?,?,?,?,?,?) ON CONFLICT(episode_id,platform) DO UPDATE SET state=excluded.state, detail=excluded.detail, url=COALESCE(excluded.url,tasks.url), updated_at=excluded.updated_at`)
+      db.prepare(`INSERT INTO episodes (id,name,dir,created_at) VALUES (?,?,'',?) ON CONFLICT(id) ${platform === 'x' ? 'DO NOTHING' : 'DO UPDATE SET name=excluded.name'}`).run(eid, post.text.slice(0, 100) || post.id, imported);
+      db.prepare(`INSERT INTO tasks (episode_id,platform,state,detail,url,updated_at) VALUES (?,?,?,?,?,?) ON CONFLICT(episode_id,platform) ${platform === 'x' ? 'DO NOTHING' : 'DO UPDATE SET state=excluded.state, detail=excluded.detail, url=COALESCE(excluded.url,tasks.url), updated_at=excluded.updated_at'}`)
         .run(eid, platform, post.state || 'published', 'L1 只读观测', post.url || null, captured_at);
       const previous = oldSnapshot ? JSON.parse(oldSnapshot.project) : {};
       const created_at = post.created_at || previous.created_at || null;
-      const snapshot = { ...previous, account, postId: post.id, noteId: platform === 'xhs' ? post.id : undefined, created_at, source, text: post.text, date_status: created_at ? 'known' : 'unknown', status: post.state || 'published', example,
-        platforms: { ...previous.platforms, [platform]: { ...previous.platforms?.[platform], id: post.id, title: post.text.slice(0, 100) || post.id, text: post.text, url: post.url || previous.platforms?.[platform]?.url || '', created_at } } };
+      const sources = [...new Set([...(previous.sources || []), previous.source, source].filter(Boolean))];
+      const snapshot = { ...previous, account, postId: post.id, noteId: platform === 'xhs' ? post.id : undefined, created_at, source, sources, text: post.text || previous.text || '', date_status: created_at ? 'known' : 'unknown', status: post.state || 'published', example,
+        platforms: { ...previous.platforms, [platform]: { ...previous.platforms?.[platform], id: post.id, title: (post.text || previous.text || '').slice(0, 100) || post.id, text: post.text || previous.text || '', url: post.url || previous.platforms?.[platform]?.url || '', created_at } } };
       db.prepare('INSERT OR REPLACE INTO snapshots (episode_id,taken_at,project) VALUES (?,?,?)').run(eid, captured_at, JSON.stringify(snapshot));
     }
     const old = db.prepare('SELECT * FROM metrics WHERE day=? AND episode_id=? AND platform=?').get(day, eid, platform);
     if (old && Date.parse(old.collected_at) > Date.parse(captured_at)) { skipped++; continue; }
-    const oldExtra = old ? JSON.parse(old.extra || '{}') : {};
-    const extra = { ...oldExtra, source, account, captured_at, precision: post.precision || 'public-reported; exactness unverified', example, field_observed_at: { ...oldExtra.field_observed_at } };
+    const baseline = old || db.prepare('SELECT * FROM metrics WHERE episode_id=? AND platform=? AND julianday(collected_at)<=julianday(?) ORDER BY julianday(collected_at) DESC LIMIT 1').get(eid, platform, captured_at);
+    const oldExtra = baseline ? JSON.parse(baseline.extra || '{}') : {};
+    const extra = { ...oldExtra, source, sources: [...new Set([...(oldExtra.sources || []), oldExtra.source, source].filter(Boolean))], account, captured_at, precision: post.precision || 'public-reported; exactness unverified', example, field_observed_at: { ...oldExtra.field_observed_at } };
     const keys = ['views', 'likes', 'comments', 'favorites', 'shares'];
     const values = keys.map(key => {
       if (post[key] != null) extra.field_observed_at[key] = captured_at;
-      return post[key] ?? old?.[key] ?? null;
+      return post[key] ?? baseline?.[key] ?? null;
     });
     extra.quotes = post.quotes ?? oldExtra.quotes ?? null;
     if (post.quotes != null) extra.field_observed_at.quotes = captured_at;

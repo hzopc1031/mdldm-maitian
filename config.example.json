@@ -85,10 +85,18 @@
     }
   },
   "l1": {
-    "note": "L1 使用 scripts/l1-run.mjs；仅 PeanutPair / TwoPeanuts（ai），近30天；无发布、无定时任务、无飞书。路径由 MAITIAN_HOME / MAITIAN_DB / MAITIAN_CONFIG 控制。",
+    "note": "L1 独立运行，X 默认专用 Chrome 页面采集；--import-x 可选手工 JSON 导入。仅 PeanutPair / TwoPeanuts（ai），无发布、无定时任务、无飞书。",
     "database": "D:\\AIInfra\\maitian\\data\\hub.db",
     "xInbox": "D:\\AIInfra\\maitian\\inbox\\x",
     "reports": "D:\\AIInfra\\maitian\\reports",
-    "login": "node scripts/l1-run.mjs --login-xhs"
+    "login": "node scripts/l1-run.mjs --login-x / --login-xhs（分别运行）",
+    "x": {
+      "chromeProfile": "D:\\AIInfra\\maitian\\chrome-profile-l1-x",
+      "chromePort": 9341
+    },
+    "xhs": {
+      "chromeProfile": "D:\\AIInfra\\maitian\\chrome-profile-l1-xhs",
+      "chromePort": 9340
+    }
   }
 }

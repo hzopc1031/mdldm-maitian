@@ -5,11 +5,15 @@ import net from 'node:net';
 import { spawn } from 'node:child_process';
 import { home } from './l1-config.mjs';
 export const pause = (min = 1800, max = 3200) => new Promise(resolve => setTimeout(resolve, min + Math.random() * (max - min)));
-export function browserSettings(config) {
-  const profile = path.resolve(config.chromeProfile || path.join(home, 'chrome-profile-l1-xhs'));
-  const expected = path.resolve(home, 'chrome-profile-l1-xhs');
-  const port = config.chromePort ?? 9340;
-  if (port !== 9340 || profile.toLowerCase() !== expected.toLowerCase()) throw new Error('L1 仅允许端口 9340 和 MAITIAN_HOME/chrome-profile-l1-xhs 专用 profile');
+export function browserSettings(config, platform = 'xhs') {
+  if (!['x', 'xhs'].includes(platform)) throw new Error('未知 L1 浏览器平台');
+  const settings = config.l1?.[platform] || {};
+  // X 绝不继承旧全局的 9340/profile；小红书保留旧配置兼容。
+  const expected = path.resolve(home, `chrome-profile-l1-${platform}`);
+  const profile = path.resolve(settings.chromeProfile || (platform === 'xhs' ? config.chromeProfile : null) || expected);
+  const expectedPort = platform === 'x' ? 9341 : 9340;
+  const port = settings.chromePort ?? (platform === 'xhs' ? config.chromePort : null) ?? expectedPort;
+  if (port !== expectedPort || profile.toLowerCase() !== expected.toLowerCase()) throw new Error(`L1 ${platform} 仅允许端口 ${expectedPort} 和 ${expected} 专用 profile`);
   const candidates = [config.chromeBinary, process.env.PROGRAMFILES && path.join(process.env.PROGRAMFILES, 'Google/Chrome/Application/chrome.exe'), process.env['PROGRAMFILES(X86)'] && path.join(process.env['PROGRAMFILES(X86)'], 'Google/Chrome/Application/chrome.exe'), process.env.LOCALAPPDATA && path.join(process.env.LOCALAPPDATA, 'Google/Chrome/Application/chrome.exe')].filter(Boolean);
   const binary = candidates.find(file => fs.existsSync(file));
   if (!binary) throw new Error('找不到 Chrome 程序，请配置 chromeBinary');
@@ -22,8 +26,8 @@ async function assertFree(port) {
     server.listen({ host: '127.0.0.1', port, exclusive: true }, () => server.close(resolve));
   });
 }
-export async function withL1Browser(config, fn) {
-  const { profile, port, binary } = browserSettings(config);
+export async function withL1Browser(config, fn, platform = 'xhs') {
+  const { profile, port, binary } = browserSettings(config, platform);
   await assertFree(port);
   fs.mkdirSync(profile, { recursive: true });
   const child = spawn(binary, [`--user-data-dir=${profile}`, `--remote-debugging-port=${port}`, '--remote-debugging-address=127.0.0.1', '--enable-automation', '--no-first-run', '--no-default-browser-check', '--disable-background-mode', 'about:blank'], { stdio: 'ignore', windowsHide: false });
@@ -69,7 +73,7 @@ export async function withL1Browser(config, fn) {
     }
     if (!version) throw new Error('专用 Chrome 启动超时');
     const endpoint = new URL(version.webSocketDebuggerUrl);
-    if (!['127.0.0.1', 'localhost'].includes(endpoint.hostname) || Number(endpoint.port) !== port) throw new Error('调试端点不是预期 loopback');
+    if (endpoint.hostname !== '127.0.0.1' || Number(endpoint.port) !== port || endpoint.protocol !== 'ws:') throw new Error('调试端点不是预期 loopback');
     ws = new WebSocket(endpoint);
     await new Promise((resolve, reject) => {
       const timer = setTimeout(() => reject(new Error('CDP 连接超时')), 5000);
@@ -84,24 +88,42 @@ export async function withL1Browser(config, fn) {
     };
     ws.onclose = () => { for (const item of pending.values()) { clearTimeout(item.timer); item.reject(new Error('专用 Chrome 连接关闭')); } pending.clear(); };
     const command = await send('Browser.getBrowserCommandLine');
-    if (!command.arguments?.includes(`--user-data-dir=${profile}`)) { ws.close(); throw new Error('浏览器 profile 归属校验失败'); }
+    const processes = await send('SystemInfo.getProcessInfo');
+    try { assertBrowserOwner(command.arguments, processes.processInfo, { profile, port }, child.pid); }
+    catch (error) { ws.close(); throw error; }
     verifiedOwner = true;
     const target = await send('Target.createTarget', { url: 'about:blank' });
     session = (await send('Target.attachToTarget', { targetId: target.targetId, flatten: true })).sessionId;
     await send('Page.enable', {}, session);
     const page = {
       async goto(url) {
-        if (!url.startsWith('https://creator.xiaohongshu.com/')) throw new Error('L1 仅允许小红书创作者页面');
+        if (!allowedPage(url, platform)) throw new Error('L1 拒绝非本平台只读页面');
         const result = await send('Page.navigate', { url }, session);
         if (result.errorText) throw new Error(result.errorText);
         await pause(5000, 7000);
       },
-      async evaluate(fn) {
-        const result = await send('Runtime.evaluate', { expression: `(${fn.toString()})()`, returnByValue: true, awaitPromise: true }, session);
+      async evaluate(fn, ...args) {
+        const result = await send('Runtime.evaluate', { expression: `(${fn.toString()})(...${JSON.stringify(args)})`, returnByValue: true, awaitPromise: true }, session);
         if (result.exceptionDetails) throw new Error('页面 DOM 读取失败');
         return result.result.value;
       },
     };
     return await fn(page);
   } finally { process.removeListener('SIGINT', interrupt); process.removeListener('SIGTERM', interrupt); await shutdown(); }
+}
+export function assertBrowserOwner(args, processes, { profile, port }, pid) {
+  if (!Number.isInteger(pid) || !args?.includes(`--user-data-dir=${profile}`) ||
+      !args.includes(`--remote-debugging-port=${port}`) ||
+      !args.includes('--remote-debugging-address=127.0.0.1') ||
+      !processes?.some(p => p.type === 'browser' && p.id === pid)) {
+    throw new Error('浏览器 PID/profile/端口归属校验失败');
+  }
+}
+export function allowedPage(value, platform) {
+  try {
+    const url = new URL(value);
+    if (url.protocol !== 'https:' || url.username || url.password || url.port || url.search || url.hash) return false;
+    if (platform === 'xhs') return url.hostname === 'creator.xiaohongshu.com';
+    return platform === 'x' && url.hostname === 'x.com' && /^(?:\/PeanutPair\/?|\/PeanutPair\/status\/\d+|\/i\/flow\/login)$/i.test(url.pathname);
+  } catch { return false; }
 }
