@@ -2,6 +2,7 @@ import { createInterface } from 'node:readline/promises';
 import { withL1Browser, pause } from './l1-browser.mjs';
 import { visibleIdentity, visibleFans, visibleNoteCards, scrollNotes, nextNotesPage, parseVisibleNumber } from './l1-xhs-dom.mjs';
 import { inWindow, validDay } from './l1-config.mjs';
+import { loginTimeoutMs, waitForVisibleLogin } from './l1-login.mjs';
 const HOME = 'https://creator.xiaohongshu.com/new/home';
 export async function assertTwoPeanuts(page) {
   let identity;
@@ -12,14 +13,23 @@ export async function assertTwoPeanuts(page) {
   }
   if (identity.login || identity.nickname !== 'TwoPeanuts') throw new Error(`停止：期望可见昵称 TwoPeanuts，实际 ${identity.nickname || '暂无/未登录'}；未写入本次小红书数据`);
 }
-export async function loginXhs(config) {
-  if (!process.stdin.isTTY) throw new Error('扫码登录需要交互终端');
+export async function loginXhs(config, { waitLogin = false } = {}) {
+  if (!waitLogin && !process.stdin.isTTY) throw new Error('扫码登录需要交互终端');
+  const timeoutMs = waitLogin ? loginTimeoutMs() : null;
   await withL1Browser(config, async page => {
     await page.goto(HOME);
-    const terminal = createInterface({ input: process.stdin, output: process.stdout });
-    try { await terminal.question('请 Liu 在该窗口扫码登录 TwoPeanuts，不要登录其他号。扫码完成后回车校验并关闭专用 Chrome：'); }
-    finally { terminal.close(); }
-    await page.goto(HOME); await assertTwoPeanuts(page);
+    if (waitLogin) {
+      console.log(`请 Liu 在专用窗口扫码登录 TwoPeanuts；自动轮询可见昵称，无需回车，超时 ${timeoutMs} 毫秒。`);
+      await waitForVisibleLogin(page, visibleIdentity, identity => {
+        if (identity.nickname && identity.nickname !== 'TwoPeanuts') throw new Error(`停止：期望可见昵称 TwoPeanuts，实际 ${identity.nickname}；未采集、未写库`);
+        return !identity.login && identity.nickname === 'TwoPeanuts';
+      }, timeoutMs);
+    } else {
+      const terminal = createInterface({ input: process.stdin, output: process.stdout });
+      try { await terminal.question('请 Liu 在该窗口扫码登录 TwoPeanuts，不要登录其他号。扫码完成后回车校验并关闭专用 Chrome：'); }
+      finally { terminal.close(); }
+      await page.goto(HOME); await assertTwoPeanuts(page);
+    }
     console.log('登录校验成功：TwoPeanuts；随后关闭本次专用 Chrome，登录状态由 Chrome 自行保存在专用 profile。');
   });
 }

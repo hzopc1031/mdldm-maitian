@@ -50,6 +50,27 @@ node scripts/l1-run.mjs --login-xhs
 
 只启动 9340 的专用 Chrome，提示 Liu 登录 TwoPeanuts；回车后返回首页核验可见昵称。成功或失败均关闭本次浏览器，不打开数据库或写日报。两个登录参数都必须单独运行。
 
+### 远程登录：自动轮询，无需回车
+
+Grok Bot 可在非 TTY 后台启动，再截取专用窗口的二维码给 Liu 扫码：
+
+```powershell
+Set-Location D:\AIInfra\maitian
+node scripts/l1-run.mjs --login-xhs --wait-login
+# X 同样支持，校验当前登录账号 @PeanutPair
+node scripts/l1-run.mjs --login-x --wait-login
+```
+
+两条命令分别运行。`--wait-login` 跳过 TTY 检查和回车等待，打开登录/首页后每隔随机 1.8–3.2 秒只读可见 DOM，不刷新二维码页面。小红书可见昵称必须严格等于 `TwoPeanuts`；X 只认当前账号切换器的 `@PeanutPair`（允许省略 @、不区分大小写），不把主页作者当登录账号。发现其他已登录账号立即失败；未登录则继续等待。默认等待最多 10 分钟，最后一次等待不超过剩余时长，可用环境变量覆盖：
+
+```powershell
+$env:L1_LOGIN_TIMEOUT_MS = '900000' # 15 分钟，正整数毫秒
+node scripts/l1-run.mjs --login-xhs --wait-login
+Remove-Item Env:L1_LOGIN_TIMEOUT_MS
+```
+
+校验成功退出 0，账号不符、超时或其他错误退出 1。成功和失败均由现有归属校验与清理流程关闭本次专用 Chrome；小红书仍只用 `chrome-profile-l1-xhs` / `127.0.0.1:9340`，不会关闭日常 Chrome 或 9341 的 X 浏览器。登录过程不打开数据库、不采集、不写日报，不读 cookie、token 或 storage。省略 `--wait-login` 时仍使用原有交互回车模式。
+
 ## 默认采集与日报
 
 ```powershell
@@ -92,6 +113,8 @@ node scripts/import-x-public.mjs inbox/x/x-2026-11-17.json
 L1 仅显式传 --import-x（兼容旧别名 --x-json）时导入，不自动查找 inbox JSON。独立导入脚本省略路径时仍查找当天文件。整体先校验再事务写入；已知窗口外帖子跳过，未知日期保留并标记 unknown（Chrome 新帖发现则必须有可靠时间）。JSON 来源标记 grok-public，quotes 存在 extra，合并规则与页面观测一致。
 
 ## 离线自测
+
+新增登录自测：`node scripts/l1-login-selftest.mjs`。用假页面执行实际身份 DOM 函数和 CLI，覆盖正确/错误账号、超时、关闭及非 TTY 参数分流；不启动真实 Chrome，不连接 9340/9341，不打开任何数据库。
 
 ```powershell
 Set-Location D:\AIInfra\maitian

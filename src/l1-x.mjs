@@ -2,6 +2,7 @@ import fs from 'node:fs';
 import { createInterface } from 'node:readline/promises';
 import { withL1Browser, pause } from './l1-browser.mjs';
 import { dbPath } from './l1-config.mjs';
+import { loginTimeoutMs, waitForVisibleLogin } from './l1-login.mjs';
 import { visibleXIdentity, visibleXFollowers, visibleXPosts, visibleXMetricLabel, scrollXProfile, xNumber, parseXLabel, selectXPosts } from './l1-x-dom.mjs';
 const PROFILE = 'https://x.com/PeanutPair';
 
@@ -16,14 +17,24 @@ export async function assertPeanutPair(page, wait = pause) {
   throw new Error('停止：无法确认可见登录账号为 @PeanutPair；本次 X 未写库');
 }
 
-export async function loginX(config) {
-  if (!process.stdin.isTTY) throw new Error('X 登录需要交互终端');
+export async function loginX(config, { waitLogin = false } = {}) {
+  if (!waitLogin && !process.stdin.isTTY) throw new Error('X 登录需要交互终端');
+  const timeoutMs = waitLogin ? loginTimeoutMs() : null;
   await withL1Browser(config, async page => {
     await page.goto('https://x.com/i/flow/login');
-    const terminal = createInterface({ input: process.stdin, output: process.stdout });
-    try { await terminal.question('请 Liu 在该窗口登录 @PeanutPair，不要登录其他号。完成后回车校验并关闭专用 Chrome：'); }
-    finally { terminal.close(); }
-    await page.goto(PROFILE); await assertPeanutPair(page);
+    if (waitLogin) {
+      console.log(`请 Liu 在专用窗口登录 @PeanutPair；自动轮询当前账号切换器，无需回车，超时 ${timeoutMs} 毫秒。`);
+      await waitForVisibleLogin(page, visibleXIdentity, identity => {
+        if (!identity.handle) return false;
+        if (identity.handle.replace(/^@/, '').toLowerCase() !== 'peanutpair') throw new Error(`停止：可见登录账号 ${identity.handle} 不是 @PeanutPair；未采集、未写库`);
+        return new URL(identity.url).origin === 'https://x.com';
+      }, timeoutMs);
+    } else {
+      const terminal = createInterface({ input: process.stdin, output: process.stdout });
+      try { await terminal.question('请 Liu 在该窗口登录 @PeanutPair，不要登录其他号。完成后回车校验并关闭专用 Chrome：'); }
+      finally { terminal.close(); }
+      await page.goto(PROFILE); await assertPeanutPair(page);
+    }
     console.log('X 登录校验成功：@PeanutPair；随后关闭本次专用 Chrome。');
   }, 'x');
 }

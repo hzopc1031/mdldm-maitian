@@ -3,7 +3,8 @@ import path from 'node:path';
 import { parseArgs } from 'node:util';
 import { home, dbPath, readConfig, beijingDay, validDay } from '../src/l1-config.mjs';
 try {
-  const { values } = parseArgs({ options: { only: { type: 'string' }, date: { type: 'string' }, 'import-x': { type: 'string' }, 'x-json': { type: 'string' }, 'login-x': { type: 'boolean' }, 'login-xhs': { type: 'boolean' }, 'report-dir': { type: 'string' } } });
+  const { values } = parseArgs({ options: { only: { type: 'string' }, date: { type: 'string' }, 'import-x': { type: 'string' }, 'x-json': { type: 'string' }, 'login-x': { type: 'boolean' }, 'login-xhs': { type: 'boolean' }, 'wait-login': { type: 'boolean' }, 'report-dir': { type: 'string' } } });
+  if (values['wait-login'] && !values['login-x'] && !values['login-xhs']) throw new Error('--wait-login 必须与 --login-x 或 --login-xhs 一起使用');
   if (values.only && !['x','xhs'].includes(values.only)) throw new Error('--only 仅允许 x 或 xhs');
   const config = readConfig(), date = validDay(values.date || beijingDay());
   console.log(`L1 DB=${dbPath}；HOME=${home}；日期=${date}`);
@@ -11,13 +12,13 @@ try {
   const input = values['import-x'] || values['x-json'];
   if (values.only === 'xhs' && input) throw new Error('--only xhs 不能导入 X');
   if (values['login-x'] || values['login-xhs']) {
-    if (Object.keys(values).length !== 1) throw new Error('--login-x / --login-xhs 请单独运行');
+    if ((values['login-x'] && values['login-xhs']) || Object.keys(values).some(key => !['login-x', 'login-xhs', 'wait-login'].includes(key))) throw new Error('--login-x / --login-xhs 请单独运行，仅可附加 --wait-login');
     if (values['login-x']) {
       const { loginX } = await import('../src/l1-x.mjs');
-      await loginX(config);
+      await loginX(config, { waitLogin: values['wait-login'] });
     } else {
       const { loginXhs } = await import('../src/l1-xhs.mjs');
-      await loginXhs(config); // 登录命令不打开数据库，也不生成日报。
+      await loginXhs(config, { waitLogin: values['wait-login'] }); // 登录命令不打开数据库，也不生成日报。
     }
   } else {
     if (values.only !== 'xhs') {
