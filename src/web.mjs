@@ -10,25 +10,41 @@ import { initLogin, sessionOk, handleLogin } from './login.mjs';
 const DIR = path.dirname(fileURLToPath(import.meta.url)), ROOT = path.resolve(DIR, '..');
 const W = config.web || { port: 8787, key: '' };
 const send = (res, code, body, type = 'application/json; charset=utf-8', extra = {}) => { res.writeHead(code, { 'content-type': type, 'cache-control': 'no-store', ...extra }); res.end(typeof body === 'string' || Buffer.isBuffer(body) ? body : JSON.stringify(body)); };
-const readPj = (dir) => { try { return JSON.parse(fs.readFileSync(path.join(dir, 'publish.json'), 'utf8')); } catch { return null; } };
-const short = (n) => n.split(/[｜|]/)[0].trim();
+const readPj = (dir) => { if (!dir) return null; try { return JSON.parse(fs.readFileSync(path.join(dir, 'publish.json'), 'utf8')); } catch { return null; } };
+const short = (n) => (n || '').split(/[｜|]/)[0].trim();
 const nickOf = (name, pj) => (pj && pj.nick) || (short(name).split(/[，,？?！!：:。]/)[0].trim() || short(name)).slice(0, 16);
 const latest = db.prepare('SELECT * FROM metrics WHERE episode_id=? AND platform=? ORDER BY day DESC LIMIT 1');
 const actions = [];   // 最近的操作（内存里）
 
-function episodeView(ep, full = false) {
-  const snap = getSnapshot(ep.id), pj = (snap && JSON.parse(snap.project)) || readPj(ep.dir) || { platforms: {} };
+// 无工程目录的 L1 观测不能回退到进程当前目录读取文件。
+export function episodeFile(ep, rel) {
+  if (!ep?.dir || typeof rel !== 'string' || !rel) return null;
+  const root = path.resolve(ep.dir), file = path.resolve(root, rel), relative = path.relative(root, file);
+  if (!relative || relative === '..' || relative.startsWith(`..${path.sep}`) || path.isAbsolute(relative)) return null;
+  try { return fs.statSync(file).isFile() ? file : null; } catch { return null; }
+}
+export function coverFile(ep, key = '4x3') {
+  if (!ep?.dir) return null;
+  const snap = getSnapshot(ep.id), pj = readPj(ep.dir) || (snap && JSON.parse(snap.project));
+  const covers = pj?.covers || {};
+  return episodeFile(ep, covers[key] || Object.values(covers)[0]);
+}
+export function episodeView(ep, full = false) {
+  const snap = getSnapshot(ep.id), pj = (snap && JSON.parse(snap.project)) || readPj(ep.dir) || {};
+  const platforms = pj.platforms || {};
   let views = 0, inter = 0;
   const tasks = getTasks(ep.id).map(t => {
     const m = latest.get(ep.id, t.platform) || null;
     if (m) { views += m.views || 0; inter += (m.likes || 0) + (m.comments || 0) + (m.favorites || 0) + (m.shares || 0); }
-    const p = pj.platforms[t.platform] || {};
+    // 兼容升级前只有 account/postId/text 的 L1 快照。
+    const p = platforms[t.platform] || { title: ep.name, text: pj.text };
     return { platform: t.platform, name: NAMES[t.platform] || t.platform, state: t.state, stateCn: STATE_CN[t.state] || t.state, detail: t.detail || '', url: t.url || '', updatedAt: t.updated_at,
       m: m && { day: m.day, views: m.views, likes: m.likes, comments: m.comments, favorites: m.favorites, shares: m.shares, extra: JSON.parse(m.extra || '{}') },
-      ...(full ? { copy: { title: p.title || p.shortTitle || '', body: p.desc || p.body || p.text || p.description || '', tags: p.tags || p.topics || [], covers: p.covers || [] }, shot: fs.existsSync(path.join(ep.dir, '发布档案', `${t.platform}.jpg`)) } : {}) };
+      ...(full ? { copy: { title: p.title || p.shortTitle || '', body: p.desc || p.body || p.text || p.description || '', tags: p.tags || p.topics || [], covers: p.covers || [] }, shot: !!episodeFile(ep, path.join('发布档案', `${t.platform}.jpg`)) } : {}) };
   });
   const out = { id: ep.id, episode: ep.episode, name: ep.name, short: short(ep.name), nick: nickOf(ep.name, pj), schedule: ep.schedule, createdAt: ep.created_at, dir: ep.dir,
-    campaign: (JSON.stringify(pj.platforms).match(/utm_campaign=([\w-]+)/) || [])[1] || '', covers: Object.keys(pj.covers || {}), durationSec: pj.durationSec || 0, tasks, views, inter };
+    publishedAt: pj.created_at || ep.schedule || null, observedAt: snap?.taken_at || null,
+    campaign: (JSON.stringify(platforms).match(/utm_campaign=([\w-]+)/) || [])[1] || '', covers: Object.keys(pj.covers || {}).filter(k => episodeFile(ep, pj.covers[k])), durationSec: pj.durationSec || 0, tasks, views, inter };
   if (full) {
     out.logs = recentLogs(ep.id, 200);
     out.metrics = db.prepare('SELECT day, platform, views, likes, comments, favorites, shares FROM metrics WHERE episode_id=? ORDER BY day').all(ep.id);
@@ -36,13 +52,13 @@ function episodeView(ep, full = false) {
     // 复盘：已经到了第 1/3/7 天的节点（和飞书卡片同一套算法）
     const t0 = Date.parse(ep.schedule || ep.created_at);
     out.reviews = tasks.some(t => t.state === 'published') ? [1, 3, 7].filter(a => Date.now() >= t0 + a * 864e5 || a === 1).map(a => { try { const r = review(ep, a); return { age: a, partial: Date.now() < t0 + a * 864e5, views: r.cur.views, ints: r.cur.ints, rows: r.cur.rows.map(x => ({ p: x.p, views: x.m.views, inter: x.m.likes + x.m.comments + x.m.favorites + x.m.shares })), prev: r.prev && { nick: r.prev.nick, views: r.prev.views, rows: r.prev.rows.map(x => ({ p: x.p, views: x.m.views })) }, fans: r.fans.sum, conv: r.conv || null }; } catch { return null; } }).filter(Boolean) : [];
-    out.files = ['成片.mp4', '字幕.srt', '发布素材.md', 'publish.json', '发布记录.json'].filter(f => fs.existsSync(path.join(ep.dir, f)));
+    out.files = ['成片.mp4', '字幕.srt', '发布素材.md', 'publish.json', '发布记录.json'].filter(f => episodeFile(ep, f));
   }
   return out;
 }
 
 const ACT = { links: '取链接', mark: '标记', 'login-expired': '登录过期', upload: '上传', fill: '填写', submit: '提交', verify: '核对' };
-function feed(n = 14) {
+export function feed(n = 14) {
   const names = Object.fromEntries(episodes().map(e => [e.id, e.episode])), nicks = Object.fromEntries(episodes().map(e => [e.id, nickOf(e.name, readPj(e.dir))]));
   return db.prepare('SELECT * FROM logs ORDER BY id DESC LIMIT ?').all(n).map(l => {
     let r = l.result || ''; try { const j = JSON.parse(r); r = j.status || j.note || ''; } catch {}
@@ -50,6 +66,19 @@ function feed(n = 14) {
   });
 }
 async function chromeUp() { try { const r = await fetch(`http://127.0.0.1:${config.chromePort || 9333}/json/version`, { signal: AbortSignal.timeout(800) }); return r.ok; } catch { return false; } }
+
+// 纯本地数据读取，可离线验证；浏览器健康检查由 HTTP 层单独执行。
+export function overviewData() {
+  const at = e => Date.parse(e.publishedAt || e.observedAt || e.createdAt) || 0;
+  return {
+    episodes: episodes().map(e => episodeView(e)).sort((a, b) => at(b) - at(a) || a.id.localeCompare(b.id)),
+    site: { days: db.prepare('SELECT * FROM site_daily ORDER BY day').all(), channels: db.prepare('SELECT * FROM site_channels ORDER BY revenue DESC').all(),
+      campaigns: db.prepare('SELECT * FROM site_campaigns ORDER BY reg DESC').all(), campaignsOn: getMeta('siteCampaigns') === 'on' },
+    metrics: db.prepare('SELECT day, episode_id, platform, views FROM metrics ORDER BY day').all(),
+    followers: db.prepare("SELECT day, platform, total, gain, loss, source FROM followers WHERE day >= date('now','localtime','-40 day') ORDER BY day").all(),
+    samples: db.prepare('SELECT ts, episode_id, platform, views FROM samples ORDER BY ts').all(), feed: feed()
+  };
+}
 
 function widgetScript(req, file) {
   let base = `${req.headers['x-forwarded-proto'] || (req.headers['cf-visitor'] ? 'https' : 'http')}://${req.headers.host}`;
@@ -102,7 +131,7 @@ function thumb(f, w) {
   } catch { return null; }
 }
 
-async function handle(req, res) {
+export async function handle(req, res) {
   const u = new URL(req.url, 'http://x');
   // 访问控制：前面挂了 Cloudflare Access（邮箱验证码）就认它的登录凭证；否则用口令（第一次带 ?key= 进来，之后用 cookie）
   if (/^\/static\/icon-\d+\.png$/.test(u.pathname)) return send(res, 200, fs.readFileSync(path.join(DIR, 'web', path.basename(u.pathname))), 'image/png', { 'cache-control': 'max-age=86400' });   // 主屏幕图标不用登录
@@ -110,7 +139,7 @@ async function handle(req, res) {
     if (!W.widgetToken || !tokenEq(u.searchParams.get('t'), W.widgetToken)) return send(res, 401, '');
     let f = null;
     if (u.searchParams.get('k') === 'avatar') f = W.avatar && path.resolve(ROOT, W.avatar);
-    else { const ep = latestPublished(); const pj = ep && (readPj(ep.dir) || {}); const rel = pj && ((pj.covers || {})[u.searchParams.get('k') || '4x3'] || Object.values(pj.covers || {})[0]); f = rel && path.join(ep.dir, rel); }
+    else f = coverFile(latestPublished(), u.searchParams.get('k') || '4x3');
     if (!f || !fs.existsSync(f)) return send(res, 404, '');
     const t = thumb(f, Math.min(800, +u.searchParams.get('w') || 400));
     return send(res, 200, fs.readFileSync(t || f), t ? 'image/jpeg' : 'image/png', { 'cache-control': 'max-age=1800' });
@@ -137,22 +166,15 @@ async function handle(req, res) {
   }
   if (u.pathname === '/api/overview') {
     return send(res, 200, { name: config.name || '麦田', siteOn: !!SITE, siteName: SITE ? SITE.name : '', siteLogo: !!(SITE && config.site.logo), board: config.board && config.board.url, driver: config.driver,
-      episodes: episodes().sort((a, b) => (b.episode || 0) - (a.episode || 0)).map(e => episodeView(e)), actions: actions.slice(-8).reverse(),
-      site: { days: db.prepare('SELECT * FROM site_daily ORDER BY day').all(), channels: db.prepare('SELECT * FROM site_channels ORDER BY revenue DESC').all(),
-        campaigns: db.prepare('SELECT * FROM site_campaigns ORDER BY reg DESC').all(), campaignsOn: getMeta('siteCampaigns') === 'on' },
-      metrics: db.prepare('SELECT day, episode_id, platform, views FROM metrics ORDER BY day').all(),
-      followers: db.prepare("SELECT day, platform, total, gain, loss, source FROM followers WHERE day >= date('now','localtime','-40 day') ORDER BY day").all(),
-      samples: db.prepare('SELECT ts, episode_id, platform, views FROM samples ORDER BY ts').all(),
-      feed: feed(), health: { nas: fs.existsSync(config.rootPath), chrome: await chromeUp(), metricsDay: getMeta('metricsDay') || '', doctorDay: getMeta('doctorDay') || '', login: Object.fromEntries((config.keepAlive || []).map(k => [k, getMeta(`login:${k}`) || '']) ) }, now: new Date().toISOString() });
+      ...overviewData(), actions: actions.slice(-8).reverse(),
+      health: { nas: fs.existsSync(config.rootPath), chrome: await chromeUp(), metricsDay: getMeta('metricsDay') || '', doctorDay: getMeta('doctorDay') || '', login: Object.fromEntries((config.keepAlive || []).map(k => [k, getMeta(`login:${k}`) || '']) ) }, now: new Date().toISOString() });
   }
   if (u.pathname === '/site-logo') { const f = SITE && config.site.logo && path.resolve(ROOT, config.site.logo); return f && fs.existsSync(f) ? send(res, 200, fs.readFileSync(f), /\.svg$/.test(f) ? 'image/svg+xml' : /\.jpe?g$/.test(f) ? 'image/jpeg' : 'image/png', { 'cache-control': 'max-age=3600' }) : send(res, 404, ''); }
   if (u.pathname === '/api/episode') { const ep = getEpisode(u.searchParams.get('id')); return ep ? send(res, 200, episodeView(ep, true)) : send(res, 404, { error: '没有这一期' }); }
   if (u.pathname === '/cover' || u.pathname === '/shot') {
     const ep = getEpisode(u.searchParams.get('id')); if (!ep) return send(res, 404, '');
-    let f;
-    if (u.pathname === '/shot') f = path.join(ep.dir, '发布档案', `${(u.searchParams.get('p') || '').replace(/\W/g, '')}.jpg`);
-    else { const pj = readPj(ep.dir) || {}; const rel = (pj.covers || {})[u.searchParams.get('k') || '4x3'] || Object.values(pj.covers || {})[0]; f = rel && path.join(ep.dir, rel); }
-    if (!f || !f.startsWith(ep.dir) || !fs.existsSync(f)) return send(res, 404, '');
+    const f = u.pathname === '/shot' ? episodeFile(ep, path.join('发布档案', `${(u.searchParams.get('p') || '').replace(/\W/g, '')}.jpg`)) : coverFile(ep, u.searchParams.get('k') || '4x3');
+    if (!f) return send(res, 404, '');
     // 远程打开时原图（每张 ~700KB）太慢：默认给缩略图（长边 ≤ w，默认 720，JPEG），缓存在 data/thumbs；?full=1 给原图
     if (!u.searchParams.get('full') && !/\.svg$/.test(f)) { const t = thumb(f, Math.min(1600, +u.searchParams.get('w') || 720)); if (t) return send(res, 200, fs.readFileSync(t), 'image/jpeg', { 'cache-control': 'max-age=3600' }); }
     return send(res, 200, fs.readFileSync(f), /\.png$/.test(f) ? 'image/png' : /\.svg$/.test(f) ? 'image/svg+xml' : 'image/jpeg', { 'cache-control': 'max-age=300' });

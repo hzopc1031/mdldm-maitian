@@ -38,6 +38,7 @@ const sum = (arr, k) => arr.reduce((s, r) => s + (r[k] || 0), 0);
 const inter = (m) => m ? (m.likes || 0) + (m.comments || 0) + (m.favorites || 0) + (m.shares || 0) : 0;
 const task = (e, p) => e && e.tasks.find(t => t.platform === p);
 const M = (e, p) => (task(e, p) || {}).m || null;
+const timeOf = e => e.publishedAt || e.schedule || e.observedAt || e.createdAt;
 
 // —— 粉丝 ——
 const latest = (p) => { const d = Object.keys(F[p] || {}).sort(); return d.length ? F[p][d[d.length - 1]] : null; };
@@ -110,17 +111,17 @@ function insights(cur, ref) {
 }
 
 function heroHTML(cur, prev) {
-  const now = Date.now(), at = cur.schedule ? Date.parse(cur.schedule) : null;
+  const now = Date.now(), at = Date.parse(timeOf(cur)) || null;
   const pubN = cur.tasks.filter(t => t.state === 'published').length, sch = cur.tasks.filter(t => t.state === 'scheduled').length, todo = cur.tasks.filter(t => ['awaiting_user', 'filled'].includes(t.state)).length, bad = cur.tasks.filter(t => ['failed', 'not_logged_in'].includes(t.state)).length;
   const plan = cur.tasks.filter(t => t.state === 'planned').length;
   const st = bad ? `${bad} 个平台异常` : todo ? `${todo} 个平台等你点发布` : plan === cur.tasks.filter(t => t.state !== 'skipped').length ? `${plan} 个平台，还没开跑` : plan ? `${plan} 个平台还没开跑` : sch ? `${pubN} 已发布 · ${sch} 定时` : '全部已发布';
   const eb = plan && !pubN && !sch ? '分发计划' : bad || todo ? '发布中' : at && at > now ? '即将发布' : at && now - at < 48 * 3600e3 ? '刚发布' : '最新发布';
   const cmp = prev ? `<div class="cmp">上一期「${esc(prev.nick)}」目前 <b style="color:var(--t1)">${fmt(prev.views)}</b> 播放${cur.views > 1 ? `，这一期是它的 ${pct(cur.views, prev.views)}` : '，这一期发出后在这里对比'}<div class="tr"><i style="width:${Math.min(100, cur.views / Math.max(prev.views, 1) * 100).toFixed(1)}%"></i></div></div>` : '';
   const [t1, t2] = cur.name.split(/[｜|]/).map(x => x.trim()), k = cur.covers.includes('3x4') ? '3x4' : cur.covers[0], src = `/cover?id=${encodeURIComponent(cur.id)}&k=${k}`;
-  const tabs = SL.length > 1 ? `<div class="ctabs">${SL.map((e, i) => { const d = e.schedule ? new Date(e.schedule) : null, dd = d ? Math.round((new Date(d).setHours(0, 0, 0, 0) - new Date().setHours(0, 0, 0, 0)) / 864e5) : null;
+  const tabs = SL.length > 1 ? `<div class="ctabs">${SL.map((e, i) => { const d = timeOf(e) ? new Date(timeOf(e)) : null, dd = d ? Math.round((new Date(d).setHours(0, 0, 0, 0) - new Date().setHours(0, 0, 0, 0)) / 864e5) : null;
       const day = dd == null ? '' : dd === 0 ? '今天' : dd === 1 ? '明天' : dd === -1 ? '昨天' : `${d.getMonth() + 1}/${d.getDate()}`, done = e.tasks.every(t => t.state === 'published' || t.state === 'skipped'), warn = e.tasks.some(t => ['failed', 'not_logged_in', 'awaiting_user', 'filled'].includes(t.state));
       return `<button class="ct${i === HI ? ' on' : ''}" data-i="${i}" title="${esc(e.nick)}：${esc(e.name)}"><i class="${done ? 'ok' : warn ? 'warn' : 'wait'}"></i>${day} ${d ? pad(d.getHours()) + ':' + pad(d.getMinutes()) : esc(e.nick)}${i === HI ? '<u></u>' : ''}</button>`; }).join('')}</div>` : '';
-  return `${cur.covers.length ? `<div class="amb" style="background-image:url('${src}')"></div><div class="stage"><div class="float"><a class="cv" href="/p#/ep/${encodeURIComponent(cur.id)}"><i class="edge"></i><img src="${src}" alt=""><i class="glare"></i><span class="tagz a">第 ${esc(cur.episode)} 期</span><span class="tagz b"><i></i>${pubN}/${cur.tasks.length} 平台已发布</span></a></div></div>` : ''}
+  return `${cur.covers.length ? `<div class="amb" style="background-image:url('${src}')"></div><div class="stage"><div class="float"><a class="cv" href="/p#/ep/${encodeURIComponent(cur.id)}"><i class="edge"></i><img src="${src}" alt=""><i class="glare"></i><span class="tagz a">${cur.episode == null ? '已导入作品' : `第 ${esc(cur.episode)} 期`}</span><span class="tagz b"><i></i>${pubN}/${cur.tasks.length} 平台已发布</span></a></div></div>` : ''}
       <div class="inf">${tabs}<div class="eyebrow">${eb}</div><h2>${esc(t1)}</h2>${t2 ? `<div class="subt">${esc(t2)}</div>` : ''}<div class="when"><span id="cd"></span><span style="color:var(--t3)">· ${esc(st)}</span></div>
         <div class="plats">${PL.map(p => task(cur, p)).filter(Boolean).map(t => { const u = safeUrl(t.url), on = t.state === 'published', cls = on ? 'on' : ['awaiting_user', 'filled'].includes(t.state) ? 'todo' : ['failed', 'not_logged_in'].includes(t.state) ? 'bad' : ''; return `<${u ? `a href="${u}" target="_blank" rel="noopener"` : 'div'} class="pl ${cls}" data-tip="${PN[t.platform]}  ${esc(t.stateCn)}${t.detail ? '\n' + esc(t.detail) : ''}">${logo(t.platform)}<div><b>${PN[t.platform]}</b><span>${on ? (t.m ? (SL.length > 1 ? kfmt(t.m.views) : fmt(t.m.views) + ' 播放') : '已发布') : esc(t.stateCn)}</span></div></${u ? 'a' : 'div'}>`; }).join('')}</div>
         <div class="nums"><div><div class="lab">全平台播放</div><div class="val">${cur.views > 1 ? fmt(cur.views) : '–'}</div></div><div><div class="lab">互动（赞评藏转）</div><div class="val">${cur.views > 1 ? fmt(cur.inter) : '–'}</div></div><div><div class="lab">互动率</div><div class="val">${cur.views > 1 ? pct(cur.inter, cur.views, 1) : '–'}</div></div></div>${cmp}</div>`;
@@ -142,7 +143,7 @@ function render() {
   const eps = O.episodes, days = O.site.days, h = O.health, now = Date.now();
   F = {}; for (const r of O.followers) (F[r.platform] ||= {})[r.day] = r.total;
   // 大卡轮播：没全部发完的期 + 48 小时内刚发的期，按发布时间排；默认停在「最近刚发的」，没有就停在「最快要发的」
-  const at = (e) => e.schedule ? Date.parse(e.schedule) : Date.parse(e.createdAt);
+  const at = (e) => Date.parse(timeOf(e));
   const open = (e) => e.tasks.some(t => t.state !== 'published' && t.state !== 'skipped');
   SL = eps.filter(e => open(e) || (at(e) <= now && now - at(e) < 48 * 3600e3)).sort((a, b) => at(a) - at(b));
   if (!SL.length && eps[0]) SL = [eps[0]];
@@ -205,7 +206,7 @@ function tick() {
   c.innerHTML = `<small>${n.getMonth() + 1}/${n.getDate()} 周${'日一二三四五六'[n.getDay()]}</small>${pad(n.getHours())}:${pad(n.getMinutes())}`;
   const cd = $('#cd'), cur = O && (SL[HI] || O.episodes[0]);
   if (cd && cur) {
-    const s = cur.schedule ? Math.round((new Date(cur.schedule) - n) / 1000) : null, d = cur.schedule && new Date(cur.schedule), at = d ? `${d.getMonth() + 1}/${d.getDate()} ${pad(d.getHours())}:${pad(d.getMinutes())}` : '';
+    const time = cur.publishedAt || cur.schedule, s = time ? Math.round((new Date(time) - n) / 1000) : null, d = time && new Date(time), at = d ? `${d.getMonth() + 1}/${d.getDate()} ${pad(d.getHours())}:${pad(d.getMinutes())}` : '';
     cd.textContent = s == null ? '' : s > 0 ? (s > 86400 ? `定时 ${at}，还有 ${Math.floor(s / 86400)} 天 ${Math.floor(s % 86400 / 3600)} 小时` : `定时 ${at}，还有 ${Math.floor(s / 3600)}:${pad(Math.floor(s % 3600 / 60))}:${pad(s % 60)}`) : -s < 3600 ? `${at} 发布，已发 ${Math.floor(-s / 60)} 分钟` : -s < 172800 ? `${at} 发布，已发 ${Math.floor(-s / 3600)} 小时` : `${at} 发布，已发 ${Math.floor(-s / 86400)} 天`;
   }
 }

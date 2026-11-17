@@ -21,7 +21,8 @@ export function saveObservation({ platform, account, captured_at, source, posts,
         .run(eid, platform, post.state || 'published', 'L1 只读观测', post.url || null, captured_at);
       const previous = oldSnapshot ? JSON.parse(oldSnapshot.project) : {};
       const created_at = post.created_at || previous.created_at || null;
-      const snapshot = { ...previous, account, postId: post.id, noteId: platform === 'xhs' ? post.id : undefined, created_at, source, text: post.text, date_status: created_at ? 'known' : 'unknown', status: post.state || 'published', example };
+      const snapshot = { ...previous, account, postId: post.id, noteId: platform === 'xhs' ? post.id : undefined, created_at, source, text: post.text, date_status: created_at ? 'known' : 'unknown', status: post.state || 'published', example,
+        platforms: { ...previous.platforms, [platform]: { ...previous.platforms?.[platform], id: post.id, title: post.text.slice(0, 100) || post.id, text: post.text, url: post.url || previous.platforms?.[platform]?.url || '', created_at } } };
       db.prepare('INSERT OR REPLACE INTO snapshots (episode_id,taken_at,project) VALUES (?,?,?)').run(eid, captured_at, JSON.stringify(snapshot));
     }
     const old = db.prepare('SELECT * FROM metrics WHERE day=? AND episode_id=? AND platform=?').get(day, eid, platform);

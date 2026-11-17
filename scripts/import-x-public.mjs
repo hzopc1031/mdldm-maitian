@@ -21,13 +21,13 @@ export function validateX(input) {
   if (errors.length) throw new Error(`导入 0，跳过 0，校验错误 ${errors.length}：\n${errors.join('\n')}`);
   return input;
 }
-export async function importX(file, { date } = {}) {
+export async function importX(file, { date, example = false } = {}) {
   readConfig();
   const input = validateX(JSON.parse(fs.readFileSync(file, 'utf8').replace(/^\uFEFF/, '')));
   const day = validDay(date || beijingDay(input.captured_at));
   const posts = input.posts.filter(p => inWindow(p.created_at, day) !== false);
   const store = await import('../src/l1-store.mjs'); // 所有校验通过后才打开库。
-  const result = store.transaction(() => store.saveObservation({ platform: 'x', account: input.account, captured_at: new Date(input.captured_at).toISOString(), source: 'grok-public', followers: input.followers, example: input.posts.some(p => /示例|假数据/.test(p.text)), posts: posts.map(p => ({ ...p, comments: p.replies, shares: p.reposts, favorites: p.bookmarks })) }));
+  const result = store.transaction(() => store.saveObservation({ platform: 'x', account: input.account, captured_at: new Date(input.captured_at).toISOString(), source: 'grok-public', followers: input.followers, example: input.example === true || example === true, posts: posts.map(p => ({ ...p, comments: p.replies, shares: p.reposts, favorites: p.bookmarks })) }));
   result.skipped += input.posts.length - posts.length;
   console.log(`X PeanutPair：导入 ${result.imported}，跳过 ${result.skipped}，校验错误 0；DB=${dbPath}`);
   return result;

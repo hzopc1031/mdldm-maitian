@@ -23,11 +23,13 @@ const dayStr = (d) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDa
 const gainN = (p, n) => { const t = dayStr(new Date()), b = dayStr(new Date(Date.now() - n * 864e5)); return F[p] && F[p][t] != null && F[p][b] != null ? F[p][t] - F[p][b] : null; };
 const latest = (p) => { const d = Object.keys(F[p] || {}).sort(); return d.length ? { day: d[d.length - 1], total: F[p][d[d.length - 1]], n: d.length } : null; };
 const M = (e, p) => ((e.tasks.find(t => t.platform === p) || {}).m) || null;
+const timeOf = e => e.publishedAt || e.schedule || e.observedAt || e.createdAt;
+const episodeLabel = e => e.episode == null ? '已导入作品' : `第 ${esc(e.episode)} 期`;
 const busy = () => O.actions.some(a => !a.done);
 const abtn = (a, text, cls = '', cf = '') => `<button class="btn ${cls}" ${busy() && a.type !== 'mark' ? 'disabled' : ''} data-act='${esc(JSON.stringify(a))}' data-confirm="${esc(cf)}">${text}</button>`;
 const tile = (lab, val, sub = '') => `<div class="panel tile"><div class="lab">${lab}</div><div class="val">${val}</div><div class="dl">${sub}</div></div>`;
 const sec = (t, note = '') => `<div class="sec"><h2>${t}</h2><span class="note">${note}</span></div>`;
-const epc = (x) => `<span class="epc">${x.covers.length ? `<img src="/cover?id=${encodeURIComponent(x.id)}&k=${x.covers.includes('4x3') ? '4x3' : x.covers[0]}" alt="">` : '<i></i>'}<span><b>${esc(x.nick)}</b><small>第 ${esc(x.episode)} 期 · ${when(x.schedule || x.createdAt).split(' ')[0]}</small></span></span>`;
+const epc = (x) => `<span class="epc">${x.covers.length ? `<img src="/cover?id=${encodeURIComponent(x.id)}&k=${x.covers.includes('4x3') ? '4x3' : x.covers[0]}" alt="">` : '<i></i>'}<span><b>${esc(x.nick)}</b><small>${episodeLabel(x)} · ${when(timeOf(x)).split(' ')[0]}</small></span></span>`;
 const samplesOf = (e) => PL.map(p => ({ name: PN[p], pts: O.samples.filter(s => s.episode_id === e.id && s.platform === p && s.views != null).map(s => [Date.parse(s.ts + ':00Z'), s.views]) })).filter(s => s.pts.length).sort((a, b) => b.pts[b.pts.length - 1][1] - a.pts[a.pts.length - 1][1]);
 let after = () => {};
 
@@ -77,19 +79,19 @@ function vCalendar() {
   const DAY = 864e5, now = new Date(), dow = (now.getDay() + 6) % 7, mon0 = new Date(now.getFullYear(), now.getMonth(), now.getDate() - dow - 7);
   const days = Array.from({ length: 28 }, (_, i) => new Date(mon0.getTime() + i * DAY)), key = (d) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
   const st = (e) => { const s = e.tasks.map(t => t.state); return s.some(x => ['failed', 'not_logged_in'].includes(x)) ? ['bad', '异常'] : s.some(x => ['awaiting_user', 'filled'].includes(x)) ? ['todo', '等你点发布'] : s.every(x => x === 'published' || x === 'skipped') ? ['ok', '已发布'] : s.some(x => x === 'planned') ? ['plan', '计划中'] : ['sch', '已定时']; };
-  const by = {}; for (const e of O.episodes) { const d = new Date(e.schedule || e.createdAt); (by[key(d)] ||= []).push(e); }
+  const by = {}; for (const e of O.episodes) { const d = new Date(timeOf(e)); (by[key(d)] ||= []).push(e); }
   const today = key(now), upcoming = O.episodes.filter(e => e.schedule && Date.parse(e.schedule) > Date.now()).length;
   return `<div class="h1">日历</div><p class="lead">上周到未来两周的分发安排。${upcoming ? `接下来还有 <b>${upcoming}</b> 期要发。` : '接下来没有排期，可以用 <code>hub plan</code> 把下一期放进来。'}</p>
   <div class="panel cal"><div class="cal-h">${'一二三四五六日'.split('').map(x => `<div>周${x}</div>`).join('')}</div><div class="cal-g">${days.map(d => { const k = key(d), list = by[k] || [];
     return `<div class="cal-d${k === today ? ' today' : ''}${d < new Date(now.getFullYear(), now.getMonth(), now.getDate()) ? ' past' : ''}"><div class="cal-n">${d.getDate() === 1 || d === days[0] ? `${d.getMonth() + 1}/` : ''}${d.getDate()}${k === today ? '<span>今天</span>' : ''}</div>
-      ${list.map(e => { const [c, t] = st(e), at = new Date(e.schedule || e.createdAt); return `<a class="cal-e ${c}" href="#/ep/${encodeURIComponent(e.id)}" title="${esc(e.name)}">${e.covers.length ? `<img src="/cover?id=${encodeURIComponent(e.id)}&k=${e.covers.includes('3x4') ? '3x4' : e.covers[0]}" alt="">` : ''}<div><b>${esc(e.nick)}</b><span><i></i>${pad(at.getHours())}:${pad(at.getMinutes())} · ${t}${e.views > 1 ? ' · ' + fmt(e.views) : ''}</span></div></a>`; }).join('')}</div>`; }).join('')}</div></div>
+      ${list.map(e => { const [c, t] = st(e), at = new Date(timeOf(e)); return `<a class="cal-e ${c}" href="#/ep/${encodeURIComponent(e.id)}" title="${esc(e.name)}">${e.covers.length ? `<img src="/cover?id=${encodeURIComponent(e.id)}&k=${e.covers.includes('3x4') ? '3x4' : e.covers[0]}" alt="">` : ''}<div><b>${esc(e.nick)}</b><span><i></i>${pad(at.getHours())}:${pad(at.getMinutes())} · ${t}${e.views > 1 ? ' · ' + fmt(e.views) : ''}</span></div></a>`; }).join('')}</div>`; }).join('')}</div></div>
   <div class="cal-lg"><span><i class="ok"></i>已发布</span><span><i class="sch"></i>已定时</span><span><i class="todo"></i>等你点发布</span><span><i class="plan"></i>计划中</span><span><i class="bad"></i>异常</span></div>`;
 }
 function vArchive() {
   if (!O.episodes.length) return `<div class="h1">档案</div><p class="lead">还没有登记的期数。</p>`;
   return `<div class="h1">档案</div><p class="lead">每一期发了什么、发到哪、数据怎么样。</p>
   <div class="wall">${O.episodes.map(e => `<a class="panel poster" href="#/ep/${encodeURIComponent(e.id)}"><div class="im" style="${e.covers.length ? `background-image:url('/cover?id=${encodeURIComponent(e.id)}&k=${e.covers.includes('4x3') ? '4x3' : e.covers[0]}')` : ''}"></div>
-    <div class="tx"><div class="ep">第 ${esc(e.episode)} 期 · ${when(e.schedule || e.createdAt)}</div><h3>${esc(e.name)}</h3><div class="mt"><span class="gpill">${e.views > 1 ? fmt(e.views) + ' 播放' : '还没有播放数据'}</span><span class="gpill">${e.tasks.filter(t => t.state === 'published').length}/${e.tasks.length} 已发布</span></div></div></a>`).join('')}</div>`;
+    <div class="tx"><div class="ep">${episodeLabel(e)} · ${when(timeOf(e))}</div><h3>${esc(e.name)}</h3><div class="mt"><span class="gpill">${e.views > 1 ? fmt(e.views) + ' 播放' : '还没有播放数据'}</span><span class="gpill">${e.tasks.filter(t => t.state === 'published').length}/${e.tasks.length} 已发布</span></div></div></a>`).join('')}</div>`;
 }
 
 async function vEpisode(id) {
@@ -98,9 +100,9 @@ async function vEpisode(id) {
   after = () => { const el = $('#c-line'); if (el) drawLines(el, samplesOf(e)); };
   return `<a class="back" href="#/archive">‹ 档案</a>
   <div class="panel ephero">${e.covers.length ? `<img src="/cover?id=${encodeURIComponent(e.id)}&k=${e.covers.includes('4x3') ? '4x3' : e.covers[0]}" alt="">` : '<div></div>'}
-    <div><div class="eyebrow">第 ${esc(e.episode)} 期</div><div class="h1" style="margin:6px 0">${esc(t1)}</div>${t2 ? `<p class="lead" style="margin:0 0 14px">${esc(t2)}</p>` : ''}
+    <div><div class="eyebrow">${episodeLabel(e)}</div><div class="h1" style="margin:6px 0">${esc(t1)}</div>${t2 ? `<p class="lead" style="margin:0 0 14px">${esc(t2)}</p>` : ''}
       <div style="display:flex;gap:34px;flex-wrap:wrap;margin:6px 0 16px"><div><div class="lab" style="font-size:12px;color:var(--t3)">全平台播放</div><div class="val">${e.views > 1 ? fmt(e.views) : '–'}</div></div><div><div style="font-size:12px;color:var(--t3)">互动</div><div class="val">${e.views > 1 ? fmt(e.inter) : '–'}</div></div><div><div style="font-size:12px;color:var(--t3)">互动率</div><div class="val">${e.views > 1 ? pct(e.inter, e.views, 1) : '–'}</div></div><div><div style="font-size:12px;color:var(--t3)">已发布</div><div class="val">${e.tasks.filter(t => t.state === 'published').length}/${e.tasks.length}</div></div></div>
-      <dl class="kv"><dt>发布时间</dt><dd>${e.schedule ? when(e.schedule) : '立即发布'}</dd>${e.durationSec ? `<dt>时长</dt><dd>${Math.floor(e.durationSec / 60)} 分 ${Math.round(e.durationSec % 60)} 秒</dd>` : ''}${e.campaign ? `<dt>链接标记</dt><dd>${esc(e.campaign)}</dd>` : ''}<dt>工程里有</dt><dd>${e.files.map(esc).join('、') || '读不到工程目录'}</dd></dl>
+      <dl class="kv"><dt>发布时间</dt><dd>${e.publishedAt || e.schedule ? when(e.publishedAt || e.schedule) : e.episode == null ? '暂无' : '立即发布'}</dd>${e.durationSec ? `<dt>时长</dt><dd>${Math.floor(e.durationSec / 60)} 分 ${Math.round(e.durationSec % 60)} 秒</dd>` : ''}${e.campaign ? `<dt>链接标记</dt><dd>${esc(e.campaign)}</dd>` : ''}<dt>工程里有</dt><dd>${e.files.map(esc).join('、') || '读不到工程目录'}</dd></dl>
       <div class="btns" style="margin-top:16px">${abtn({ type: 'sync', id: e.id }, '取链接、对状态', 'pri')}${abtn({ type: 'metrics', id: e.id }, '采这一期的流量')}</div></div></div>
   ${todo.length ? `${sec('等你点发布')}<div class="panel">${todo.map(t => `<div class="prow">${logo(t.platform)}<span class="n" style="width:auto;margin-right:auto">${esc(PN[t.platform] || t.name)}<span style="color:var(--t3);margin-left:10px;font-size:12px">${esc(t.detail)}</span></span>${abtn({ type: 'mark', id: e.id, platform: t.platform, state: 'published' }, '我已发布', '', `确认「${t.name}」已经发出去了？`)}</div>`).join('')}</div>` : ''}
   ${sec('各平台')}
