@@ -16,6 +16,11 @@ const key = 'offline-test-key', widgetToken = 'offline-widget-token';
 process.env.MAITIAN_HOME = folder;
 process.env.MAITIAN_DB = path.join(folder, 'hub.db');
 process.env.MAITIAN_CONFIG = path.join(folder, 'config.json');
+process.env.MAITIAN_LOCAL_SKILLS = path.join(folder, 'skills');
+for (const name of ['xhs','wechat']) {
+  const dir = path.join(process.env.MAITIAN_LOCAL_SKILLS, `${name === 'xhs' ? 'xhs' : 'wechat'}-publish`, 'scripts');
+  fs.mkdirSync(dir, {recursive:true}); fs.writeFileSync(path.join(dir, `${name}.mjs`), "// offline mock opts['keep-browser']");
+}
 fs.writeFileSync(process.env.MAITIAN_CONFIG, JSON.stringify({ web: { key, widgetToken }, keepAlive: ['channels'] }));
 // 跑真实 CLI 的成功/失败退出路径；替换全部采集器和报告写入，禁止浏览器/旧 hub 模块。
 const loader = path.join(folder, 'cli-mock.mjs');
@@ -69,7 +74,7 @@ function request(route, { action, auth = true, headers = {}, raw } = {}) {
       method: action !== undefined || raw !== undefined ? 'POST' : 'GET',
       headers: { ...(auth ? { 'x-maitian-key': key } : {}), 'content-type': 'application/json', ...headers } }, res => {
       let body = ''; res.setEncoding('utf8'); res.on('data', data => body += data);
-      res.on('end', () => resolve({ code: res.statusCode, body, json: () => JSON.parse(body) }));
+      res.on('end', () => resolve({ code: res.statusCode, headers:res.headers, body, json: () => JSON.parse(body) }));
     }); req.on('error', reject); req.end(raw ?? (action === undefined ? undefined : JSON.stringify(action)));
   });
 }
@@ -130,6 +135,30 @@ try {
   assert.equal(db.prepare('SELECT value FROM meta WHERE key=?').get('login:channels').value, 'ok');
   assert.equal(redactL1('token=secret key=secret Cookie: secret').includes('secret'), false);
 
+  // 新发布准备 API：执行真实 HTTP 路由，子进程全部替身；不运行第三方 skill。
+  assert.equal((await request('/api/prep', {auth:false})).code,401);
+  const createX = await request('/api/prep', {action:{type:'create',input:{platform:'x',content:'offline draft only',test:true}}});
+  assert.equal(createX.code,200); const prepId = createX.json().record.id;
+  const job = (await request('/api/prep/job?id=' + prepId)).json(); assert.equal(job.submit,false);
+  const intent = await request('/api/prep/x?id=' + prepId); assert.equal(intent.code,303);
+  assert.match(intent.headers.location,/^https:\/\/twitter.com\/intent\/tweet\?text=/);
+  assert.equal((await request('/api/prep', {action:{type:'submit',id:prepId}})).code,400);
+  assert.equal((await request('/api/prep', {action:{type:'execute',id:prepId}})).code,400);
+  const beforeGate = children.length;
+  for (const type of ['doctor','sync']) assert.equal((await post({type,platform:'x',...(type === 'sync' ? {id:'no-episode'} : {})})).code,409);
+  assert.equal(children.length,beforeGate);
+  const draft = await request('/api/prep',{action:{type:'create',input:{platform:'wechat',title:'offline test',content:'mock only'}}});
+  const draftId = draft.json().record.id;
+  assert.equal((await request('/api/prep',{action:{type:'execute',id:draftId}})).code,400);
+  assert.equal(children.length,beforeGate);
+  assert.equal((await request('/api/prep',{action:{type:'check',id:draftId}})).code,200);
+  assert.match(children.at(-1).args[0],/wechat\.mjs$/); assert.equal(children.at(-1).args[1],'check');
+  assert.equal((await post({type:'collect',platform:'x'})).code,409);
+  children.at(-1).child.stdout.emit('data',JSON.stringify({ok:true,offline:true})); children.at(-1).child.emit('close',0);
+  assert.equal((await request('/api/prep')).json().records.find(r=>r.id===draftId).state,'checked');
+  assert.equal((await request('/api/prep',{action:{type:'create',input:{platform:'x',content:'bad',submit:true}}})).code,400);
+  assert.equal((await request('/api/prep',{action:{type:'create',input:{platform:'x',content:'bad'}},headers:{origin:'https://evil.test'}})).code,403);
+
   // 执行真实页面模板，核验空数据、系统控制和持久化失败记录均可渲染。
   const elements = new Map();
   const element = key => { if (!elements.has(key)) elements.set(key, { innerHTML: '', style: {}, append() {} }); return elements.get(key); };
@@ -138,6 +167,7 @@ try {
     fetch() { return new Promise(() => {}); }, setInterval() {}, clearInterval() {}, setTimeout() {}, addEventListener() {}, scrollTo() {} });
   vm.runInContext(fs.readFileSync(path.join(root, 'src/web/mt.js'), 'utf8'), context);
   vm.runInContext(fs.readFileSync(path.join(root, 'src/web/pages.html'), 'utf8').match(/<script>([\s\S]*?)<\/script>/)[1], context);
+  vm.runInContext(fs.readFileSync(path.join(root, 'src/web/publish-prep.js'), 'utf8'), context);
   context.input = (await request('/api/overview')).json();
   vm.runInContext('O = input; F = {};', context);
   const html = vm.runInContext('vSystem()', context);
@@ -147,7 +177,8 @@ try {
   assert.match(html, /手动操作/); assert.match(html, /最近动态/); assert.match(html, /平台登录与校验/);
   assert.ok(html.indexOf('手动操作') < html.indexOf('平台登录与校验'));
   for (const capability of ['采流量', '采粉丝']) for (const name of ['X', '小红书', '公众号']) assert.ok(html.includes(`${capability} · ${name}`));
-  for (const label of ['体检', '取链接', '同步知识站数据']) assert.ok(html.includes(`<button class="btn" disabled>${label}（未适配）</button>`));
+  assert.ok(html.includes('<button class="btn" disabled>同步知识站数据（未适配）</button>'));
+  assert.match(html, /准备发布/); assert.match(html, /blocked by policy/);
   assert.match(html, /同时读取流量和粉丝/); assert.match(html, /自动保活、定时体检、定时采集和自动日报发送均未启用/);
   // 每个真实可执行入口都通过 L1 白名单；未适配入口没有动作属性。
   const uiActions = [...html.matchAll(/data-act='([^']+)'/g)].map(m => JSON.parse(m[1].replaceAll('&quot;', '"')));
@@ -158,6 +189,11 @@ try {
   assert.equal((vm.runInContext('vSystem()', context).match(/disabled data-act=/g) || []).length, 12);
   assert.doesNotMatch(html, /七个平台|开机自启|视频号登录保活/);
   assert.match(vm.runInContext('vTraffic()', context), /登录与采集状态/);
+  context.prepData = (await request('/api/prep')).json();
+  vm.runInContext('api = async () => prepData; location.hash = "#/prepare";',context);
+  const prepHtml = await vm.runInContext('vPrepare()',context);
+  assert.match(prepHtml,/生成准备任务/); assert.match(prepHtml,/打开 X 文字草稿/); assert.match(prepHtml,/保存公众号草稿/);
+  assert.match(prepHtml,/disabled/); assert.doesNotMatch(prepHtml,/data-prep="submit"/);
   assert.equal(overviewData().episodes.length, 0);
   console.log('L1 WEB PASS: 3 平台 CLI 参数、HTTP 鉴权/互斥/校验、非零退出/spawn error、持久化/脱敏、页面模板。');
   console.log('仅临时配置/数据库和 loopback HTTP；未启动/连接 Chrome，未读真实配置/凭据，未调用旧 hub。');

@@ -7,12 +7,17 @@ export const L1_PLATFORMS = ['x', 'xhs', 'wechat'];
 export const L1_PORTS = { x: 9341, xhs: 9340, wechat: 9342 };
 export function planL1Action(action) {
   if (!action || typeof action !== 'object' || Array.isArray(action) ||
-      !['login', 'collect', 'status'].includes(action.type) || !L1_PLATFORMS.includes(action.platform)) {
+      !['login', 'collect', 'status', 'doctor', 'sync'].includes(action.type) || !L1_PLATFORMS.includes(action.platform)) {
     throw new Error('请选择 L1 平台和登录 / 采集 / 状态操作');
   }
-  const keys = action.type === 'collect' ? ['type', 'platform', 'date'] : ['type', 'platform'];
+  const keys = action.type === 'collect' ? ['type', 'platform', 'date'] : action.type === 'sync' ? ['type', 'platform', 'id'] : ['type', 'platform'];
   if (Object.keys(action).some(key => !keys.includes(key))) throw new Error('操作包含不支持的参数');
   if (action.type === 'status') return null;
+  if (action.type === 'sync') {
+    if (typeof action.id !== 'string' || !action.id || action.id.length > 200) throw new Error('请选择作品');
+    return ['--platform', action.platform, '--episode', action.id];
+  }
+  if (action.type === 'doctor') return ['--platform', action.platform];
   return action.type === 'login' ? [`--login-${action.platform}`, '--wait-login']
     : ['--only', action.platform, '--date', validDay(action.date ?? beijingDay())];
 }
@@ -31,7 +36,7 @@ export function launchL1(action, { root, env = process.env, spawnChild = spawn, 
   const argv = planL1Action(action);
   if (!argv) throw new Error('状态读取不应启动子进程');
   const rec = { type: action.type, platform: action.platform,
-    label: `${action.type === 'login' ? '登录校验' : '采集'} · ${action.platform}`,
+    label: `${({ login: '登录校验', collect: '采集', doctor: '可见身份体检', sync: '按作品取链接' })[action.type]} · ${action.platform}`,
     startedAt: new Date().toISOString(), done: false, ok: null, tail: '' };
   let output = '', finished = false;
   const finish = (ok, error, code = null) => {
@@ -45,7 +50,7 @@ export function launchL1(action, { root, env = process.env, spawnChild = spawn, 
   };
   try {
     save({ ...rec });
-    const child = spawnChild(process.execPath, [path.join(root, 'scripts', 'l1-run.mjs'), ...argv],
+    const child = spawnChild(process.execPath, [path.join(root, 'scripts', ['doctor', 'sync'].includes(action.type) ? 'l1-inspect.mjs' : 'l1-run.mjs'), ...argv],
       { cwd: root, env: { ...env, HUB_NO_WEB: '1' }, shell: false, windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'] });
     // 整段保留到结束后再脱敏，避免凭据在两个 data chunk 之间被拆开。
     const onData = data => { output += data; };

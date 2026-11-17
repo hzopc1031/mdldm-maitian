@@ -201,6 +201,7 @@ try {
   const board = vm.createContext({ URLSearchParams, location: { search: '' }, innerWidth: 1000,
     document: { body: element('body'), hidden: true, querySelector: element, addEventListener() {} },
     setInterval() {}, setTimeout() {}, fetch() { return new Promise(() => {}); }, matchMedia() { return { matches: true }; }, addEventListener() {}, window: { addEventListener() {} } });
+  vm.runInContext(fs.readFileSync(path.join(root, 'src/web/health.js'), 'utf8'), board);
   vm.runInContext(fs.readFileSync(path.join(root, 'src/web/board.html'), 'utf8').match(/<script>([\s\S]*?)<\/script>/)[1], board);
   board.input = overviewData();
   vm.runInContext("O = { ...input, health: { login: {} }, actions: [] }; draw = () => {}; render();", board);

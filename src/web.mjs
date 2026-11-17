@@ -9,6 +9,7 @@ import { initLogin, sessionOk, handleLogin } from './login.mjs';
 import { L1_PLATFORMS, L1_PORTS, planL1Action, launchL1, redactL1 } from './l1-web.mjs';
 import { home } from './l1-config.mjs';
 import { authPage, cleanTarget } from './web-auth.mjs';
+import { createPrepService, BROWSER_BLOCK } from './publish-prep.mjs';
 
 const DIR = path.dirname(fileURLToPath(import.meta.url)), ROOT = path.resolve(DIR, '..');
 const W = config.web || { port: 8787, key: '' };
@@ -18,6 +19,7 @@ const short = (n) => (n || '').split(/[｜|]/)[0].trim();
 const nickOf = (name, pj) => (pj && pj.nick) || (short(name).split(/[，,？?！!：:。]/)[0].trim() || short(name)).slice(0, 16);
 const latest = db.prepare('SELECT * FROM metrics WHERE episode_id=? AND platform=? ORDER BY day DESC LIMIT 1');
 const actions = [];   // 最近的操作（内存里）
+const prep = createPrepService({ db, config, home, root: ROOT, secrets: [W.key, W.widgetToken] });
 
 // 无工程目录的 L1 观测不能回退到进程当前目录读取文件。
 export function episodeFile(ep, rel) {
@@ -195,9 +197,37 @@ export async function handle(req, res) {
   if (u.pathname === '/api/overview') {
     return send(res, 200, { name: config.name || '麦田', siteOn: !!SITE, siteName: SITE ? SITE.name : '', siteLogo: !!(SITE && config.site.logo), board: config.board && config.board.url, driver: config.driver,
       ...overviewData(), actions: actions.slice(-8).reverse(),
-      health: { mode: 'l1', daemon: false, platforms: l1Status() }, now: new Date().toISOString() });
+      health: { mode: 'l1', daemon: false, platforms: l1Status() }, publishPrep: prep.publicCapabilities(), now: new Date().toISOString() });
   }
   if (u.pathname === '/api/l1/status' && req.method === 'GET') return send(res, 200, { platforms: l1Status(), actions: actions.slice(-8).reverse() });
+  if (u.pathname === '/api/prep' && req.method === 'GET') return send(res, 200, { capabilities: prep.publicCapabilities(), records: prep.list() });
+  if (u.pathname === '/api/prep/x' && req.method === 'GET') {
+    try {
+      const r = prep.get(u.searchParams.get('id'));
+      if (r.platform !== 'x') throw new Error('仅支持 X');
+      const job = JSON.parse(fs.readFileSync(prep.jobFile(r.id), 'utf8'));
+      return send(res, 303, '', 'text/plain', { location: `https://twitter.com/intent/tweet?text=${encodeURIComponent(job.content)}`, 'referrer-policy': 'no-referrer' });
+    } catch { return send(res, 400, { error: 'X 准备任务不存在' }); }
+  }
+  if (u.pathname === '/api/prep/job' && req.method === 'GET') {
+    try { return send(res, 200, fs.readFileSync(prep.jobFile(u.searchParams.get('id'))), 'application/json; charset=utf-8', { 'content-disposition': 'attachment; filename="job.json"' }); }
+    catch { return send(res, 404, { error: '准备任务不存在' }); }
+  }
+  if (u.pathname === '/api/prep' && req.method === 'POST') {
+    if (!['127.0.0.1', '::1', '::ffff:127.0.0.1'].includes(req.socket.remoteAddress)) return send(res, 403, { error: '仅允许本机操作' });
+    if (!W.key) return send(res, 503, { error: '请先由用户配置网页口令' });
+    if (req.headers.origin && req.headers.origin !== `http://${req.headers.host}`) return send(res, 403, { error: '请求来源不符' });
+    let body = '';
+    for await (const chunk of req) { body += chunk; if (Buffer.byteLength(body) > 131072) return send(res, 413, { error: '请求过大' }); }
+    try {
+      const a = JSON.parse(body);
+      if (!a || Object.keys(a).some(k => !['type', 'input', 'id'].includes(k))) throw new Error('操作字段不对');
+      if (actions.some(a => !a.done) || prep.busy()) return send(res, 409, { error: '另一个操作还在运行' });
+      const record = a.type === 'create' ? prep.create(a.input) : ['check', 'execute'].includes(a.type) ? prep.start(a.id, a.type) : null;
+      if (!record) throw new Error('不支持此操作；没有最终发布入口');
+      return send(res, 200, { ok: true, record });
+    } catch (e) { return send(res, 400, { error: redactL1(e.message, [W.key, W.widgetToken]) }); }
+  }
   if (u.pathname === '/site-logo') { const f = SITE && config.site.logo && path.resolve(ROOT, config.site.logo); return f && fs.existsSync(f) ? send(res, 200, fs.readFileSync(f), /\.svg$/.test(f) ? 'image/svg+xml' : /\.jpe?g$/.test(f) ? 'image/jpeg' : 'image/png', { 'cache-control': 'max-age=3600' }) : send(res, 404, ''); }
   if (u.pathname === '/api/episode') { const ep = getEpisode(u.searchParams.get('id')); return ep ? send(res, 200, episodeView(ep, true)) : send(res, 404, { error: '没有这一期' }); }
   if (u.pathname === '/cover' || u.pathname === '/shot') {
@@ -219,7 +249,8 @@ export async function handle(req, res) {
       let a; try { a = JSON.parse(body); } catch { return send(res, 400, { error: '请求格式不对' }); }
       try { planL1Action(a); } catch (error) { return send(res, 400, { error: error.message }); }
       if (a.type === 'status') return send(res, 200, l1Status()[a.platform]);
-      if (actions.some(x => !x.done)) return send(res, 409, { error: '上一个 L1 操作还在跑，等它结束' });
+      if (['doctor', 'sync'].includes(a.type) && config.publishPrep?.browserExecution !== true) return send(res, 409, { error: BROWSER_BLOCK });
+      if (actions.some(x => !x.done) || prep.busy()) return send(res, 409, { error: '上一个 L1 操作还在跑，等它结束' });
       const rec = launchL1(a, { root: ROOT, secrets: [W.key, W.widgetToken],
         save: record => db.prepare('INSERT OR REPLACE INTO meta (key,value) VALUES (?,?)').run(`l1:web:${a.platform}`, JSON.stringify(record)) });
       actions.push(rec);
