@@ -119,14 +119,28 @@ async function vEpisode(id) {
 }
 
 function vSystem() {
-  const h = O.health;
-  return `<div class="h1">系统</div><p class="lead">L1 手动登录和采集。登录时由用户在本次打开的专用窗口完成扫码或验证；网页会等待结果，完成后关闭该窗口。</p>
+  const h = O.health, platforms = ['x', 'xhs', 'wechat'];
+  const wholeRound = capability => platforms.map(platform => abtn({ type: 'collect', platform }, `${capability} · ${PN[platform]}`, '', `${PN[platform]} 的流量和粉丝共用一次整轮采集，将同时读取可见数据并更新本地日报。缺失指标不保证更新，可能需要你在专用窗口完成登录。继续？`)).join('');
+  const unavailable = label => `<button class="btn" disabled>${label}（未适配）</button>`;
+  return `<div class="h1">系统</div><p class="lead">手动操作与最近动态。平台登录和校验位于下方附加区域。</p>
+  <div class="grid g4">${tile('守护进程', '未启用', '当前仅手动操作')}${tile('工程目录', '本地数据', 'L1 不使用原版 NAS 工程流程')}${tile('专用浏览器', '按需打开', '不探测现有浏览器的登录状态')}${tile('平台登录', '未实时检查', '最近成功记录不代表当前仍在线')}</div>
+  ${sec('手动操作', '同一时间只跑一个')}
+  <div class="panel system-manual">
+    <div class="system-op"><div><h3>体检</h3><p class="note">原版用于检查平台登录。L1 尚无全平台只检查入口，可在下方逐平台登录 / 校验。</p></div><div class="btns">${unavailable('体检')}</div></div>
+    <div class="system-op"><div><h3>取链接</h3><p class="note">原版按期取链接并核对发布状态。L1 尚无按期核对能力；合并采集发现作品链接不等于完成此操作。</p></div><div class="btns">${unavailable('取链接')}</div></div>
+    <div class="system-op"><div><h3>采流量</h3><p class="note">选择平台执行整轮采集，同时读取流量和粉丝。当前不支持只采流量。</p></div><div class="btns">${wholeRound('采流量')}</div></div>
+    <div class="system-op"><div><h3>采粉丝</h3><p class="note">与采流量共用平台整轮采集；可见数据才会更新，缺项不能视为已采到。当前不支持只采粉丝。</p></div><div class="btns">${wholeRound('采粉丝')}</div></div>
+    <div class="system-op"><div><h3>同步知识站数据</h3><p class="note">L1 尚未接入知识站 / 看板同步能力，此入口暂不可执行。</p></div><div class="btns">${unavailable('同步知识站数据')}</div></div>
+  </div>
+  <p class="note">目前仅支持 X、小红书、公众号的合并采集。其他原版平台尚未适配 L1。自动保活、定时体检、定时采集和自动日报发送均未启用。</p>
+  ${sec('最近动态')}<div class="panel">${O.feed.map(f => `<div class="fd"><span class="tm">${when(f.ts).split(' ')[1]}</span><span class="ep">${f.nick ? esc(f.nick) : ''}</span><span>${esc(f.platform)}</span><span class="rs">${esc(f.action)}${f.result ? ' · ' + esc(f.result) : ''}</span></div>`).join('') || '<div class="empty" style="height:60px">还没有动态</div>'}</div>
+  ${sec('平台登录与校验', '附加功能')}
+  <p class="note">登录时由你在本次打开的专用窗口完成扫码或验证；网页等待结果，完成后关闭该窗口。“采集数据”同样执行平台整轮采集。</p>
   <div class="grid g3">${Object.entries(h?.platforms || {}).map(([platform, s]) => `<div class="panel"><h3>${logo(platform)} ${esc(PN[platform])}</h3><p>${esc(s.account)}</p><p>${s.state === 'running' ? '操作进行中' : '当前空闲'}</p><p class="note">${esc(s.login)}</p><div class="btns">${abtn({ type: 'login', platform }, '登录 / 校验', 'pri')}${abtn({ type: 'collect', platform }, '采集数据')}</div><p class="note">${s.last ? `最近${s.last.type === 'login' ? '登录校验' : '采集'}：${s.last.done ? s.last.ok ? '成功' : '失败' : '未确认结束'} · ${esc(when(s.last.endedAt || s.last.startedAt))}` : '暂无操作记录'}</p>${s.last?.error ? `<div class="copy">${esc(s.last.error)}</div>` : ''}</div>`).join('')}</div>
   ${sec('操作记录', '同一时间只跑一个；失败后可重新登录或采集')}
   <div class="panel">
     ${O.actions.length ? `<div style="margin-top:14px">${O.actions.map(a => `<div class="prow"><span class="st-chip ${a.done ? (a.ok ? 'published' : 'failed') : 'scheduled'}"><i>${a.done ? (a.ok ? '✓' : '✕') : '…'}</i>${a.done ? (a.ok ? '完成' : '出错') : '进行中'}</span><span>${esc(a.label)}</span><span class="d">${ago(a.startedAt)}</span></div>${a.done && !a.ok ? `<div class="copy">${esc(a.tail)}</div>` : ''}`).join('')}</div>` : ''}</div>
-  <p class="note">当前为手动采集模式；未启用自动保活、全平台体检或自动日报发送。日报由 Grok Bot 读取本地文件。</p>
-  ${sec('最近动态')}<div class="panel">${O.feed.map(f => `<div class="fd"><span class="tm">${when(f.ts).split(' ')[1]}</span><span class="ep">${f.nick ? esc(f.nick) : ''}</span><span>${esc(f.platform)}</span><span class="rs">${esc(f.action)}${f.result ? ' · ' + esc(f.result) : ''}</span></div>`).join('') || '<div class="empty" style="height:60px">还没有动态</div>'}</div>`;
+  <p class="note">日报保存在本地文件，网页操作不依赖 Bot。发布插件接入尚待完成。</p>`;
 }
 
 async function render() {

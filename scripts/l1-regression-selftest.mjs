@@ -117,6 +117,7 @@ try {
     setInterval() {}, setTimeout() {}, fetch() { return new Promise(() => {}); },
     matchMedia() { return { matches: true }; }, addEventListener() {}, window: { addEventListener() {} }
   });
+  vm.runInContext(fs.readFileSync(path.join(root, 'src/web/health.js'), 'utf8'), context);
   vm.runInContext(board, context);
   context.input = overview;
   vm.runInContext("O = { ...input, health: { login: {} }, actions: [] }; draw = () => {}; render();", context);

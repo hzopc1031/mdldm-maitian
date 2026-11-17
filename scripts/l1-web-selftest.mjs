@@ -142,9 +142,21 @@ try {
   vm.runInContext('O = input; F = {};', context);
   const html = vm.runInContext('vSystem()', context);
   assert.match(html, /PeanutPair/); assert.match(html, /TwoPeanuts/); assert.match(html, /ENOENT/);
-  assert.equal((html.match(/登录 \/ 校验/g) || []).length, 3);
-  assert.equal((html.match(/采集数据/g) || []).length, 3);
-  assert.doesNotMatch(html, /七个平台|开机自启|视频号登录保活|type.*doctor/);
+  assert.equal((html.match(/>登录 \/ 校验<\/button>/g) || []).length, 3);
+  assert.equal((html.match(/>采集数据<\/button>/g) || []).length, 3);
+  assert.match(html, /手动操作/); assert.match(html, /最近动态/); assert.match(html, /平台登录与校验/);
+  assert.ok(html.indexOf('手动操作') < html.indexOf('平台登录与校验'));
+  for (const capability of ['采流量', '采粉丝']) for (const name of ['X', '小红书', '公众号']) assert.ok(html.includes(`${capability} · ${name}`));
+  for (const label of ['体检', '取链接', '同步知识站数据']) assert.ok(html.includes(`<button class="btn" disabled>${label}（未适配）</button>`));
+  assert.match(html, /同时读取流量和粉丝/); assert.match(html, /自动保活、定时体检、定时采集和自动日报发送均未启用/);
+  // 每个真实可执行入口都通过 L1 白名单；未适配入口没有动作属性。
+  const uiActions = [...html.matchAll(/data-act='([^']+)'/g)].map(m => JSON.parse(m[1].replaceAll('&quot;', '"')));
+  assert.equal(uiActions.length, 12);
+  for (const action of uiActions) assert.ok(planL1Action(action));
+  context.input.actions = [{ done: false }];
+  vm.runInContext('O = input;', context);
+  assert.equal((vm.runInContext('vSystem()', context).match(/disabled data-act=/g) || []).length, 12);
+  assert.doesNotMatch(html, /七个平台|开机自启|视频号登录保活/);
   assert.match(vm.runInContext('vTraffic()', context), /登录与采集状态/);
   assert.equal(overviewData().episodes.length, 0);
   console.log('L1 WEB PASS: 3 平台 CLI 参数、HTTP 鉴权/互斥/校验、非零退出/spawn error、持久化/脱敏、页面模板。');

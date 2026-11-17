@@ -81,7 +81,10 @@ try {
     await evaluate(`document.querySelector('#key').value=${JSON.stringify(secret)};document.querySelector('form').requestSubmit();true`);
     await waitFor("!!document.querySelector('.h1') && document.querySelector('.h1').textContent==='系统'");
     assert.equal(await evaluate('location.pathname+location.hash'), '/p#/system');
-    assert.equal(await evaluate("document.querySelectorAll('[data-act]').length"), 6);
+    assert.equal(await evaluate("document.querySelectorAll('[data-act]').length"), 12);
+    for (const label of ['手动操作', '采流量', '采粉丝', '体检（未适配）', '取链接（未适配）', '同步知识站数据（未适配）', '最近动态', '平台登录与校验']) {
+      assert.equal(await evaluate(`document.body.innerText.includes(${JSON.stringify(label)})`), true);
+    }
     assert.equal(await evaluate("document.body.innerText.includes('未实时检查')"), true);
     assert.equal(await evaluate("document.body.innerText.includes('今日已检')"), false);
     evidence.systemShot = await shot('authed-system');
