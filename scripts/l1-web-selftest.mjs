@@ -21,7 +21,7 @@ for (const name of ['xhs','wechat']) {
   const dir = path.join(process.env.MAITIAN_LOCAL_SKILLS, `${name === 'xhs' ? 'xhs' : 'wechat'}-publish`, 'scripts');
   fs.mkdirSync(dir, {recursive:true}); fs.writeFileSync(path.join(dir, `${name}.mjs`), "// offline mock opts['keep-browser']");
 }
-fs.writeFileSync(process.env.MAITIAN_CONFIG, JSON.stringify({ xHandle:'PeanutPair', l1:{xhs:{account:'TwoPeanuts'}}, web: { key, widgetToken }, keepAlive: ['channels'] }));
+fs.writeFileSync(process.env.MAITIAN_CONFIG, JSON.stringify({ xHandle:'PeanutPair', publishPrep:{browserExecution:false}, l1:{x:{browserExecution:false},wechat:{browserExecution:false},xhs:{account:'TwoPeanuts',browserExecution:false}}, web: { key, widgetToken }, keepAlive: ['channels'] }));
 // 跑真实 CLI 的成功/失败退出路径；替换全部采集器和报告写入，禁止浏览器/旧 hub 模块。
 const loader = path.join(folder, 'cli-mock.mjs');
 fs.writeFileSync(loader, `import { registerHooks } from 'node:module';
@@ -178,7 +178,7 @@ try {
   assert.ok(html.indexOf('手动操作') < html.indexOf('平台登录与校验'));
   for (const capability of ['采流量', '采粉丝']) for (const name of ['X', '小红书', '公众号']) assert.ok(html.includes(`${capability} · ${name}`));
   assert.ok(html.includes('<button class="btn" disabled>同步知识站数据（未适配）</button>'));
-  assert.match(html, /准备发布/); assert.match(html, /平台浏览器操作尚未验收/);
+  assert.match(html, /准备发布/); assert.match(html, /小红书填好后由你核对发布/);
   assert.match(html, /同时读取流量和粉丝/); assert.match(html, /自动保活、定时体检、定时采集和自动日报发送均未启用/);
   // 每个真实可执行入口都通过 L1 白名单；未适配入口没有动作属性。
   const uiActions = [...html.matchAll(/data-act='([^']+)'/g)].map(m => JSON.parse(m[1].replaceAll('&quot;', '"')));
@@ -194,6 +194,15 @@ try {
   const prepHtml = await vm.runInContext('vPrepare()',context);
   assert.match(prepHtml,/生成准备任务/); assert.match(prepHtml,/打开 X 文字草稿/); assert.match(prepHtml,/保存公众号草稿/);
   assert.match(prepHtml,/disabled/); assert.doesNotMatch(prepHtml,/data-prep="submit"/);
+  assert.match(prepHtml,/实际发表日期/);assert.match(prepHtml,/data-prep="links"/);
+  const {config:mutableConfig}=await import('../src/feishu.mjs');
+  mutableConfig.l1.x.browserExecution=true;
+  const preparationId=context.prepData.records.find(r=>r.platform==='x').id;
+  assert.equal((await post({type:'sync',platform:'x',preparationId,date:'2026-11-17'})).code,200);
+  const linkChild=children.at(-1);
+  assert.match(linkChild.args[0],/l1-inspect\.mjs$/);
+  assert.deepEqual(linkChild.args.slice(1),['--platform','x','--preparation',preparationId,'--date','2026-11-17']);
+  linkChild.child.emit('close',0);
   assert.equal(overviewData().episodes.length, 0);
   console.log('L1 WEB PASS: 3 平台 CLI 参数、HTTP 鉴权/互斥/校验、非零退出/spawn error、持久化/脱敏、页面模板。');
   console.log('仅临时配置/数据库和 loopback HTTP；未启动/连接 Chrome，未读真实配置/凭据，未调用旧 hub。');

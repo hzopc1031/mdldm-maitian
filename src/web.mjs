@@ -78,7 +78,7 @@ export function l1Status() {
     const active = actions.find(a => a.platform === platform && !a.done);
     let account; try { account=l1Account(config,platform); if(platform==='x')account='@'+account; } catch { account='尚未配置预期可见账号'; }
     return [platform, { account,
-      port: L1_PORTS[platform], profile: path.join(home, `chrome-profile-l1-${platform}`),
+      port: L1_PORTS[platform], profile: path.resolve(config.l1?.[platform]?.chromeProfile || (platform==='xhs'?config.chromeProfile:null) || path.join(home, `chrome-profile-l1-${platform}`)),
       state: active ? 'running' : 'idle', last: active || last,
       login: '未实时检查；登录和采集均校验可见身份，完成后关闭本次专用窗口' }];
   }));
@@ -255,7 +255,7 @@ export async function handle(req, res) {
       let a; try { a = JSON.parse(body); } catch { return send(res, 400, { error: '请求格式不对' }); }
       try { planL1Action(a); } catch (error) { return send(res, 400, { error: error.message }); }
       if (a.type === 'status') return send(res, 200, l1Status()[a.platform]);
-      if (['doctor', 'sync'].includes(a.type) && config.publishPrep?.browserExecution !== true) return send(res, 409, { error: BROWSER_BLOCK });
+      if (['doctor', 'sync'].includes(a.type) && config.l1?.[a.platform]?.browserExecution === false) return send(res, 409, { error: BROWSER_BLOCK });
       if (actions.some(x => !x.done) || prep.busy()) return send(res, 409, { error: '上一个 L1 操作还在跑，等它结束' });
       const rec = launchL1(a, { root: ROOT, secrets: [W.key, W.widgetToken],
         save: record => db.prepare('INSERT OR REPLACE INTO meta (key,value) VALUES (?,?)').run(`l1:web:${a.platform}`, JSON.stringify(record)) });

@@ -15,7 +15,7 @@ process.env.MAITIAN_CONFIG=path.join(folder,'config.json');
 fs.writeFileSync(process.env.MAITIAN_CONFIG,'{}');
 const {config}=await import('../src/feishu.mjs');
 config.web={key:'isolated-render-fixture'}; // Public test fixture, never read the user's configuration.
-config.xHandle='PeanutPair';config.l1={xhs:{account:'TwoPeanuts'}};
+config.xHandle='PeanutPair';config.publishPrep={browserExecution:false};config.l1={x:{browserExecution:false},xhs:{account:'TwoPeanuts',browserExecution:false},wechat:{browserExecution:false}};
 const {db,saveObservation}=await import('../src/l1-store.mjs');
 saveObservation({platform:'x',account:'PeanutPair',captured_at:new Date().toISOString(),source:'isolated-test',followers:42,example:true,
   posts:[{id:'123',text:'隔离浏览器验收样本（假数据）',url:'https://x.com/PeanutPair/status/123',created_at:new Date().toISOString(),views:100}]});
@@ -40,12 +40,12 @@ function browserChecks(test, image) {
       if(login) {login.value='isolated-render-fixture';document.querySelector('form').requestSubmit();return;}
       await wait(()=>test==='home'?!!document.querySelector('.hero'):!!document.querySelector('.h1'));
       check(!document.body.innerText.includes('出错了：'),'no render error');
-      const expected=test==='home'?'/':test==='system'?'/p#/system':'/p#/prepare';
+      const expected=test==='home'?'/':test.endsWith('system')?'/p#/system':'/p#/prepare';
       check(location.pathname+location.hash===expected,'POST preserved route');
       if(!sessionStorage.getItem('qa-reloaded')){sessionStorage.setItem('qa-reloaded','1');location.reload();return;}
-      if(test==='system') {
+      if(test.endsWith('system')) {
         for(const label of ['手动操作','采流量','采粉丝','体检','取链接','最近动态','平台登录与校验'])check(document.body.innerText.includes(label),label);
-        check(document.querySelectorAll('[data-act]').length===12,'manual actions retained');
+        check(document.querySelectorAll('[data-act]').length===(test==='enabled-system'?15:12),'manual actions retained');
         const a=document.querySelector('a[href="#/prepare"]');check(!!a,'prepare link');a.click();
         await wait(()=>!!document.querySelector('#prep-form'));check(location.hash==='#/prepare','button navigation');
         location.hash='#/system';await wait(()=>document.querySelector('.h1')?.textContent==='系统');
@@ -96,9 +96,11 @@ const binary=process.env.CHROME_PATH || [
 const evidence={at:new Date().toISOString(),mode:'Chrome headless CLI; isolated real handler and test data; no platform access or remote debugging',results:[]};
 try {
   if(!binary)throw new Error('Chrome not found');
-  for(const test of ['unauth','invalid','home','system','prepare','prepare-flow']) {
+  for(const test of ['unauth','invalid','home','system','prepare','prepare-flow','enabled-system']) {
     current=test;report=null;
-    const target=test==='home'?'/':test==='unauth'||test==='system'?'/p#/system':'/p#/prepare';
+    config.publishPrep.browserExecution=test==='enabled-system';
+    for(const p of ['x','xhs','wechat'])config.l1[p].browserExecution=test==='enabled-system';
+    const target=test==='home'?'/':test==='unauth'||test.endsWith('system')?'/p#/system':'/p#/prepare';
     const shot=path.join(output,test+'.png');
     const child=spawn(binary,['--headless=new','--incognito','--no-first-run','--no-default-browser-check','--disable-extensions','--disable-background-networking',
       '--window-size=1440,1800','--user-data-dir='+path.join(folder,'profile-'+test),'--screenshot='+shot,'--dump-dom','--timeout=18000',

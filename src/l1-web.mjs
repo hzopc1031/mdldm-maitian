@@ -10,10 +10,15 @@ export function planL1Action(action) {
       !['login', 'collect', 'status', 'doctor', 'sync'].includes(action.type) || !L1_PLATFORMS.includes(action.platform)) {
     throw new Error('请选择 L1 平台和登录 / 采集 / 状态操作');
   }
-  const keys = action.type === 'collect' ? ['type', 'platform', 'date'] : action.type === 'sync' ? ['type', 'platform', 'id'] : ['type', 'platform'];
+  const keys = action.type === 'collect' ? ['type', 'platform', 'date'] : action.type === 'sync' ? ['type', 'platform', 'id','preparationId','date'] : ['type', 'platform'];
   if (Object.keys(action).some(key => !keys.includes(key))) throw new Error('操作包含不支持的参数');
   if (action.type === 'status') return null;
   if (action.type === 'sync') {
+    if(action.preparationId) {
+      if(action.id || !/^[a-f0-9-]{36}$/.test(action.preparationId) || !action.date)throw new Error('准备记录取链接需唯一记录ID和明确发表日期');
+      return ['--platform',action.platform,'--preparation',action.preparationId,'--date',validDay(action.date)];
+    }
+    if(action.date)throw new Error('作品ID取链接不接受日期覆盖');
     if (typeof action.id !== 'string' || !action.id || action.id.length > 200) throw new Error('请选择作品');
     return ['--platform', action.platform, '--episode', action.id];
   }

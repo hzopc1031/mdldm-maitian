@@ -5,8 +5,10 @@ import os from 'node:os';
 import path from 'node:path';
 import { EventEmitter } from 'node:events';
 import { DatabaseSync } from 'node:sqlite';
-import { normalizePrep, prepCommand, acceptPrepResult, createPrepService } from '../src/publish-prep.mjs';
-import { selectPublishedLink, inspectPlatform } from '../src/l1-inspect.mjs';
+import { normalizePrep, prepCommand, acceptPrepResult, createPrepService, prepCapabilities } from '../src/publish-prep.mjs';
+import { selectPublishedLink, inspectPlatform, publishedTarget, writePublishedLink,preparationTarget,writePreparationLink } from '../src/l1-inspect.mjs';
+import {browserProxyArgs} from '../src/l1-browser.mjs';
+import {planL1Action} from '../src/l1-web.mjs';
 
 globalThis.fetch = () => { throw new Error('offline: no network'); };
 globalThis.WebSocket = class { constructor() { throw new Error('offline: no browser'); } };
@@ -21,7 +23,7 @@ db.exec('CREATE TABLE tasks (episode_id TEXT,platform TEXT,state TEXT,detail TEX
 db.prepare('INSERT INTO tasks VALUES (?,?,?,?,?,?)').run('ep','xhs','planned','','','');
 let child, lastArgs, spawnCount = 0;
 const spawnChild = (binary,args,opts) => { spawnCount++; lastArgs = args; assert.equal(opts.shell,false); child = new EventEmitter(); child.stdout = new EventEmitter(); child.stderr = new EventEmitter(); return child; };
-const opts = { db, home: folder, root:folder, env: { MAITIAN_LOCAL_SKILLS:folder }, config:{}, spawnChild };
+const opts = { db, home: folder, root:folder, env: { MAITIAN_LOCAL_SKILLS:folder }, config:{publishPrep:{browserExecution:false}}, spawnChild };
 const service = createPrepService(opts);
 const input = { platform:'xhs',title:'离线测试',content:'离线素材',images:[image],episodeId:'ep' };
 try {
@@ -37,7 +39,10 @@ try {
   const r = service.create(input);
   assert.equal(db.prepare('SELECT state FROM tasks').get().state,'planned');
   assert.throws(() => service.create(input),/已有准备记录/);
-  assert.throws(() => service.start(r.id,'execute'),/blocked by policy/); assert.equal(spawnCount,0);
+  assert.throws(() => service.start(r.id,'execute'),/本地配置停用/); assert.equal(spawnCount,0);
+  assert.equal(prepCapabilities({},opts.env).xhs.browserEnabled,true);
+  assert.equal(prepCapabilities({publishPrep:{browserExecution:false}},opts.env).xhs.inspectEnabled,true);
+  assert.equal(prepCapabilities({l1:{xhs:{browserExecution:false}}},opts.env).xhs.inspectEnabled,false);
   service.start(r.id,'check'); assert.equal(lastArgs[1],'preflight');
   assert.throws(() => service.create({platform:'x',content:'a'}),/正在运行|在运行/);
   child.stdout.emit('data',JSON.stringify({ok:true,offlineOnly:true})); child.emit('close',0);
@@ -79,6 +84,31 @@ try {
   assert.equal(selectPublishedLink('x',[xCard],{postId:'123',account:'Example'}),xCard.url);
   assert.throws(() => selectPublishedLink('x',[{...xCard,kind:'repost'}],{postId:'123',account:'Example'}));
   assert.throws(() => selectPublishedLink('x',[{...xCard,author:'SomeoneElse'}],{postId:'123',account:'Example'}));
+  assert.deepEqual(publishedTarget('xhs',{schedule:'2026-11-17'},{platforms:{xhs:{title:'完整标题'}}}),{text:'完整标题',date:'2026-11-17'});
+  assert.deepEqual(publishedTarget('x',{}, {postId:'123'}),{postId:'123'});
+  assert.deepEqual(publishedTarget('xhs',{}, {postId:'legacy-note'}),{postId:'legacy-note'});
+  assert.throws(()=>publishedTarget('xhs',{}, {postId:'other-platform-id',platforms:{x:{id:'other-platform-id'}}}));
+  assert.throws(()=>publishedTarget('xhs',{}, {platforms:{xhs:{title:'不猜日期'}}}));
+  assert.equal(selectPublishedLink('xhs',[{id:'abc',state:'published',url,date:'2026-11-17',text:'完整标题'}],{text:'完整标题',date:'2026-11-17'}),url);
+  assert.throws(()=>selectPublishedLink('xhs',[{id:'abc',state:'published',url,date:'2026-11-17',text:'完整标题片段'}],{text:'完整标题',date:'2026-11-17'}));
+  db.exec('CREATE TABLE logs (ts TEXT,episode_id TEXT,platform TEXT,action TEXT,result TEXT)');
+  const proof={ok:true,platform:'xhs',account:'TwoPeanuts',url,checkedAt:new Date().toISOString()};
+  writePublishedLink(db,'ep','xhs',proof);
+  assert.equal(db.prepare('SELECT url FROM tasks WHERE episode_id=?').get('ep').url,url);
+  assert.equal(db.prepare('SELECT COUNT(*) AS n FROM logs').get().n,1);
+  const prepRecord=enabled.create({platform:'x',content:'完整正文'});
+  assert.deepEqual(preparationTarget(prepRecord,{content:'完整正文',submit:false},'2026-11-17'),{text:'完整正文',date:'2026-11-17'});
+  assert.throws(()=>preparationTarget(prepRecord,{content:'完整正文',submit:false},''));
+  assert.deepEqual(planL1Action({type:'sync',platform:'x',preparationId:prepRecord.id,date:'2026-11-17'}),['--platform','x','--preparation',prepRecord.id,'--date','2026-11-17']);
+  assert.throws(()=>planL1Action({type:'sync',platform:'x',preparationId:prepRecord.id,id:'ep',date:'2026-11-17'}));
+  writePreparationLink(db,prepRecord.id,{...proof,platform:'x',account:'Example',url:xCard.url});
+  assert.equal(enabled.get(prepRecord.id).url,xCard.url);assert.equal(enabled.get(prepRecord.id).state,'published');
+  assert.throws(()=>enabled.start(prepRecord.id,'execute'));
+  assert.deepEqual(browserProxyArgs({},'x',{HTTPS_PROXY:'http://127.0.0.1:12334'}),['--proxy-server=http://127.0.0.1:12334']);
+  assert.deepEqual(browserProxyArgs({},'xhs',{HTTPS_PROXY:'http://127.0.0.1:12334'}),[]);
+  assert.throws(()=>browserProxyArgs({l1:{x:{proxy:'http://user:pass@proxy.invalid'}}},'x',{}));
+  assert.throws(()=>writePublishedLink(db,'missing','xhs',proof));
+  assert.equal(db.prepare('SELECT COUNT(*) AS n FROM logs').get().n,2);
   let reads = [], nav = [];
   const withBrowser = async (cfg,fn,platform) => { assert.equal(platform,'xhs'); return fn({goto:async u => nav.push(u),evaluate:async fn => {
     reads.push(fn.name);

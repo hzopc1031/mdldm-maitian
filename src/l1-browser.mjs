@@ -2,10 +2,19 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import net from 'node:net';
+import os from 'node:os';
 import { spawn } from 'node:child_process';
 import { home } from './l1-config.mjs';
 import { l1Account } from './l1-account.mjs';
 export const pause = (min = 1800, max = 3200) => new Promise(resolve => setTimeout(resolve, min + Math.random() * (max - min)));
+export function browserProxyArgs(config, platform, env=process.env) {
+  const value=config.l1?.[platform]?.proxy ?? (platform==='x' ? env.HTTPS_PROXY || env.HTTP_PROXY : null);
+  if(!value || value==='system')return [];
+  if(value==='direct')return ['--no-proxy-server'];
+  let url;try{url=new URL(value);}catch{throw new Error('L1代理配置格式无效');}
+  if(!['http:','https:','socks5:'].includes(url.protocol)||url.username||url.password||url.search||url.hash||!['','/'].includes(url.pathname))throw new Error('L1代理只接受无凭据的HTTP/HTTPS/SOCKS5服务地址');
+  return [`--proxy-server=${url.protocol}//${url.host}`];
+}
 export function browserSettings(config, platform = 'xhs') {
   if (!['x', 'xhs', 'wechat'].includes(platform)) throw new Error('未知 L1 浏览器平台');
   const settings = config.l1?.[platform] || {};
@@ -14,8 +23,15 @@ export function browserSettings(config, platform = 'xhs') {
   const profile = path.resolve(settings.chromeProfile || (platform === 'xhs' ? config.chromeProfile : null) || expected);
   const expectedPort = { x: 9341, xhs: 9340, wechat: 9342 }[platform];
   const port = settings.chromePort ?? (platform === 'xhs' ? config.chromePort : null) ?? expectedPort;
-  if (port !== expectedPort || profile.toLowerCase() !== expected.toLowerCase()) throw new Error(`L1 ${platform} 仅允许端口 ${expectedPort} 和 ${expected} 专用 profile`);
-  const candidates = [config.chromeBinary, process.env.PROGRAMFILES && path.join(process.env.PROGRAMFILES, 'Google/Chrome/Application/chrome.exe'), process.env['PROGRAMFILES(X86)'] && path.join(process.env['PROGRAMFILES(X86)'], 'Google/Chrome/Application/chrome.exe'), process.env.LOCALAPPDATA && path.join(process.env.LOCALAPPDATA, 'Google/Chrome/Application/chrome.exe')].filter(Boolean);
+  if (port !== expectedPort) throw new Error(`L1 ${platform} 仅允许端口 ${expectedPort}`);
+  if (!path.isAbsolute(settings.chromeProfile || (platform === 'xhs' ? config.chromeProfile : null) || expected) || /^(?:\\\\|\/\/)/.test(profile)) throw new Error('L1 profile 必须为专用本机绝对路径');
+  const normalProfiles = [process.env.LOCALAPPDATA && path.join(process.env.LOCALAPPDATA,'Google/Chrome/User Data'),process.env.LOCALAPPDATA && path.join(process.env.LOCALAPPDATA,'Microsoft/Edge/User Data'),path.join(os.homedir(),'Library/Application Support/Google/Chrome'),path.join(os.homedir(),'.config/google-chrome')].filter(Boolean);
+  if(normalProfiles.some(root=>{const rel=path.relative(root,profile);return !rel||(!rel.startsWith('..')&&!path.isAbsolute(rel));}))throw new Error('拒绝普通Chrome/Edge用户profile；请配置独立L1目录');
+  for(const other of ['x','xhs','wechat'].filter(p=>p!==platform)) {
+    const otherProfile=path.resolve(config.l1?.[other]?.chromeProfile || (other==='xhs'?config.chromeProfile:null) || path.join(home,`chrome-profile-l1-${other}`));
+    if(otherProfile.toLowerCase()===profile.toLowerCase())throw new Error('L1平台必须使用不同专用profile');
+  }
+  const candidates = [config.chromeBinary, process.env.CHROME_PATH, process.env.PROGRAMFILES && path.join(process.env.PROGRAMFILES, 'Google/Chrome/Application/chrome.exe'), process.env['PROGRAMFILES(X86)'] && path.join(process.env['PROGRAMFILES(X86)'], 'Google/Chrome/Application/chrome.exe'), process.env.LOCALAPPDATA && path.join(process.env.LOCALAPPDATA, 'Google/Chrome/Application/chrome.exe'), '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome', '/usr/bin/google-chrome', '/usr/bin/chromium'].filter(Boolean);
   const binary = candidates.find(file => fs.existsSync(file));
   if (!binary) throw new Error('找不到 Chrome 程序，请配置 chromeBinary');
   return { profile, port, binary };
@@ -31,7 +47,7 @@ export async function withL1Browser(config, fn, platform = 'xhs') {
   const { profile, port, binary } = browserSettings(config, platform);
   await assertFree(port);
   fs.mkdirSync(profile, { recursive: true });
-  const child = spawn(binary, [`--user-data-dir=${profile}`, `--remote-debugging-port=${port}`, '--remote-debugging-address=127.0.0.1', '--enable-automation', '--no-first-run', '--no-default-browser-check', '--disable-background-mode', 'about:blank'], { stdio: 'ignore', windowsHide: false });
+  const child = spawn(binary, [`--user-data-dir=${profile}`, `--remote-debugging-port=${port}`, '--remote-debugging-address=127.0.0.1', '--enable-automation', '--no-first-run', '--no-default-browser-check', '--disable-background-mode', ...browserProxyArgs(config,platform), 'about:blank'], { stdio: 'ignore', windowsHide: false });
   let launchError, exited = false, ws, seq = 0, session, verifiedOwner = false;
   child.once('error', error => { launchError = error; });
   child.once('exit', () => { exited = true; });
@@ -39,7 +55,7 @@ export async function withL1Browser(config, fn, platform = 'xhs') {
   function send(method, params = {}, sessionId) {
     return new Promise((resolve, reject) => {
       const id = ++seq;
-      const timer = setTimeout(() => { pending.delete(id); reject(new Error(`CDP 超时：${method}`)); }, 15000);
+      const timer = setTimeout(() => { pending.delete(id); reject(new Error(`CDP 超时：${method}`)); }, method === 'Page.navigate' ? 60000 : 15000);
       pending.set(id, { resolve, reject, timer });
       try { ws.send(JSON.stringify({ id, method, params, ...(sessionId ? { sessionId } : {}) })); }
       catch (error) { clearTimeout(timer); pending.delete(id); reject(error); }
@@ -110,6 +126,13 @@ export async function withL1Browser(config, fn, platform = 'xhs') {
         if (result.exceptionDetails) throw new Error('页面 DOM 读取失败');
         return result.result.value;
       },
+      async screenshot(file) {
+        if(!path.isAbsolute(file)||/^(?:\\\\|\/\/)/.test(file))throw new Error('截图仅允许本机绝对路径');
+        const shot=await send('Page.captureScreenshot',{format:'png'},session);
+        fs.writeFileSync(file,Buffer.from(shot.data,'base64'));
+        return file;
+      },
+
     };
     return await fn(page);
   } finally { process.removeListener('SIGINT', interrupt); process.removeListener('SIGTERM', interrupt); await shutdown(); }
@@ -129,7 +152,7 @@ export function allowedPage(value, platform, account) {
     if (platform === 'wechat') return typeof value === 'string' && /^https:\/\/mp\.weixin\.qq\.com\/?$/i.test(value);
     const url = new URL(value);
     if (url.protocol !== 'https:' || url.username || url.password || url.port || url.search || url.hash) return false;
-    if (platform === 'xhs') return url.hostname === 'creator.xiaohongshu.com';
+    if (platform === 'xhs') return url.hostname === 'creator.xiaohongshu.com' || ['www.xiaohongshu.com','xiaohongshu.com'].includes(url.hostname) && /^\/explore\/[\w-]+$/.test(url.pathname);
     return platform === 'x' && url.hostname === 'x.com' && (url.pathname==='/i/flow/login' || /^[A-Za-z0-9_]{1,15}$/.test(account || '') && new RegExp(`^/${account}(?:/status/\\d+)?/?$`,'i').test(url.pathname));
   } catch { return false; }
 }

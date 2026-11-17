@@ -11,9 +11,17 @@ async function load() {
   if (lib) return lib;
   const shim = await import('./chrome-shim.mjs');
   globalThis.chrome = shim.chrome;
-  const pub = await import(pathToFileURL(path.join(config.pluginDir, 'lib/publish.js')).href);
-  const cdp = await import(pathToFileURL(path.join(config.pluginDir, 'lib/cdp.js')).href);
+  const pluginDir = process.env.MAITIAN_PUBLISHER_DIR || config.pluginDir;
+  if (!pluginDir) throw new Error('请配置 pluginDir 或 MAITIAN_PUBLISHER_DIR 指向官方 publisher 仓库目录');
+  const pub = await import(pathToFileURL(path.join(pluginDir, 'lib/publish.js')).href);
+  const cdp = await import(pathToFileURL(path.join(pluginDir, 'lib/cdp.js')).href);
   return (lib = { shim, pub, cdp });
+}
+// 正式加载原库、检查导出；不调用ensure/run/preflight，不打开浏览器。
+export async function publisherInfo() {
+  const {pub,cdp}=await load();
+  if(typeof pub.run!=='function'||typeof pub.collectLinks!=='function'||typeof cdp.evaluate!=='function')throw new Error('publisher 导出不完整');
+  return {loaded:true,adapters:Object.keys(pub.ADAPTERS),browserLaunched:false,platformOperation:false};
 }
 
 export async function ensure() { if (mode === 'plugin') return bridge.ensureBridge(); const l = await load(); await l.shim.launchChrome(); }

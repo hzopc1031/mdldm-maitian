@@ -40,6 +40,7 @@ if (process.argv[2] === '--fake-child') {
                 return [node('OtherHiddenAccount', true), ...(loggedIn ? [node(name)] : []),
                   ...(scenario === 'hidden-only' ? [node('TwoPeanuts', true)] : [])];
               }
+              if(selector === 'input[autocomplete="username"], [data-testid="loginButton"], a[href="/i/flow/login"]')return [];
               assert.equal(selector, '[data-testid="SideNav_AccountSwitcher_Button"]');
               return loggedIn ? [node(`Display Name\n${handle}`)] : [];
             },

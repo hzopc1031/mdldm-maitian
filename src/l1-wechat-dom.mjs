@@ -2,7 +2,8 @@
 export function visibleWechatIdentity() {
   const visible = el => { const r = el.getBoundingClientRect(), s = getComputedStyle(el); return r.width > 0 && r.height > 0 && s.visibility !== 'hidden' && s.display !== 'none'; };
   const names = [...new Set([...document.querySelectorAll('.weui-desktop-account__nickname, .weui-desktop-account__name, .account_meta .nickname, #accountNickName')].filter(visible).map(el => el.innerText.trim()).filter(Boolean))];
-  return { names, trustedOrigin: location.origin === 'https://mp.weixin.qq.com', login: /扫码登录|扫描二维码登录|重新登录|登录已过期/.test(document.body?.innerText || '') };
+  const qr=[...document.querySelectorAll('img[class*="qrcode"],.login__type__container__scan__qrcode,img[alt*="二维码"],.qrcode')].some(visible);
+  return { names, trustedOrigin: location.origin === 'https://mp.weixin.qq.com', login: !names.length && (qr || /扫码登录|扫描二维码登录|重新登录|登录已过期/.test(document.body?.innerText || '')) };
 }
 export function visibleWechatFollowers() {
   const visible = el => { const r = el.getBoundingClientRect(), s = getComputedStyle(el); return r.width > 0 && r.height > 0 && s.visibility !== 'hidden' && s.display !== 'none'; };

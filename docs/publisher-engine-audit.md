@@ -1,5 +1,19 @@
 # 原发布引擎核对（2026-11-17夜间）
 
+## 22:17纠正后的安装与实际加载
+
+已按[官方仓库README](https://github.com/CzzzzzzJ/mdldm-maitian-publisher#安装)支持的git clone机制，安装完整独立仓库D:\AIInfra\maitian-publisher，HEAD=539091cff24fb8ce32c28d881100a69886aced3a、manifest版本0.4.0、Apache-2.0许可保留。不存在package.json依赖安装步骤；没有执行npm/pip install，也未填写凭据。
+
+实际执行node scripts/publisher-check.mjs --plugin-dir <安装目录>：经过原driver与原shim加载真实publish.js/cdp.js，七个平台导出完整；检查期间禁用网络与WebSocket，没有启动浏览器或平台动作。不是只读源码即声称加载。原库node tests/md.test.mjs README.md也实际通过；初次误用node --test、缺少其要求的文章参数所致错误已纠正，未修改第三方测试。
+
+这证明direct库可加载，不证明Chrome扩展已启用，也不证明旧Windows shim的视频发布链已通过。L1小红书图文使用原xhs-publish，已真实上传填写、留窗、submitted:false；公众号使用原wechat-publish，真实status确认当前扫码页，草稿链路仍待本人扫码。原publisher仍无公众号适配，小红书适配仍为视频，不替换本轮图文引擎。
+
+本机正式Google Chrome产品版本157.0.8103.51（读取chrome.exe版本属性）。[Chrome官方公告](https://groups.google.com/a/chromium.org/g/chromium-extensions/c/1-g8EFx2BBY)确认从137起正式Chrome移除--load-extension；本轮没有试该参数或用其它版本绕过。[官方加载文档](https://developer.chrome.com/docs/extensions/get-started/tutorial/hello-world)要求chrome://extensions→开发者模式→Load unpacked选择目录。[Windows外部安装文档](https://developer.chrome.com/docs/extensions/how-to/distribute/install-extensions)说明注册表外部安装指向Chrome Web Store并仍需要用户确认；当前仓库README没有提供Web Store项目ID，不能自行编造。
+
+当前剩余扩展启用步骤为该官方UI加载，尚未执行。已知Computer Use native pipe os error 2只影响其UI传输；本轮按要求仅只读核对，没有重试。由[computer-use技能](D:/MovedFromC/.codex/plugins/cache/openai-bundled/computer-use/26.1111.21308/skills/computer-use/SKILL.md)指定的@oai/sky入口当前不可用，指导文件要求“Use only the Computer Use JS APIs for Windows app automation.”；没有自建helper或直接修改Chrome会话/扩展状态文件来替代。因本次没有可用UI输入通道，需本人在允许的窗口选择已准备目录；不是声称Chrome在所有环境一律只允许真人操作。扩展未加载不阻塞本轮已验证的本地skill与L1只读通道。
+
+公开方案研究共2次查询、5个页面；未为旧安全拒绝研究绕行。此前compare独立profile+9368的blocked by policy保留原样，范围不扩大，不自动重试。
+
 核对对象：主库上游基线`61ffcf0`与L1起点`e5ae25c`的`src/driver.mjs`、`src/hub.mjs`、`src/bridge.mjs`；官方姊妹仓库[mdldm-maitian-publisher](https://github.com/CzzzzzzJ/mdldm-maitian-publisher/tree/539091cff24fb8ce32c28d881100a69886aced3a)，只读下载版本`539091cff24fb8ce32c28d881100a69886aced3a`。未执行该仓库脚本、安装依赖、连接Chrome或加载扩展。
 
 | 对象 | 源码证据 | 对本轮的结论 |

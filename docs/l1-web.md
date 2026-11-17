@@ -1,6 +1,8 @@
 # L1 本机登录与采集
 
-在 `l1-real` 分支运行 `node src/hub.mjs web`，只监听 `127.0.0.1:8787`（端口可用 `web.port` 配置）。启动日志只显示普通地址，不显示网页口令。大屏右下角「登录与采集」进入 `/p#/system`。
+在 `l1-real` 分支运行 `node scripts/l1-web-server.mjs`，只监听 `127.0.0.1:8787`（端口可用 `web.port` 配置）。启动日志只显示普通地址，不显示网页口令。大屏右下角「登录与采集」进入 `/p#/system`。
+
+2026-11-17 22:17纠正后：三平台可见身份体检、作品取链接、新准备稿按完整文字/实际日期取链接均有实际CLI入口；不调用旧七平台doctor。原本地小红书skill已真实完成ai身份核验、图文上传填写、保留窗口，未发布。X/公众号各自专用profile真实确认需要本人登录。小红书正向取链接尚未成功，原因是当前可见列表没有公开URL，额外公开页404；不会按ID拼造。详见[publish-preparation.md](publish-preparation.md)和[问题清单](issue-register.md)。
 
 网页仅提供 X `@PeanutPair`、小红书 `TwoPeanuts` 和公众号三个平台。公众号可用名称由 `config.l1.wechat.account` 约束；未配置时仍可登录，由可见唯一公众号名称完成校验。首次登录和过期后的扫码/验证需要 Liu 在本次专用窗口完成。
 
@@ -12,9 +14,9 @@
 | 采集数据 | `node scripts/l1-run.mjs --only x --date YYYY-MM-DD`（或 `xhs` / `wechat`） | 日期默认北京时间当天；执行该平台整轮采集和本地日报，完成后关闭本次专用窗口 |
 | 状态 | `GET /api/l1/status` 或 `POST /api/action` 的 `status` | 仅读本机记录，不探测或启动 Chrome |
 
-专用端口 / profile 固定为 `9341 / chrome-profile-l1-x`、`9340 / chrome-profile-l1-xhs`、`9342 / chrome-profile-l1-wechat`。端口被占用即拒绝，不连接已运行浏览器。清理范围由本次子进程 PID、profile 和端口归属核验限定，不按 Chrome 进程名全局关闭。
+专用端口固定为9341/9340/9342，默认profile为MAITIAN_HOME下chrome-profile-l1-x/xhs/wechat；可用l1.<平台>.chromeProfile配置独立本机绝对路径，普通Chrome/Edge目录、网络共享、跨平台共用均拒绝。端口被占用即拒绝，不连接已运行浏览器。清理范围由本次子进程PID、profile和端口归属核验限定，不按Chrome进程名全局关闭。
 
-`POST /api/action` 只接受 `{ "type": "login|collect|status", "platform": "x|xhs|wechat" }`；`collect` 可额外给 `date`。参数逐项白名单校验，使用无 shell 的 argv 启动子进程。拒绝旧 `metrics/followers/doctor/sync/board/mark/submit` 等网页动作。所有平台操作全局串行，运行时再次发起返回 409。
+POST /api/action接受type=login/collect/status/doctor/sync与platform=x/xhs/wechat；collect可给date，sync需id，或preparationId+date（二者互斥）。doctor/sync走新L1 inspect，而非旧hub动作。参数逐项白名单校验，使用无shell的argv启动子进程。拒绝旧metrics/followers/board/mark/submit等网页动作。所有平台操作全局串行，运行时再次发起返回409。
 
 接口沿用网页 cookie 鉴权，也支持 `X-Maitian-Key` 请求头；不要把凭据拼入命令行、URL 或日志。写操作需要已有 `web.key` 且请求来自 loopback，跨来源请求拒绝。本文不提供或修改任何凭据。
 

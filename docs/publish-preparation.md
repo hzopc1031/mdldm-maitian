@@ -1,5 +1,19 @@
 # L1 发布准备
 
+## 22:17纠正后的当前用法
+
+下文夜间记录按历史保留。本轮已实际调用原本地xhs-publish：ai身份精确匹配TwoPeanuts；经生产HTTP接口完成preflight→post→上传1张已逐图审阅的明确测试卡、填写完整标题正文及3个正式话题。回执submitted:false、dryRun:true，截图已查看，专用窗口按用户约定保留，未点发布。测试只在隔离准备库执行；正式小红书采集另成功读取近30天50篇并更新日报。
+
+原来的“所有平台浏览器禁用”结论已撤回。默认可执行已安装的受限本地skill；publishPrep.browserExecution:false仍可总停，publishPrep.<平台>.browserExecution:false可停单平台。L1只读体检/取链接由l1.<平台>.browserExecution:false单独停用。配置不是审批证明：compare/9368旧拒绝仍保留，本次没有重试或换形式执行该拒绝动作。本地skill的9333/9335专用通道、L1既有profile只读通道在本次授权内分别实测，不能把它们和9368混同。
+
+准备页现可填话题。新准备稿也能选择实际发表日期并点击“从已发布列表取链接”；无ID时按完整正文（X）或完整标题（小红书/公众号）与日期匹配，歧义、审核中、缺少真实公开URL均不写。稳定ID优先；回写任务、准备记录与日志使用事务。真实小红书列表当前没有公开URL，额外公开页实测404，本轮没有正向链接回写成功。
+
+X文图包与真实Chrome下载验收可用，平台草稿仍由本人附图/保存；实际X专用profile未登录。X现支持沿用既有无凭据HTTP(S)_PROXY，或l1.x.proxy显式system/direct/服务地址，不改系统代理。公众号发布skill及L1各自专用profile均已真实确认扫码页，需本人登录；没有执行post、没有伪报草稿保存。
+
+L1的chromeProfile可配置为本机独立绝对目录；缺省使用MAITIAN_HOME下各平台目录。拒绝普通Chrome/Edge目录、网络共享、跨平台共用profile；端口仍9341/9340/9342，不变更旧拒绝的9368。新增macOS/Linux程序路径候选；旧hub、bridge、shim与macOS行为保留。原driver仅新增MAITIAN_PUBLISHER_DIR路径和无浏览器包加载检查。
+
+可复现：node scripts/publisher-check.mjs --plugin-dir <官方publisher目录>；node scripts/l1-inspect.mjs --platform xhs；node scripts/l1-inspect.mjs --platform xhs --episode <真实作品ID>；准备稿用--preparation <记录UUID> --date YYYY-MM-DD。真实操作必须使用实际账号，不能把离线回执当平台证据。
+
 范围：X 文图草稿包、小红书图文、公众号纯文字与本地配图。未接知识站或其他平台，不定时、不后台发布。原 `hub.mjs`、`driver.mjs`、`chrome-shim.mjs`、原插件/macOS 工作流均未修改。
 
 2026-11-17 夜间更新：无调试端口的 Chrome CLI 已完成隔离真实 HTTP/SQLite 页面验收（登录、错误提示、深链、刷新、系统手动区、准备任务生成及 ZIP 下载），正式8787未登录页也有新截图。原调试启动的策略拒绝没有解除；Computer Use 独立标签页再次返回 native pipe `os error 2`。**本机页面测试通道可用，不等于平台执行通道可用**。真实安装的 `xhs-publish preflight` / `wechat-publish check` 经生产适配器实跑成功，只属离线素材检查。

@@ -10,7 +10,9 @@ export function visibleXIdentity() {
     return [...el.querySelectorAll('[data-testid="UserScreenName"]')].filter(visible)
       .map(node => node.innerText.trim()).filter(text => /^[A-Za-z0-9_]+$/.test(text));
   }))];
-  return { handle: handles.length === 1 ? handles[0] : null, url: location.href };
+  const login = [...document.querySelectorAll('input[autocomplete="username"], [data-testid="loginButton"], a[href="/i/flow/login"]')].some(visible) ||
+    /电子邮箱或用户名|Phone, email, or username|手机号码、邮箱地址或用户名/.test(document.body?.innerText || '') && [...document.querySelectorAll('input[type="text"],input[name="text"]')].some(visible);
+  return { handle: handles.length === 1 ? handles[0] : null, url: location.href, login: !handles.length && login };
 }
 
 export function visibleXFollowers(account) {

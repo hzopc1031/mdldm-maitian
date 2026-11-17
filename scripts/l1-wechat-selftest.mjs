@@ -123,7 +123,8 @@ try {
   log('PASS 采集：错号/未知/歧义/换号均零落库；关闭后持久化；--date自然日边界/旧置顶/未知日期；不确认末页则失败。');
   const settings = browserSettings(config, 'wechat'); assert.equal(settings.port, 9342); assert.equal(settings.profile, path.join(folder, 'chrome-profile-l1-wechat'));
   for (const port of [9333, 9334, 9335, 9336, 9340, 9341, 9343]) assert.throws(() => browserSettings({ ...config, l1: { wechat: { chromePort: port } } }, 'wechat'));
-  assert.throws(() => browserSettings({ ...config, l1: { wechat: { chromeProfile: folder } } }, 'wechat'));
+  assert.throws(() => browserSettings({ ...config, l1: { wechat: { chromeProfile: 'relative-profile' } } }, 'wechat'));
+  assert.equal(browserSettings({...config,l1:{wechat:{chromeProfile:path.join(folder,'dedicated-custom')}}},'wechat').profile,path.join(folder,'dedicated-custom'));
   for (const url of ['https://mp.weixin.qq.com/', 'https://mp.weixin.qq.com']) assert.equal(allowedPage(url, 'wechat'), true);
   for (const url of ['http://mp.weixin.qq.com/', 'https://mp.weixin.qq.com:443/', 'https://mp.weixin.qq.com/?', 'https://mp.weixin.qq.com/#', 'https://mp.weixin.qq.com/?token=x', 'https://u:p@mp.weixin.qq.com/', 'https://mp.weixin.qq.com.evil/', 'https://mp.weixin.qq.com/cgi-bin/appmsg', 'https://x.com/', 'https://creator.xiaohongshu.com/']) assert.equal(allowedPage(url, 'wechat'), false);
   const args = [`--user-data-dir=${settings.profile}`, '--remote-debugging-port=9342', '--remote-debugging-address=127.0.0.1'];

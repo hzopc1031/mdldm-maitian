@@ -6,7 +6,6 @@
   "bridge": "http://127.0.0.1:8765",
   "driver": "direct",
   "chromePort": 9340,
-  "chromeProfile": "D:\\AIInfra\\maitian\\chrome-profile-l1-xhs",
   "rootPath": "/Volumes/<NAS 共享名>/视频导出",
   "nasUrl": "smb://<用户名>@<NAS 地址>/<共享名>",
   "batches": [
@@ -86,23 +85,17 @@
   },
   "l1": {
     "note": "L1 独立运行，默认 X + 小红书；公众号显式 --only wechat。--import-x 可选手工 JSON 导入。无发布、无定时任务、无飞书。",
-    "database": "D:\\AIInfra\\maitian\\data\\hub.db",
-    "xInbox": "D:\\AIInfra\\maitian\\inbox\\x",
-    "reports": "D:\\AIInfra\\maitian\\reports",
     "login": "node scripts/l1-run.mjs --login-x / --login-xhs / --login-wechat，可附加 --wait-login（分别运行）",
     "x": {
-      "chromeProfile": "D:\\AIInfra\\maitian\\chrome-profile-l1-x",
       "chromePort": 9341
     },
     "xhs": {
-      "chromeProfile": "D:\\AIInfra\\maitian\\chrome-profile-l1-xhs",
       "chromePort": 9340
     },
     "wechat": {
       "account": "",
-      "chromeProfile": "D:\\AIInfra\\maitian\\chrome-profile-l1-wechat",
       "chromePort": 9342,
-      "note": "account 可选；填写则必须与可见公众号名称精确匹配。只读DOM，不配置Cookie/token。MAITIAN_HOME迁移后省略profile以使用新HOME下的专用目录。"
+      "note": "请设置公开预期account，或放入本地身份文件。profile缺省使用MAITIAN_HOME下的独立目录，也可配置本机绝对路径。只读DOM，不配置凭据。"
     }
   }
 }

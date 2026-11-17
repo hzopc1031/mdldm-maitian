@@ -7,7 +7,7 @@ import { spawn } from 'node:child_process';
 import { redactL1 } from './l1-web.mjs';
 import { xDraftBundle } from './prep-bundle.mjs';
 
-export const BROWSER_BLOCK = '平台浏览器操作暂不可用：此前调试启动 blocked by policy，Computer Use 工具也异常；填写、上传和保存草稿保持禁用。工作台本机页面测试通过不代表平台执行已获准或可用。';
+export const BROWSER_BLOCK = '此平台的专用浏览器操作已由本地配置停用；不会改用其它账号、profile 或旧发布引擎。';
 export function prepCapabilities(config = {}, env = process.env) {
   const root = env.MAITIAN_LOCAL_SKILLS || path.join(os.homedir(), '.dsh', 'skills');
   return Object.fromEntries(['x', 'xhs', 'wechat'].map(platform => {
@@ -15,10 +15,13 @@ export function prepCapabilities(config = {}, env = process.env) {
     const installed = script ? fs.existsSync(script) : true;
     // 安装检查只读脚本，不读取 accounts.json、profile 或凭据。
     const keepWindow = platform !== 'xhs' || (installed && fs.readFileSync(script, 'utf8').includes("opts['keep-browser']"));
-    const enabled = config.publishPrep?.browserExecution === true && installed && keepWindow;
-    return [platform, { script, installed, browserEnabled: enabled,
+    // 原compare/9368审批拒绝不是这些已授权专用通道的通用禁令。
+    // 显式false仍由维护者控制；身份核验是独立的只读通道。
+    const enabled = config.publishPrep?.browserExecution !== false && config.publishPrep?.[platform]?.browserExecution !== false && installed && keepWindow;
+    const inspectEnabled = config.l1?.[platform]?.browserExecution !== false;
+    return [platform, { script, installed, browserEnabled: enabled, inspectEnabled,
       mode: platform === 'x' ? '正文与最多4张图片打包下载；由本人手工附图并核对，不自动发布' : platform === 'xhs' ? '本地 xhs-publish，固定 --account ai，填图文后保留窗口' : '本地 wechat-publish，只保存草稿并核对成功提示',
-      reason: platform === 'x' ? '文图包可直接生成和下载；文字链接不会附图，也不能证明平台草稿已保存。体检与取链接另受浏览器执行限制。' : !installed ? '本地 DSH skill 未安装；不回退旧 hub' : !keepWindow ? '本地 skill 不支持保留窗口，未适配' : enabled ? '执行通道由维护者启用；仍未代表真实验收通过' : BROWSER_BLOCK }];
+      reason: platform === 'x' ? '文图包可直接生成和下载；由本人在 X 附图和保存，不自动发布。' : !installed ? '本地 DSH skill 未安装；不回退旧 hub' : !keepWindow ? '本地 skill 不支持保留窗口，未适配' : enabled ? '使用本地技能专用窗口；执行时核验可见账号。登录、素材检查和本次保存回执决定结果。' : BROWSER_BLOCK }];
   }));
 }
 function text(value, name, max, required = false) {
@@ -107,7 +110,7 @@ export function createPrepService({ db, home, root, config, secrets = [], spawnC
     if (!['check', 'execute'].includes(kind)) throw new Error('不支持此动作');
     const r = get(id), cap = prepCapabilities(config, env)[r.platform];
     if (r.platform === 'x') throw new Error('X 请使用文字草稿链接，由用户打开，不运行自动化');
-    if (['running', 'unknown', 'awaiting_user', 'draft_saved', 'failed'].includes(r.state)) throw new Error('结果未确认或已到位；请人工核对，禁止直接重跑');
+    if (['running', 'unknown', 'awaiting_user', 'draft_saved', 'published', 'failed'].includes(r.state)) throw new Error('结果未确认或已到位；请人工核对，禁止直接重跑');
     if (kind === 'execute' && !cap.browserEnabled) throw new Error(cap.reason);
     if (kind === 'execute' && r.state !== 'checked') throw new Error('必须先通过本地 skill 离线检查');
     if (!cap.installed) throw new Error(cap.reason);
@@ -130,6 +133,10 @@ export function createPrepService({ db, home, root, config, secrets = [], spawnC
         if (kind === 'execute' && r.episodeId) {
           db.prepare('UPDATE tasks SET state=?,detail=?,updated_at=? WHERE episode_id=? AND platform=?').run(r.platform === 'wechat' ? 'draft_saved' : 'awaiting_user', r.note, new Date().toISOString(), r.episodeId, r.platform);
         }
+        r.evidence = { submitted: result.submitted === false ? false : null,
+          ...(typeof result.titleFinal==='string' ? {titleFinal:result.titleFinal.slice(0,100)} : {}),
+          ...(typeof result.screenshot === 'string' && path.isAbsolute(result.screenshot) && !/^(?:\\\\|\/\/)/.test(result.screenshot) ? { screenshot: result.screenshot } : {}),
+          ...(r.platform === 'wechat' ? { savedAsDraft: result.savedAsDraft === true, draftVerified: result.draftVerified === true } : {}) };
       } catch (e) { r.state = kind === 'execute' ? 'unknown' : 'check_failed'; r.error = redactL1(e.message, secrets); }
       // 不保存 skill 原始 stdout/stderr：其中可能含认证 URL、会话或无界 DOM。
       r.finishedAt = new Date().toISOString(); save(r);
