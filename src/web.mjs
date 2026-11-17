@@ -222,16 +222,24 @@ export async function handle(req, res) {
     try { return send(res, 200, fs.readFileSync(prep.jobFile(u.searchParams.get('id'))), 'application/json; charset=utf-8', { 'content-disposition': 'attachment; filename="job.json"' }); }
     catch { return send(res, 404, { error: '准备任务不存在' }); }
   }
-  if (u.pathname === '/api/prep' && req.method === 'POST') {
+  if (['/api/prep','/api/prep/image'].includes(u.pathname) && req.method === 'POST') {
     if (!['127.0.0.1', '::1', '::ffff:127.0.0.1'].includes(req.socket.remoteAddress)) return send(res, 403, { error: '仅允许本机操作' });
     if (!W.key) return send(res, 503, { error: '请先由用户配置网页口令' });
     if (req.headers.origin && req.headers.origin !== `http://${req.headers.host}`) return send(res, 403, { error: '请求来源不符' });
+    if (u.pathname === '/api/prep/image') {
+      const chunks=[]; let size=0;
+      for await (const chunk of req) { size+=chunk.length; if(size>32*1024*1024) return send(res,413,{error:'单图不超过32MB'}); chunks.push(chunk); }
+      try { return send(res,200,prep.uploadImage(u.searchParams.get('name') || '',Buffer.concat(chunks))); }
+      catch(e) { return send(res,400,{error:redactL1(e.message,[W.key,W.widgetToken])}); }
+    }
     let body = '';
     for await (const chunk of req) { body += chunk; if (Buffer.byteLength(body) > 131072) return send(res, 413, { error: '请求过大' }); }
     try {
       const a = JSON.parse(body);
       if (!a || Object.keys(a).some(k => !['type', 'input', 'id'].includes(k))) throw new Error('操作字段不对');
       if (actions.some(a => !a.done) || prep.busy()) return send(res, 409, { error: '另一个操作还在运行' });
+      if (['window','window-check'].includes(a.type)) return send(res,200,{ok:true,window:await prep.window(a.id,a.type==='window')});
+      if (a.type==='release-window') return send(res,200,{ok:true,record:prep.releaseWindow(a.id)});
       const record = a.type === 'create' ? prep.create(a.input) : ['check', 'execute'].includes(a.type) ? prep.start(a.id, a.type) : null;
       if (!record) throw new Error('不支持此操作；没有最终发布入口');
       return send(res, 200, { ok: true, record });

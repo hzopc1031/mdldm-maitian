@@ -6,6 +6,7 @@ import crypto from 'node:crypto';
 import { spawn } from 'node:child_process';
 import { redactL1 } from './l1-web.mjs';
 import { xDraftBundle } from './prep-bundle.mjs';
+import { xhsWindow } from './prep-window.mjs';
 
 export const BROWSER_BLOCK = '此平台的专用浏览器操作已由本地配置停用；不会改用其它账号、profile 或旧发布引擎。';
 export function prepCapabilities(config = {}, env = process.env) {
@@ -75,6 +76,10 @@ export function acceptPrepResult(platform, kind, code, result) {
   if (platform === 'xhs' && result.dryRun === true && result.submitted === false) return 'awaiting_user';
   throw new Error('缺少填好 / 草稿保存证明，状态保持未确认');
 }
+const jobDigest = file => {
+  const bytes=fs.readFileSync(file), job=JSON.parse(bytes);
+  return crypto.createHash('sha256').update(bytes).update(JSON.stringify(job.images.map(f=>crypto.createHash('sha256').update(fs.readFileSync(f)).digest('hex')))).digest('hex');
+};
 export function createPrepService({ db, home, root, config, secrets = [], spawnChild = spawn, env = process.env }) {
   // 单独表不改变原 hub 的 tasks 状态约定；准备完成绝不等于 published。
   db.exec('CREATE TABLE IF NOT EXISTS publish_preparations (id TEXT PRIMARY KEY, record TEXT NOT NULL)');
@@ -86,6 +91,9 @@ export function createPrepService({ db, home, root, config, secrets = [], spawnC
   function create(input) {
     if (db.prepare("SELECT 1 FROM publish_preparations WHERE json_extract(record,'$.state')='running'").get()) throw new Error('已有准备操作在运行');
     const data = normalizePrep(input);
+    const contentDigest = crypto.createHash('sha256').update(JSON.stringify({ ...data, job:{...data.job,images:data.job.images.map(f => crypto.createHash('sha256').update(fs.readFileSync(f)).digest('hex'))} })).digest('hex');
+    const same = db.prepare("SELECT record FROM publish_preparations WHERE json_extract(record,'$.contentDigest')=?").get(contentDigest);
+    if (same) return JSON.parse(same.record);
     if (data.episodeId) {
       const task = db.prepare('SELECT state FROM tasks WHERE episode_id=? AND platform=?').get(data.episodeId, data.platform);
       if (!task) throw new Error('该作品没有此平台任务');
@@ -101,7 +109,7 @@ export function createPrepService({ db, home, root, config, secrets = [], spawnC
     });
     fs.writeFileSync(path.join(folder, 'job.json'), JSON.stringify(data.job, null, 2));
     const r = { id, platform: data.platform, episodeId: data.episodeId, test: data.test, title: data.job.title,
-      imageCount:data.job.images.length, state: 'prepared', createdAt: new Date().toISOString(), note: '本地任务已生成；未操作平台、未上传、未存平台草稿' };
+      imageCount:data.job.images.length, contentDigest, state: 'prepared', createdAt: new Date().toISOString(), note: '本地任务已生成；未操作平台、未上传、未存平台草稿' };
     save(r); return r;
   }
   const jobFile = id => { get(id); return path.join(home, 'data', 'publish-prep', id, 'job.json'); };
@@ -109,14 +117,21 @@ export function createPrepService({ db, home, root, config, secrets = [], spawnC
     if (db.prepare("SELECT 1 FROM publish_preparations WHERE json_extract(record,'$.state')='running'").get()) throw new Error('已有准备操作在运行');
     if (!['check', 'execute'].includes(kind)) throw new Error('不支持此动作');
     const r = get(id), cap = prepCapabilities(config, env)[r.platform];
+    if (r.readOnlyReceipt) throw new Error('历史回执只读；不能重新检查或上传');
+    if (kind === 'execute' && ['awaiting_user','draft_saved'].includes(r.state)) {
+      const current = jobDigest(jobFile(id));
+      if (current === r.checkedDigest) return r;
+      throw new Error('已填任务摘要变化，禁止重新上传；先核对原窗口');
+    }
     if (r.platform === 'x') throw new Error('X 请使用文字草稿链接，由用户打开，不运行自动化');
     if (['running', 'unknown', 'awaiting_user', 'draft_saved', 'published', 'failed'].includes(r.state)) throw new Error('结果未确认或已到位；请人工核对，禁止直接重跑');
     if (kind === 'execute' && !cap.browserEnabled) throw new Error(cap.reason);
     if (kind === 'execute' && r.state !== 'checked') throw new Error('必须先通过本地 skill 离线检查');
+    if (kind === 'execute' && r.platform === 'xhs' && db.prepare("SELECT 1 FROM publish_preparations WHERE id<>? AND json_extract(record,'$.platform')='xhs' AND json_extract(record,'$.state') IN ('awaiting_user','unknown') AND COALESCE(json_extract(record,'$.windowReleased'),0)=0").get(id)) throw new Error('ai 专用窗口已有待手动发布或结果未知的任务；先核对现稿，禁止覆盖或新建另一份');
     if (!cap.installed) throw new Error(cap.reason);
     const file = jobFile(id), job = JSON.parse(fs.readFileSync(file, 'utf8'));
     if (job.submit !== false || (r.platform === 'xhs' && job.account !== 'ai')) throw new Error('任务安全约束已改变，拒绝执行');
-    const digest = crypto.createHash('sha256').update(fs.readFileSync(file)).digest('hex');
+    const digest = jobDigest(file);
     if (kind === 'execute' && r.checkedDigest !== digest) throw new Error('任务已变化，必须重新检查');
     let output = '', done = false;
     r.state = 'running'; r.kind = kind; r.error = ''; save(r);
@@ -136,6 +151,7 @@ export function createPrepService({ db, home, root, config, secrets = [], spawnC
         r.evidence = { submitted: result.submitted === false ? false : null,
           ...(typeof result.titleFinal==='string' ? {titleFinal:result.titleFinal.slice(0,100)} : {}),
           ...(typeof result.screenshot === 'string' && path.isAbsolute(result.screenshot) && !/^(?:\\\\|\/\/)/.test(result.screenshot) ? { screenshot: result.screenshot } : {}),
+          ...(r.platform === 'xhs' ? { dryRun: result.dryRun === true, account: 'ai', keepBrowser: true } : {}),
           ...(r.platform === 'wechat' ? { savedAsDraft: result.savedAsDraft === true, draftVerified: result.draftVerified === true } : {}) };
       } catch (e) { r.state = kind === 'execute' ? 'unknown' : 'check_failed'; r.error = redactL1(e.message, secrets); }
       // 不保存 skill 原始 stdout/stderr：其中可能含认证 URL、会话或无界 DOM。
@@ -151,7 +167,28 @@ export function createPrepService({ db, home, root, config, secrets = [], spawnC
     } catch { finish(null, new Error('本地 skill 进程启动失败，未确认平台结果')); }
     return get(id);
   }
-  return { create, get, list, start, jobFile, busy: () => list().some(r => r.state === 'running'),
+  function uploadImage(name, bytes) {
+    const ext = path.extname(name).toLowerCase();
+    if (!['.png','.jpg','.jpeg','.webp'].includes(ext) || !bytes.length || bytes.length > 32*1024*1024) throw new Error('请选择不超过32MB的 PNG/JPEG/WebP 图片');
+    const folder = path.join(home,'data','prep-assets'); fs.mkdirSync(folder,{recursive:true});
+    const file = path.join(folder,crypto.randomUUID()+ext);
+    fs.writeFileSync(file,bytes);
+    try { normalizePrep({platform:'xhs',title:'素材校验',content:'素材校验',images:[file]}); }
+    catch (e) { fs.unlinkSync(file); throw e; }
+    return { path:file, sha256:crypto.createHash('sha256').update(bytes).digest('hex') };
+  }
+  return { create, get, list, start, jobFile, uploadImage,
+    releaseWindow: id => {
+      const r=get(id);
+      if(r.platform!=='xhs'||r.state!=='awaiting_user')throw new Error('仅已填待手动发布的任务可由本人确认解除占用；未知结果不能解除');
+      r.windowReleased=true;r.windowReleasedAt=new Date().toISOString();save(r);return r;
+    },
+    window: async (id, activate) => {
+      const r=get(id);
+      if(r.platform!=='xhs' || !['awaiting_user','unknown'].includes(r.state)) throw new Error('仅已有小红书填写回执可核对留窗');
+      const result=await xhsWindow({activate,env});
+      r.windowEvidence={...result,checkedAt:new Date().toISOString()}; save(r); return result;
+    }, busy: () => list().some(r => r.state === 'running'),
     bundle: id => { if (get(id).platform !== 'x') throw new Error('仅 X 提供文图包'); return xDraftBundle(JSON.parse(fs.readFileSync(jobFile(id),'utf8'))); },
     publicCapabilities: () => Object.fromEntries(Object.entries(prepCapabilities(config, env)).map(([p, { script, ...cap }]) => [p, cap])) };
 }

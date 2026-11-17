@@ -137,6 +137,9 @@ try {
 
   // 新发布准备 API：执行真实 HTTP 路由，子进程全部替身；不运行第三方 skill。
   assert.equal((await request('/api/prep', {auth:false})).code,401);
+  assert.equal((await request('/api/prep/image?name=test.png', {auth:false,action:{}})).code,401);
+  assert.equal((await request('/api/prep/image?name=test.png', {action:{},headers:{origin:'https://evil.test'}})).code,403);
+  assert.equal((await request('/api/prep/image?name=test.png', {action:{}})).code,400);
   const createX = await request('/api/prep', {action:{type:'create',input:{platform:'x',content:'offline draft only',test:true}}});
   assert.equal(createX.code,200); const prepId = createX.json().record.id;
   const job = (await request('/api/prep/job?id=' + prepId)).json(); assert.equal(job.submit,false);
