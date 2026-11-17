@@ -4,6 +4,7 @@ import { num } from './metrics.mjs';
 import { db } from './db.mjs';
 import { config } from './feishu.mjs';
 import { SITE } from './site.mjs';
+import { visibleFans, visibleIdentity, parseVisibleNumber } from './l1-xhs-dom.mjs';
 
 db.exec(`CREATE TABLE IF NOT EXISTS followers (day TEXT, platform TEXT, total INTEGER, gain INTEGER, loss INTEGER, source TEXT, collected_at TEXT, PRIMARY KEY (day, platform));`);
 const dayOf = (d) => { const x = new Date(d); return `${x.getFullYear()}-${String(x.getMonth() + 1).padStart(2, '0')}-${String(x.getDate()).padStart(2, '0')}`; };
@@ -23,8 +24,17 @@ export const followerCollectors = {
     return n != null && { total: n, history: [] };
   },
   async xhs() {
-    const r = await withTab('https://creator.xiaohongshu.com/statistics/fans-data', async (t) => { await sleep(3000); return evaluate(t, `${get('/api/galaxy/creator/data/fans/overall_new')}.then(x=>{const d=x.data.thirty,m=(a)=>Object.fromEntries((a||[]).map(i=>[i.date,i.count]));const g=m(d.rise_fans_list),l=m(d.leave_fans_list);return {total:d.fans_count,list:(d.fans_list||[]).map(i=>({date:i.date,total:i.count,gain:g[i.date],loss:l[i.date]}))}})`); });
-    return r && r.total != null && { total: r.total, history: r.list.map(x => ({ day: dayOf(x.date), total: x.total, gain: x.gain ?? null, loss: x.loss ?? null })) };
+    return withTab('https://creator.xiaohongshu.com/statistics/fans-data', async t => {
+      for (let i = 0; i < 6; i++) {
+        await sleep(1800 + Math.random() * 1400);
+        const identity = await evaluate(t, `(${visibleIdentity.toString()})()`);
+        if (identity.login || (identity.nickname && identity.nickname !== 'TwoPeanuts')) throw new Error('小红书可见身份不是 TwoPeanuts，停止采集');
+        if (identity.nickname !== 'TwoPeanuts') continue;
+        const total = parseVisibleNumber(await evaluate(t, `(${visibleFans.toString()})()`));
+        if (total != null) return { total, history: [] };
+      }
+      throw new Error('未读到 TwoPeanuts 可见身份或粉丝总数，不写入数据');
+    });
   },
   async channels() {
     const text = await withTab('https://channels.weixin.qq.com/platform/statistic/follower', async (t) => { for (let i = 0; i < 8; i++) { await sleep(2000); const s = await evaluate(t, SHADOW_TEXT).catch(() => ''); if (/关注者总数 \| \d/.test(s) && /\d{4}\/\d+\/\d+ \|/.test(s)) return s; } return evaluate(t, SHADOW_TEXT); }, { wait: 9000 });

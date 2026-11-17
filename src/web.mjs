@@ -180,7 +180,7 @@ async function handle(req, res) {
 export function startWeb() {
   const srv = http.createServer((req, res) => { handle(req, res).catch((e) => { try { send(res, 500, { error: e.message }); } catch {} }); });
   initLogin(ROOT);
-  srv.listen(W.port, '0.0.0.0', () => console.log(`麦田网页：http://localhost:${W.port}/?key=${W.key}`));
+  srv.listen(W.port, W.host || '127.0.0.1', () => { const a = srv.address(); console.log(`麦田网页：http://${a.family === 'IPv6' ? `[${a.address}]` : a.address}:${a.port}/?key=${W.key}`); });
   srv.on('error', (e) => console.error('麦田网页没起来：' + e.message));
   return srv;
 }

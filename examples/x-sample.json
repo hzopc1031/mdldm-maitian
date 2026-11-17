@@ -1,0 +1,31 @@
+{
+  "account": "PeanutPair",
+  "captured_at": "2026-11-17T08:30:00+08:00",
+  "followers": 123,
+  "posts": [
+    {
+      "id": "sample-001",
+      "url": "https://x.com/PeanutPair/status/sample-001",
+      "created_at": "2026-11-16T09:00:00+08:00",
+      "text": "示例 / 假数据，不是真实账号数据：第一篇测试作品",
+      "views": 456,
+      "likes": 12,
+      "reposts": null,
+      "replies": 3,
+      "quotes": 2,
+      "bookmarks": null
+    },
+    {
+      "id": "sample-002",
+      "url": "https://x.com/PeanutPair/status/sample-002",
+      "created_at": null,
+      "text": "示例 / 假数据，不是真实账号数据：发布时间未知",
+      "views": null,
+      "likes": 1,
+      "reposts": 0,
+      "replies": null,
+      "quotes": null,
+      "bookmarks": 4
+    }
+  ]
+}
