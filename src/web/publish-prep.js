@@ -1,4 +1,4 @@
-// 只生成本地任务。检查/执行都由用户显式点击；没有最终发布动作。
+// 检查和填写都由用户显式点击；没有最终发布动作。
 async function vPrepare() {
   const data = await api('/api/prep'), params = new URLSearchParams(location.hash.split('?')[1] || '');
   const episodeId = params.get('episode') || '';
@@ -11,7 +11,7 @@ async function vPrepare() {
   }
   const states = { prepared: '本地任务已生成', checked: '离线检查通过', check_failed: '离线检查失败', failed: '执行失败，先核对平台', running: '正在运行，请勿重复操作', unknown: '结果未确认，先核对平台，禁止重跑', awaiting_user: '已填待手动发布', draft_saved: '已保存公众号草稿',published:'公开链接已核验' };
   return `<a class="back" href="#/system">‹ 系统</a><div class="h1">准备发布</div>
-    <p class="lead">X 下载文图草稿包，由你手工附图核对；小红书图文填好留给你发布；公众号只存草稿。不会自动发布。</p>
+    <p class="lead">X 可下载已验收的文图包。编辑器填写通道已接入但尚未真实验收，默认关闭；小红书仅填写图文；公众号只存草稿。</p>
     <div class="grid g3">${Object.entries(data.capabilities).map(([p,c]) => `<div class="panel"><h3>${esc(PN[p])}</h3><p>${esc(c.mode)}</p><p class="note">${esc(c.reason)}</p></div>`).join('')}</div>
     ${sec('新建准备任务', episodeId ? '从作品文案带入；请核对' : '不会自动读取或复用浏览器登录态')}
     <form id="prep-form" class="panel">
@@ -24,7 +24,7 @@ async function vPrepare() {
       <label style="display:block;margin-top:14px">选择本机图片（保持选择顺序）<input id="prep-files" type="file" accept="image/png,image/jpeg,image/webp" multiple></label>
       <div id="prep-image-review"></div>
       <details><summary>或填写本机图片绝对路径</summary><textarea name="images" rows="3" style="width:100%" aria-label="本机图片绝对路径"></textarea></details>
-      <p class="note">单张不超过32MB，整组不超过64MB。X 会复制图片到本地任务，下载包保留顺序与完整正文；不会上传或保存到 X。</p>
+      <p class="note">单张不超过32MB，整组不超过64MB。X 下载包保留图片顺序和完整正文。</p>
       <label style="display:block;margin-top:14px">话题（逗号分隔，最多10个）<input name="topics" style="width:100%" placeholder="AI,科技"></label>
       <details><summary>小红书图片 / 文本审阅记录</summary><p class="note">粘贴本地 skill 的 promotionReview JSON。必须实际逐张审阅后填写；缺失会由 skill 阻止上传，本页不会自动生成已审声明。</p><textarea name="promotionReview" rows="4" style="width:100%" placeholder="{}"></textarea></details>
       <p><label><input type="checkbox" name="test"> 明确标为测试稿（标题、正文都加标记；仍勿发表）</label></p>
@@ -35,7 +35,9 @@ async function vPrepare() {
       const cap = data.capabilities[r.platform], terminal = ['running','unknown','awaiting_user','draft_saved','published','failed'].includes(r.state);
       const receipt = r.evidence ? `<details open><summary>填写回执 · ${esc(r.id)}</summary><p>submitted: ${r.evidence.submitted === false ? 'false（未最终发布）' : '未确认'}${r.evidence.dryRun === true ? ' · dryRun: true' : ''} · ${esc(r.finishedAt || '')}</p>${r.readOnlyReceipt ? '<p>隔离库历史真实上传回执（只读）；不是正式网页新上传成功。</p>' : ''}${r.evidence.screenshot ? `<p>本机回执截图：${esc(r.evidence.screenshot)}</p>` : ''}${r.windowEvidence?.verified ? `<p>留窗已核实：ai 专用 9333 / PID ${esc(r.windowEvidence.pid)} · ${esc(r.windowEvidence.checkedAt)}；${r.windowEvidence.titleMatched ? "标题已匹配，正文图片需本人确认。" : "仅核实窗口，当前表单内容需本人确认。"}</p>` : ''}</details>` : '';
       const links=`<p>${r.url ? `<a href="${esc(r.url)}" target="_blank" rel="noopener noreferrer">打开已核验公开链接</a>` : '本人发布后，可在此核对公开链接。'}</p><label>实际发表日期 <input type="date" data-link-date="${r.id}" value="${new Intl.DateTimeFormat('sv-SE',{timeZone:'Asia/Shanghai'}).format(new Date())}"></label> <button class="btn" data-prep="links" data-platform="${r.platform}" data-id="${r.id}" ${!cap.inspectEnabled||r.state==='running'?'disabled':''}>从已发布列表取链接</button>`;
-      return `<div data-prep-record="${r.id}" style="padding:16px 0;border-bottom:1px solid var(--line)"><h3>${esc(PN[r.platform])} · ${esc(r.title || '文字草稿')}${r.test ? ' · 测试稿' : ''}</h3><p>${esc(states[r.state] || r.state)} · ${esc(r.note || '')}</p>${r.error ? `<p role="alert">${esc(r.error)}</p>` : ''}${receipt}<div class="btns">${r.readOnlyReceipt ? '' : `<a class="btn" href="/api/prep/job?id=${r.id}" download="job.json">下载本地任务</a>`}${r.platform === 'x' ? `<a class="btn pri" href="/api/prep/bundle?id=${r.id}" download="x-draft.zip">下载 X 文图包（${r.imageCount || 0} 图）</a><a class="btn" href="/api/prep/x?id=${r.id}" target="_blank" rel="noopener noreferrer">打开 X 文字草稿</a>` : r.readOnlyReceipt ? '' : `<button class="btn" data-prep="check" data-id="${r.id}" ${terminal ? 'disabled' : ''}>运行本地 skill 离线检查</button><button class="btn pri" data-prep="execute" data-id="${r.id}" ${r.state !== 'checked' || !cap.browserEnabled ? 'disabled' : ''}>${r.platform === 'wechat' ? '保存公众号草稿' : '填写上传（不发布）'}</button>`}${r.platform==='xhs' && !r.windowReleased && ['awaiting_user','unknown'].includes(r.state) ? `<button class="btn" data-prep="window" data-id="${r.id}">切到 ai 专用编辑窗口</button>` : ''}${r.platform==='xhs' && r.state==='awaiting_user' && !r.windowReleased ? `<button class="btn" data-prep="release-window" data-id="${r.id}">我已手动处理现稿，解除占用</button>` : r.windowReleased ? '<p>本人已确认现稿不再占用窗口；这不代表已发布。</p>' : ''}</div>${r.platform !== 'x' && !cap.browserEnabled ? `<p class="note">${esc(cap.reason)}</p>` : ''}${r.platform === 'x' ? '<p class="note">由你点击打开平台页面并登录 / 核对；本地未读取页面，不能标成 filled。文图包只在本机生成；文字链接不附图。请下载包后手工附图，长文权限与平台草稿保存仍需本人确认。</p>' : ''}${links}</div>`;
+      const xControls = r.platform === 'x' ? `<a class="btn" href="/api/prep/bundle?id=${r.id}" download="x-draft.zip">下载 X 文图包（${r.imageCount || 0} 图）</a><a class="btn" href="/api/prep/x?id=${r.id}" target="_blank" rel="noopener noreferrer">打开 X 文字草稿</a><button class="btn pri" data-prep="execute" data-platform="x" data-id="${r.id}" ${r.state !== 'prepared' || !cap.browserEnabled ? 'disabled' : ''}>填写 X 文图编辑器</button>` : '';
+      const skillControls = r.platform !== 'x' && !r.readOnlyReceipt ? `<button class="btn" data-prep="check" data-id="${r.id}" ${terminal ? 'disabled' : ''}>运行本地 skill 离线检查</button><button class="btn pri" data-prep="execute" data-id="${r.id}" ${r.state !== 'checked' || !cap.browserEnabled ? 'disabled' : ''}>${r.platform === 'wechat' ? '保存公众号草稿' : '填写上传（不发布）'}</button>` : '';
+      return `<div data-prep-record="${r.id}" style="padding:16px 0;border-bottom:1px solid var(--line)"><h3>${esc(PN[r.platform])} · ${esc(r.title || '文字草稿')}${r.test ? ' · 测试稿' : ''}</h3><p>${esc(states[r.state] || r.state)} · ${esc(r.note || '')}</p>${r.error ? `<p role="alert">${esc(r.error)}</p>` : ''}${receipt}<div class="btns">${r.readOnlyReceipt ? '' : `<a class="btn" href="/api/prep/job?id=${r.id}" download="job.json">下载本地任务</a>`}${xControls}${skillControls}${r.platform==='xhs' && !r.windowReleased && ['awaiting_user','unknown'].includes(r.state) ? `<button class="btn" data-prep="window" data-id="${r.id}">切到 ai 专用编辑窗口</button>` : ''}${r.platform==='xhs' && r.state==='awaiting_user' && !r.windowReleased ? `<button class="btn" data-prep="release-window" data-id="${r.id}">我已手动处理现稿，解除占用</button>` : r.windowReleased ? '<p>本人已确认现稿不再占用窗口；这不代表已发布。</p>' : ''}</div>${!cap.browserEnabled || r.platform === 'x' ? `<p class="note">${esc(r.platform === 'x' ? (cap.browserEnabled ? '仅在显式配置专用 Chrome 后可点填写；真实 9336 会话填写尚未验收。' : cap.reason) : cap.reason)}</p>` : ''}${links}</div>`;
     }).join('') || '<p>还没有准备任务。</p>'}</div><p class="note">无平台ID时需要完整匹配文字与发表日期；缺少信息、匹配不唯一或没有真实公开链接均不回写。其他平台未适配；不启用定时或后台自动运行。</p>`;
 }
 document.addEventListener('submit', async event => {
@@ -84,7 +86,10 @@ document.addEventListener('click', async event => {
     }catch(e){toast(e.message);b.disabled=false;}
     return;
   }
-  if (!confirm(type === 'check' ? '将运行已有本地 DSH skill 的离线检查，不连接浏览器。继续？' : '将通过已获准通道操作专用窗口。小红书固定 ai，仅填好保留窗口；公众号只存草稿。结果不明时先人工核对，不直接重跑。继续？')) return;
+  const prompt = type === 'check' ? '运行已有本地 DSH skill 的离线检查？'
+    : b.dataset.platform === 'x' ? '在获准的 X 专用 Chrome 另开空白编辑页并填写文图？填好后保留编辑页供你核对。'
+    : '通过已获准的专用窗口填写小红书 ai 或保存公众号草稿？';
+  if (!confirm(prompt)) return;
   b.disabled = true;
   try {
     const res = await fetch('/api/prep', {method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({type,id:b.dataset.id})}), j = await res.json();

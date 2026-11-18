@@ -7,9 +7,14 @@ import path from 'node:path';
 import http from 'node:http';
 import {once} from 'node:events';
 import {spawn} from 'node:child_process';
+const supportedTests = ['unauth','invalid','home','traffic','system','prepare','prepare-flow','enabled-system'];
+const tests = process.argv.length > 2 ? process.argv.slice(2) : supportedTests;
+if (tests.some(test => !supportedTests.includes(test))) throw new Error('Unknown browser acceptance scenario');
 const output=path.resolve(process.env.MAITIAN_QA_OUT || '_local-headless-accept');
 fs.mkdirSync(output,{recursive:true});
 const folder=fs.mkdtempSync(path.join(os.tmpdir(),'maitian-render-'));
+const fixtureImage=path.join(folder,'draft-fixture.png');
+fs.writeFileSync(fixtureImage,Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Wl6WQAAAABJRU5ErkJggg==','base64'));
 process.env.MAITIAN_HOME=folder; process.env.MAITIAN_DB=path.join(folder,'hub.db');
 process.env.MAITIAN_CONFIG=path.join(folder,'config.json');
 fs.writeFileSync(process.env.MAITIAN_CONFIG,'{}');
@@ -51,6 +56,8 @@ function browserChecks(test, image) {
       }
       if(test.endsWith('system')) {
         for(const label of ['手动操作','采流量','采粉丝','体检','取链接','最近动态','平台登录与校验'])check(document.body.innerText.includes(label),label);
+        const wechat=[...document.querySelectorAll('[data-act]')].find(button=>button.dataset.act.includes('"platform":"wechat"')&&button.textContent.trim()==='登录 / 校验');
+        check(!!wechat,'WeChat login entry');
         check(document.querySelectorAll('[data-act]').length===(test==='enabled-system'?15:12),'manual actions retained');
         const a=document.querySelector('a[href="#/prepare"]');check(!!a,'prepare link');a.click();
         await wait(()=>!!document.querySelector('#prep-form'));check(location.hash==='#/prepare','button navigation');
@@ -66,6 +73,8 @@ function browserChecks(test, image) {
         const data=await (await fetch('/api/prep')).json();check(data.records.length===1 && data.records[0].imageCount===1,'one image draft');
         check(data.records[0].state==='prepared','not platform filled');
         check(Object.values(data.capabilities).every(c=>!c.browserEnabled),'platform execution stays disabled');
+        const xButton=document.querySelector('[data-prep="execute"][data-platform="x"]');
+        check(xButton?.disabled&&xButton.textContent==='填写 X 文图编辑器','X editor requires configured authorization');
       }
       check(!sessionStorage.getItem('qa-error'),'no uncaught JS errors');
       await finish(true,test+'：真实Chrome渲染、表单POST、cookie登录保持、刷新与交互');
@@ -89,7 +98,7 @@ const server=http.createServer(async(req,res)=>{
   }
   const end=res.end.bind(res);
   res.end=(body,...args)=>{
-    if((typeof body==='string'||Buffer.isBuffer(body)) && /^<!doctype html/i.test(String(body)))body=String(body).replace('</body>',browserChecks(current,path.join(output,'unauth.png'))+'</body>');
+    if((typeof body==='string'||Buffer.isBuffer(body)) && /^<!doctype html/i.test(String(body)))body=String(body).replace('</body>',browserChecks(current,fixtureImage)+'</body>');
     return end(body,...args);
   };
   try{await handle(req,res);}catch{res.writeHead(500);res.end('test handler failure');}
@@ -102,7 +111,7 @@ const binary=process.env.CHROME_PATH || [
 const evidence={at:new Date().toISOString(),mode:'Chrome headless CLI; isolated real handler and test data; no platform access or remote debugging',results:[]};
 try {
   if(!binary)throw new Error('Chrome not found');
-  for(const test of ['unauth','invalid','home','traffic','system','prepare','prepare-flow','enabled-system']) {
+  for(const test of tests) {
     current=test;report=null;
     config.publishPrep.browserExecution=test==='enabled-system';
     for(const p of ['x','xhs','wechat'])config.l1[p].browserExecution=test==='enabled-system';

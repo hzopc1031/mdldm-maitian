@@ -7,6 +7,8 @@ import { spawn } from 'node:child_process';
 import { redactL1 } from './l1-web.mjs';
 import { xDraftBundle } from './prep-bundle.mjs';
 import { xhsWindow } from './prep-window.mjs';
+import { l1Account } from './l1-account.mjs';
+import { fillXEditor, isDedicatedXProfile } from './x-draft-editor.mjs';
 
 export const BROWSER_BLOCK = '此平台的专用浏览器操作已由本地配置停用；不会改用其它账号、profile 或旧发布引擎。';
 export function prepCapabilities(config = {}, env = process.env) {
@@ -18,11 +20,14 @@ export function prepCapabilities(config = {}, env = process.env) {
     const keepWindow = platform !== 'xhs' || (installed && fs.readFileSync(script, 'utf8').includes("opts['keep-browser']"));
     // 原compare/9368审批拒绝不是这些已授权专用通道的通用禁令。
     // 显式false仍由维护者控制；身份核验是独立的只读通道。
-    const enabled = config.publishPrep?.browserExecution !== false && config.publishPrep?.[platform]?.browserExecution !== false && installed && keepWindow;
+    const settings = config.publishPrep?.[platform];
+    const enabled = config.publishPrep?.browserExecution !== false && (platform === 'x'
+      ? settings?.browserExecution === true && isDedicatedXProfile(settings.browserProfile)
+      : settings?.browserExecution !== false && installed && keepWindow);
     const inspectEnabled = config.l1?.[platform]?.browserExecution !== false;
     return [platform, { script, installed, browserEnabled: enabled, inspectEnabled,
-      mode: platform === 'x' ? '正文与最多4张图片打包下载；由本人手工附图并核对，不自动发布' : platform === 'xhs' ? '本地 xhs-publish，固定 --account ai，填图文后保留窗口' : '本地 wechat-publish，只保存草稿并核对成功提示',
-      reason: platform === 'x' ? '文图包可直接生成和下载；由本人在 X 附图和保存，不自动发布。' : !installed ? '本地 DSH skill 未安装；不回退旧 hub' : !keepWindow ? '本地 skill 不支持保留窗口，未适配' : enabled ? '使用本地技能专用窗口；执行时核验可见账号。登录、素材检查和本次保存回执决定结果。' : BROWSER_BLOCK }];
+      mode: platform === 'x' ? '正文和最多4张图可下载为文图包；编辑器填写通道已接入但尚未真实验收，默认关闭' : platform === 'xhs' ? '本地 xhs-publish，固定 --account ai，填图文后保留窗口' : '本地 wechat-publish，只保存草稿并核对成功提示',
+      reason: platform === 'x' ? enabled ? '仅在显式配置专用 Chrome 后可点填写；真实 9336 会话填写尚未验收。' : 'X 编辑器填写尚未真实验收，默认关闭；需正式审批并显式配置专用 Chrome 后才启用。' : !installed ? '本地 DSH skill 未安装；不回退旧 hub' : !keepWindow ? '本地 skill 不支持保留窗口，未适配' : enabled ? '使用本地技能专用窗口；执行时核验可见账号。登录、素材检查和本次保存回执决定结果。' : BROWSER_BLOCK }];
   }));
 }
 function text(value, name, max, required = false) {
@@ -80,7 +85,11 @@ const jobDigest = file => {
   const bytes=fs.readFileSync(file), job=JSON.parse(bytes);
   return crypto.createHash('sha256').update(bytes).update(JSON.stringify(job.images.map(f=>crypto.createHash('sha256').update(fs.readFileSync(f)).digest('hex')))).digest('hex');
 };
-export function createPrepService({ db, home, root, config, secrets = [], spawnChild = spawn, env = process.env }) {
+const contentDigestFor = data => crypto.createHash('sha256').update(JSON.stringify({
+  ...data, job: { ...data.job, images: data.job.images.map(file => crypto.createHash('sha256').update(fs.readFileSync(file)).digest('hex')) },
+})).digest('hex');
+
+export function createPrepService({ db, home, root, config, secrets = [], spawnChild = spawn, runX = fillXEditor, env = process.env }) {
   // 单独表不改变原 hub 的 tasks 状态约定；准备完成绝不等于 published。
   db.exec('CREATE TABLE IF NOT EXISTS publish_preparations (id TEXT PRIMARY KEY, record TEXT NOT NULL)');
   const save = r => db.prepare('INSERT OR REPLACE INTO publish_preparations VALUES (?,?)').run(r.id, JSON.stringify(r));
@@ -91,7 +100,7 @@ export function createPrepService({ db, home, root, config, secrets = [], spawnC
   function create(input) {
     if (db.prepare("SELECT 1 FROM publish_preparations WHERE json_extract(record,'$.state')='running'").get()) throw new Error('已有准备操作在运行');
     const data = normalizePrep(input);
-    const contentDigest = crypto.createHash('sha256').update(JSON.stringify({ ...data, job:{...data.job,images:data.job.images.map(f => crypto.createHash('sha256').update(fs.readFileSync(f)).digest('hex'))} })).digest('hex');
+    const contentDigest = contentDigestFor(data);
     const same = db.prepare("SELECT record FROM publish_preparations WHERE json_extract(record,'$.contentDigest')=?").get(contentDigest);
     if (same) return JSON.parse(same.record);
     if (data.episodeId) {
@@ -113,17 +122,52 @@ export function createPrepService({ db, home, root, config, secrets = [], spawnC
     save(r); return r;
   }
   const jobFile = id => { get(id); return path.join(home, 'data', 'publish-prep', id, 'job.json'); };
+  function startX(r, kind, cap) {
+    if (kind !== 'execute') throw new Error('X 文图任务不运行本地 skill 离线检查');
+    if (r.state === 'awaiting_user') return r;
+    if (r.state !== 'prepared') throw new Error('X 编辑器结果需本人核对，禁止直接重跑');
+    if (!cap.browserEnabled) throw new Error(cap.reason);
+    const file = jobFile(r.id), job = JSON.parse(fs.readFileSync(file, 'utf8'));
+    if (job.submit !== false || contentDigestFor({ platform: r.platform, job, episodeId: r.episodeId, test: r.test }) !== r.contentDigest) {
+      throw new Error('X 文图素材已变化，禁止填写');
+    }
+    const account = l1Account(config, 'x');
+    const profile = config.publishPrep.x.browserProfile;
+    r.state = 'running';
+    r.kind = kind;
+    save(r);
+    void (async () => {
+      try {
+        const receipt = await runX({ account, profile, job, folder: path.dirname(file) });
+        if (receipt?.submitted !== false || receipt.editorFilled !== true || receipt.imageCount !== job.images.length) {
+          throw new Error('缺少 X 编辑器完整文图回执');
+        }
+        r.state = 'awaiting_user';
+        r.evidence = receipt;
+        r.note = '完整正文和图片已在 X 新编辑页读回，留给本人核对。';
+        if (r.episodeId) db.prepare('UPDATE tasks SET state=?,detail=?,updated_at=? WHERE episode_id=? AND platform=?')
+          .run(r.state, r.note, new Date().toISOString(), r.episodeId, r.platform);
+      } catch (error) {
+        r.state = 'unknown';
+        r.error = redactL1(error.message, secrets);
+      } finally {
+        r.finishedAt = new Date().toISOString();
+        save(r);
+      }
+    })();
+    return get(r.id);
+  }
   function start(id, kind) {
     if (db.prepare("SELECT 1 FROM publish_preparations WHERE json_extract(record,'$.state')='running'").get()) throw new Error('已有准备操作在运行');
     if (!['check', 'execute'].includes(kind)) throw new Error('不支持此动作');
     const r = get(id), cap = prepCapabilities(config, env)[r.platform];
     if (r.readOnlyReceipt) throw new Error('历史回执只读；不能重新检查或上传');
+    if (r.platform === 'x') return startX(r, kind, cap);
     if (kind === 'execute' && ['awaiting_user','draft_saved'].includes(r.state)) {
       const current = jobDigest(jobFile(id));
       if (current === r.checkedDigest) return r;
       throw new Error('已填任务摘要变化，禁止重新上传；先核对原窗口');
     }
-    if (r.platform === 'x') throw new Error('X 请使用文字草稿链接，由用户打开，不运行自动化');
     if (['running', 'unknown', 'awaiting_user', 'draft_saved', 'published', 'failed'].includes(r.state)) throw new Error('结果未确认或已到位；请人工核对，禁止直接重跑');
     if (kind === 'execute' && !cap.browserEnabled) throw new Error(cap.reason);
     if (kind === 'execute' && r.state !== 'checked') throw new Error('必须先通过本地 skill 离线检查');

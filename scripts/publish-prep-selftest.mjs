@@ -4,11 +4,13 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { EventEmitter } from 'node:events';
+import { setImmediate as nextTurn } from 'node:timers/promises';
 import { DatabaseSync } from 'node:sqlite';
 import { normalizePrep, prepCommand, acceptPrepResult, createPrepService, prepCapabilities } from '../src/publish-prep.mjs';
 import { selectPublishedLink, inspectPlatform, publishedTarget, writePublishedLink,preparationTarget,writePreparationLink } from '../src/l1-inspect.mjs';
 import {browserProxyArgs} from '../src/l1-browser.mjs';
 import {planL1Action} from '../src/l1-web.mjs';
+import {fillXEditor} from '../src/x-draft-editor.mjs';
 
 globalThis.fetch = () => { throw new Error('offline: no network'); };
 globalThis.WebSocket = class { constructor() { throw new Error('offline: no browser'); } };
@@ -77,7 +79,7 @@ try {
   assert.throws(()=>enabled.releaseWindow(w.id));
   const x = enabled.create({platform:'x',content:'文字草稿',test:true});
   assert.match(JSON.parse(fs.readFileSync(enabled.jobFile(x.id))).content,/测试稿/);
-  assert.throws(() => enabled.start(x.id,'execute'),/不运行自动化/);
+  assert.throws(() => enabled.start(x.id,'execute'),/尚未真实验收/);
   const imageBytes=fs.readFileSync(image), xp=enabled.create({platform:'x',content:'完整正文\n第二段',images:[image]});
   fs.writeFileSync(image,'changed after creation');
   const zip=enabled.bundle(xp.id);
@@ -87,6 +89,69 @@ try {
   assert.throws(()=>enabled.bundle(w.id),/仅 X/);
   assert.throws(()=>normalizePrep({platform:'x',content:'x',images:[image]}),/文件头/);
   fs.writeFileSync(image,imageBytes);
+  const profile = path.join(folder,'agent-publish','x','chrome-profile');
+  const configX = { xHandle:'Example', publishPrep:{x:{browserExecution:true,browserProfile:profile}} };
+  const xCalls = [];
+  function fakeBrowser({ oldCompose = false, restoredDraft = false, wrongAccount = false } = {}) {
+    const old = { type:'page', targetId:'protected', url:oldCompose ? 'https://x.com/compose/post' : 'https://x.com/home' };
+    const editor = { type:'page', targetId:'new-editor', url:'https://x.com/compose/post' };
+    let opened = false, typed = false, attached = false;
+    const clip = { x:0, y:0, width:400, height:300, scale:1 };
+    return {
+      pid:1234,
+      close:() => xCalls.push('close connection'),
+      async send(method, params, session) {
+        xCalls.push(method);
+        if (method === 'SystemInfo.getProcessInfo') return { processInfo:[{type:'browser',id:1234}] };
+        if (method === 'Target.getTargets') return {targetInfos:opened ? [old,editor] : [old]};
+        if (method === 'Target.createTarget') {
+          assert.deepEqual(params,{url:editor.url,background:true}); opened = true; return {targetId:editor.targetId};
+        }
+        if (method === 'Target.attachToTarget') {
+          assert.equal(params.targetId,editor.targetId); return {sessionId:'new-editor-session'};
+        }
+        assert.equal(session,'new-editor-session');
+        if (method === 'Runtime.evaluate') {
+          if (params.expression.includes('function visibleXIdentity(')) return {result:{value:{url:editor.url,handle:wrongAccount?'@Wrong':'@Example'}}};
+          if (params.expression.includes(',"focus",')) return {result:{value:true}};
+          if (!params.returnByValue) { assert.ok(typed); return {result:{objectId:'file-input'}}; }
+          return {result:{value:{empty:!restoredDraft&&!typed,ready:typed&&attached,imageCount:Number(attached),clip}}};
+        }
+        if (method === 'Input.insertText') {
+          assert.equal(params.text,'完整正文\n第二段'); typed = true; return {};
+        }
+        if (method === 'DOM.setFileInputFiles') {
+          assert.equal(params.objectId,'file-input'); assert.equal(params.files.length,1);
+          assert.ok(fs.readFileSync(params.files[0]).equals(imageBytes)); attached = true; return {};
+        }
+        if (method === 'Page.captureScreenshot') return {data:imageBytes.toString('base64')};
+        assert.fail(`Unexpected X operation: ${method}`);
+      },
+    };
+  }
+  const xEnabled = createPrepService({...opts,config:configX,runX:params=>fillXEditor(params,()=>fakeBrowser())});
+  const xJob = JSON.parse(fs.readFileSync(xEnabled.jobFile(xp.id),'utf8'));
+  fs.appendFileSync(xJob.images[0],'modified');
+  assert.throws(() => xEnabled.start(xp.id,'execute'),/素材已变化/);
+  fs.writeFileSync(xJob.images[0],imageBytes);
+  assert.equal(xEnabled.start(xp.id,'execute').state,'running');
+  await nextTurn();
+  const xResult = xEnabled.get(xp.id);
+  assert.equal(xResult.state,'awaiting_user');
+  assert.equal(xResult.evidence.editorFilled,true);
+  assert.equal(xResult.evidence.submitted,false);
+  const xCallCount = xCalls.length;
+  assert.equal(xEnabled.start(xp.id,'execute').state,'awaiting_user');
+  assert.equal(xCalls.length,xCallCount);
+  for (const [guard, error] of [
+    [{oldCompose:true}, /已有 X 编辑页/], [{restoredDraft:true}, /已有内容/], [{wrongAccount:true}, /账号与预期不符/],
+  ]) {
+    const initialCalls = xCalls.length;
+    await assert.rejects(fillXEditor({account:'Example',profile,job:xJob,folder},()=>fakeBrowser(guard)),error);
+    const newCalls = xCalls.slice(initialCalls);
+    assert.ok(!newCalls.includes('Input.insertText')&&!newCalls.includes('DOM.setFileInputFiles'));
+    if (guard.oldCompose) assert.ok(!newCalls.includes('Target.createTarget'));
+  }
   assert.throws(()=>normalizePrep({platform:'x',content:'x',images:Array(5).fill(image)}));
   assert.throws(()=>normalizePrep({platform:'wechat',title:'x',content:'x',caption:'x'.repeat(121)}));
   const url = 'https://www.xiaohongshu.com/explore/abc';
