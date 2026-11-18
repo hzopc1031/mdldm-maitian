@@ -2,6 +2,8 @@
 
 在 `l1-real` 分支运行 `node scripts/l1-web-server.mjs`，只监听 `127.0.0.1:8787`（端口可用 `web.port` 配置）。启动日志只显示普通地址，不显示网页口令。大屏右下角「登录与采集」进入 `/p#/system`。
 
+本机并排对照：用localhost与127对照隔离Cookie。原版固定访问 `http://127.0.0.1:8788/`，L1 访问 `http://localhost:8787/`，各自登录；不用改监听或 Cookie 代码。同 host 不同端口会共享并覆盖 `mt_key`，此次 401 属于覆盖，Cookie 有效期仍为一年。Chrome 已实测 localhost 的 IPv6 连接被拒后成功回退 IPv4，正反登录顺序和刷新均保持登录；其他环境若无法回退，先分开浏览器配置文件。以后只运行 8787，可恢复 `http://127.0.0.1:8787/`。验证边界见[问题清单](issue-register.md)。
+
 2026-11-17 22:17纠正后：三平台可见身份体检、作品取链接、新准备稿按完整文字/实际日期取链接均有实际CLI入口；不调用旧七平台doctor。原本地小红书skill已真实完成ai身份核验、图文上传填写、保留窗口，未发布。X/公众号各自专用profile真实确认需要本人登录。小红书正向取链接尚未成功，原因是当前可见列表没有公开URL，额外公开页404；不会按ID拼造。详见[publish-preparation.md](publish-preparation.md)和[问题清单](issue-register.md)。
 
 网页仅提供 X `@PeanutPair`、小红书 `TwoPeanuts` 和公众号三个平台。公众号可用名称由 `config.l1.wechat.account` 约束；未配置时仍可登录，由可见唯一公众号名称完成校验。首次登录和过期后的扫码/验证需要 Liu 在本次专用窗口完成。
