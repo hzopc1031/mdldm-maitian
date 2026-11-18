@@ -46,7 +46,7 @@ function vTraffic() {
   ${sec('每期 × 平台', '格子里是播放数，细条是这一期里的占比')}
   <div class="panel"><div class="tw"><table><thead><tr><th>期</th>${PL.map(p => `<th class="n">${logo(p)}${PN[p]}</th>`).join('')}<th class="n">合计</th><th class="n">互动率</th></tr></thead><tbody>
     ${eps.map(x => { const m2 = Math.max(...PL.map(p => (M(x, p) || {}).views || 0), 1); return `<tr><td><a href="#/ep/${encodeURIComponent(x.id)}" title="${esc(x.name)}">${epc(x)}</a></td>${PL.map(p => { const m = M(x, p); return `<td class="n">${m ? fmt(m.views) : '–'}<span class="cellbar"><i style="width:${m ? (m.views / m2 * 100).toFixed(0) : 0}%"></i></span></td>`; }).join('')}<td class="n"><b>${fmt(x.views)}</b></td><td class="n">${pct(x.inter, x.views, 1)}</td></tr>`; }).join('')}</tbody></table></div></div>
-  ${sec(`${esc(e.nick)} · 各平台明细`, eps.length > 1 ? eps.map(x => `<a href="#/traffic" data-pick="${esc(x.id)}" style="margin-left:12px;${x.id === e.id ? 'color:var(--accent);font-weight:600' : ''}" title="${esc(x.name)}">${esc(x.nick)}</a>`).join('') : '')}
+  <div class="sec traffic-detail"><h2>${esc(e.nick)} · 各平台明细</h2>${eps.length > 1 ? `<label class="traffic-picker" for="traffic-pick">选择作品<select id="traffic-pick">${eps.map(x => `<option value="${esc(x.id)}" ${x.id === e.id ? 'selected' : ''}>${esc(x.nick)} · ${when(timeOf(x)).split(' ')[0]}</option>`).join('')}</select></label>` : ''}</div>
   <div class="panel"><div class="tw"><table><thead><tr><th>平台</th><th class="n">播放</th><th class="n">赞</th><th class="n">评论</th><th class="n">收藏</th><th class="n">转发</th><th class="n">互动率</th><th class="n">收藏率</th><th></th></tr></thead><tbody>
     ${rows.sort((a, b) => b.m.views - a.m.views).map(r => { const u = safeUrl(r.t && r.t.url); return `<tr><td>${logo(r.p)}${PN[r.p]}</td><td class="n"><b>${fmt(r.m.views)}</b><span class="cellbar"><i style="width:${(r.m.views / mx * 100).toFixed(0)}%"></i></span></td><td class="n">${fmt(r.m.likes)}</td><td class="n">${fmt(r.m.comments)}</td><td class="n">${fmt(r.m.favorites)}</td><td class="n">${fmt(r.m.shares)}</td><td class="n">${r.m.views ? pct(inter(r.m), r.m.views, 1) : '–'}</td><td class="n">${r.m.views && r.m.favorites != null ? pct(r.m.favorites, r.m.views, 1) : '–'}</td><td class="n">${u ? `<a href="${u}" target="_blank" rel="noopener">打开 ↗</a>` : ''}</td></tr>`; }).join('')}</tbody></table></div></div>
   ${sec(`${esc(e.nick)} · 播放走势`, '每次采样一个点')}<div class="panel"><div class="chartbox" id="c-line"></div></div>
@@ -156,12 +156,12 @@ async function load() {
 }
 function poll() { clearInterval(timer); timer = setInterval(async () => { await load(); if (!busy()) { clearInterval(timer); timer = null; } }, 4000); }
 document.addEventListener('click', async (e) => {
-  const pk = e.target.closest('[data-pick]'); if (pk) { e.preventDefault(); pick = pk.dataset.pick; render(); return; }
   const b = e.target.closest('[data-act]'); if (!b) return; const a = JSON.parse(b.dataset.act);
   if (b.dataset.confirm && !confirm(b.dataset.confirm)) return;
   const r = await fetch('/api/action', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(a) }), j = await r.json().catch(() => ({}));
   toast(r.ok ? '已开始，跑完会自动刷新' : (j.error || '没成功')); if (r.ok) { await load(); poll(); }
 });
+document.addEventListener('change', (e) => { if (e.target.id === 'traffic-pick') { pick = e.target.value; render(); } });
 addEventListener('hashchange', () => { render(); scrollTo(0, 0); });
 addEventListener('resize', () => after());
 load(); setInterval(() => { if (!location.hash.startsWith('#/prepare') && !timer && !document.hidden && !document.querySelector('details[open]')) load(); }, 60000);
