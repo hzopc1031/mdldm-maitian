@@ -14,29 +14,52 @@ export function isDedicatedXProfile(value) {
     /[\\/]agent-publish[\\/]x[\\/]chrome-profile$/i.test(path.normalize(value));
 }
 
-async function connectDedicatedBrowser(expectedProfile) {
+export async function queryDedicatedXBrowserOwner(expectedProfile) {
   if (process.platform !== 'win32') throw new Error('X 文图填写需要 Windows 专用 Chrome');
+  const powershell = 'C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe';
   const getOwner = [
     "$ErrorActionPreference = 'Stop'",
+    '[Console]::OutputEncoding = [Text.Encoding]::UTF8',
+    'try {',
+    'Import-Module NetTCPIP -ErrorAction Stop',
     '$s = @(Get-NetTCPConnection -State Listen -LocalPort 9336)',
     "if ($s.Count -ne 1 -or $s[0].LocalAddress -ne '127.0.0.1') { throw 'listener' }",
     "$p = Get-CimInstance Win32_Process -Filter ('ProcessId=' + $s[0].OwningProcess)",
     `$m = [regex]::Matches($p.CommandLine, '--user-data-dir=(?:"([^"]+)"|([^ ]+))')`,
     "if ($p.Name -ne 'chrome.exe' -or $m.Count -ne 1) { throw 'profile' }",
     '[pscustomobject]@{pid=$p.ProcessId;profile=($m[0].Groups[1].Value+$m[0].Groups[2].Value)} | ConvertTo-Json -Compress',
-  ].join('; ');
+    '} catch {',
+    '[pscustomobject]@{message=$_.Exception.Message;id=$_.FullyQualifiedErrorId;category=[string]$_.CategoryInfo.Category} | ConvertTo-Json -Compress',
+    'exit 1',
+    '}',
+  ].join('\n');
   let owner;
   try {
     const { execFile } = await import('node:child_process');
-    const { stdout } = await promisify(execFile)('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', getOwner], { windowsHide: true, timeout: 8000 });
+    const { stdout } = await promisify(execFile)(powershell, ['-NoProfile', '-NonInteractive', '-Command', getOwner], { windowsHide: true, timeout: 8000 });
     owner = JSON.parse(stdout);
-  } catch {
-    throw new Error('X 专用 Chrome 9336 的进程归属检查未通过');
+  } catch (error) {
+    let detail = error.code ?? error.name;
+    try {
+      const { message, id, category } = JSON.parse(error.stdout);
+      if ([message, id, category].every(value => typeof value === 'string')) {
+        const safe = message.split(/\r?\n/, 1)[0]
+          .replace(/(?:command\s*line|cookie|authorization|password|passwd|secret|token|api[-_ ]?key|口令|密码|命令行|chrome\.exe|\s--).*$/i, '[已脱敏]');
+        const codes = [category, id].filter(value => /^[\w,. -]+$/.test(value));
+        detail = [safe, ...codes].filter(Boolean).join(' / ');
+      }
+    } catch { /* Child diagnostics may be unavailable if PowerShell could not start. */ }
+    throw new Error(`X 专用 Chrome 9336 的进程归属检查未通过（${detail}）`);
   }
-  if (!Number.isInteger(owner.pid) || !isDedicatedXProfile(owner.profile) ||
+  if (!Number.isInteger(owner?.pid) || !isDedicatedXProfile(owner.profile) ||
     path.resolve(owner.profile).toLowerCase() !== path.resolve(expectedProfile).toLowerCase()) {
     throw new Error('X 专用 Chrome profile 与配置不匹配');
   }
+  return owner;
+}
+
+async function connectDedicatedBrowser(expectedProfile) {
+  const owner = await queryDedicatedXBrowserOwner(expectedProfile);
   const response = await fetch(`http://127.0.0.1:${port}/json/version`, { redirect: 'error', signal: AbortSignal.timeout(5000) });
   if (!response.ok) throw new Error('X 专用 Chrome 调试入口不可用');
   const version = await response.json();

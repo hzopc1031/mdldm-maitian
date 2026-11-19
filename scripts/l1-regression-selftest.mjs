@@ -14,7 +14,7 @@ process.env.MAITIAN_HOME = folder;
 fs.writeFileSync(path.join(folder,'l1-accounts.local.json'),JSON.stringify({x:'PeanutPair',xhs:'TwoPeanuts'}));
 process.env.MAITIAN_DB = path.join(folder, 'hub.db');
 process.env.MAITIAN_CONFIG = path.join(folder, 'config.json');
-fs.writeFileSync(process.env.MAITIAN_CONFIG, JSON.stringify({ rootPath: folder }));
+fs.writeFileSync(process.env.MAITIAN_CONFIG, JSON.stringify({ rootPath: folder, web: { requireLocalToken: false } }));
 globalThis.fetch = () => { throw new Error('离线自测禁止网络请求'); };
 const { importX } = await import('./import-x-public.mjs');
 const { db } = await import('../src/l1-store.mjs');

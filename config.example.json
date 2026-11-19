@@ -48,6 +48,7 @@
   "xHandle": "PeanutPair",
   "web": {
     "port": 8787,
+    "requireLocalToken": true,
     "key": "换成一串随机字符，网页访问口令",
     "login": "feishu（可选：远程打开时用飞书验证码登录，不用带口令；不要就删掉这一项）",
     "widgetToken": "可选：iPhone 小组件用的只读口令，随便一串随机字符",

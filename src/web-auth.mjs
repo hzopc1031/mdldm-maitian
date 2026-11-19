@@ -1,3 +1,21 @@
+export const isLoopback = address => ['127.0.0.1', '::1', '::ffff:127.0.0.1'].includes(address);
+
+// 免口令模式只接受直连，使用实际监听端口校验 Host 和浏览器来源。
+export function localRequestAllowed(req) {
+  const { headers, socket, method } = req;
+  if (!isLoopback(socket.remoteAddress)) return false;
+  if (!req.url.startsWith('/') || req.url.startsWith('//')) return false;
+  const host = headers.host?.toLowerCase();
+  const port = socket.localPort;
+  const localHost = port === 80 ? host?.replace(/:80$/, '') : host;
+  const suffix = port === 80 ? '' : `:${port}`;
+  if (localHost !== `localhost${suffix}` && localHost !== `127.0.0.1${suffix}`) return false;
+  if (Object.keys(headers).some(name => /^(?:forwarded$|via$|x-forwarded-|x-real-ip$|true-client-ip$|cf-)/.test(name))) return false;
+  if (headers['sec-fetch-site'] && !['none', 'same-origin'].includes(headers['sec-fetch-site'])) return false;
+  if (headers.origin !== undefined) return headers.origin === `http://${localHost}`;
+  return method === 'GET' || method === 'HEAD';
+}
+
 // 口令只由浏览器 POST /auth；不反射进 HTML、URL 或日志。
 export const cleanTarget = value => {
   try {

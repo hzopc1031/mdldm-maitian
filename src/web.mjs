@@ -8,7 +8,7 @@ import { accessEmail } from './access.mjs';
 import { initLogin, sessionOk, handleLogin } from './login.mjs';
 import { L1_PLATFORMS, L1_PORTS, planL1Action, launchL1, redactL1 } from './l1-web.mjs';
 import { home } from './l1-config.mjs';
-import { authPage, cleanTarget } from './web-auth.mjs';
+import { authPage, cleanTarget, isLoopback, localRequestAllowed } from './web-auth.mjs';
 import { createPrepService, BROWSER_BLOCK } from './publish-prep.mjs';
 import { l1Account } from './l1-account.mjs';
 import { configuredSummaries } from './l1-summary.mjs';
@@ -152,6 +152,12 @@ function thumb(f, w) {
 }
 
 export async function handle(req, res) {
+  const localOnly = W.requireLocalToken === false;
+  if (localOnly) {
+    if (!localRequestAllowed(req)) return send(res, 403, { error: '仅允许同源本机直连请求' });
+    res.setHeader('content-security-policy', "frame-ancestors 'none'");
+    res.setHeader('cross-origin-resource-policy', 'same-origin');
+  }
   const u = new URL(req.url, 'http://x');
   // 访问控制：前面挂了 Cloudflare Access（邮箱验证码）就认它的登录凭证；否则用口令（第一次带 ?key= 进来，之后用 cookie）
   if (/^\/static\/icon-\d+\.png$/.test(u.pathname)) return send(res, 200, fs.readFileSync(path.join(DIR, 'web', path.basename(u.pathname))), 'image/png', { 'cache-control': 'max-age=86400' });   // 主屏幕图标不用登录
@@ -173,7 +179,7 @@ export async function handle(req, res) {
   const cookieKey = ((req.headers.cookie || '').match(/mt_key=([^;]+)/) || [])[1];
   const authCookie = { 'set-cookie': `mt_key=${W.key}; Path=/; Max-Age=31536000; HttpOnly; SameSite=Lax`, 'referrer-policy': 'no-referrer' };
   if (u.pathname === '/auth' && req.method === 'POST') {
-    if (req.headers.origin && req.headers.origin !== `http://${req.headers.host}`) return send(res, 403, { error: '请求来源不符' });
+    if (!localOnly && req.headers.origin && req.headers.origin !== `http://${req.headers.host}`) return send(res, 403, { error: '请求来源不符' });
     let body = '';
     for await (const chunk of req) {
       body += chunk;
@@ -187,7 +193,10 @@ export async function handle(req, res) {
   if (W.key && u.searchParams.has('key') && (tokenEq(u.searchParams.get('key'), W.key) || tokenEq(cookieKey, W.key))) {
     return send(res, 302, '', 'text/plain', { ...authCookie, location: cleanTarget(u.pathname + u.search) });
   }
-  if (W.key && !tokenEq(req.headers['x-maitian-key'], W.key) && cookieKey !== W.key && !(LOGIN && sessionOk(req)) && !(await accessEmail(req, W.access))) {
+  // 小组件安装页会输出单独的口令，仍需登录。
+  if ((!localOnly || u.pathname === '/widget') &&
+      !(W.key && (tokenEq(req.headers['x-maitian-key'], W.key) || tokenEq(cookieKey, W.key))) &&
+      !(LOGIN && sessionOk(req)) && !(await accessEmail(req, W.access))) {
     if (LOGIN) return u.pathname.startsWith('/api/') ? send(res, 401, { error: '需要登录' }) : send(res, 302, '', 'text/plain', { location: '/login' });
     return u.pathname.startsWith('/api/') ? send(res, 401, { error: '需要登录' }) : send(res, 401, authPage(), 'text/html; charset=utf-8', { 'referrer-policy': 'same-origin' });
   }
@@ -223,9 +232,9 @@ export async function handle(req, res) {
     catch { return send(res, 404, { error: '准备任务不存在' }); }
   }
   if (['/api/prep','/api/prep/image'].includes(u.pathname) && req.method === 'POST') {
-    if (!['127.0.0.1', '::1', '::ffff:127.0.0.1'].includes(req.socket.remoteAddress)) return send(res, 403, { error: '仅允许本机操作' });
-    if (!W.key) return send(res, 503, { error: '请先由用户配置网页口令' });
-    if (req.headers.origin && req.headers.origin !== `http://${req.headers.host}`) return send(res, 403, { error: '请求来源不符' });
+    if (!isLoopback(req.socket.remoteAddress)) return send(res, 403, { error: '仅允许本机操作' });
+    if (!localOnly && !W.key) return send(res, 503, { error: '请先由用户配置网页口令' });
+    if (!localOnly && req.headers.origin && req.headers.origin !== `http://${req.headers.host}`) return send(res, 403, { error: '请求来源不符' });
     if (u.pathname === '/api/prep/image') {
       const chunks=[]; let size=0;
       for await (const chunk of req) { size+=chunk.length; if(size>32*1024*1024) return send(res,413,{error:'单图不超过32MB'}); chunks.push(chunk); }
@@ -256,10 +265,9 @@ export async function handle(req, res) {
     return send(res, 200, fs.readFileSync(f), /\.png$/.test(f) ? 'image/png' : /\.svg$/.test(f) ? 'image/svg+xml' : 'image/jpeg', { 'cache-control': 'max-age=300' });
   }
   if (u.pathname === '/api/action' && req.method === 'POST') {
-    const remote = req.socket.remoteAddress;
-    if (!['127.0.0.1', '::1', '::ffff:127.0.0.1'].includes(remote)) return send(res, 403, { error: 'L1 操作只允许本机请求' });
-    if (!W.key) return send(res, 503, { error: '请先由 Liu 配置网页口令' });
-    if (req.headers.origin && req.headers.origin !== `http://${req.headers.host}`) return send(res, 403, { error: '请求来源不符' });
+    if (!isLoopback(req.socket.remoteAddress)) return send(res, 403, { error: 'L1 操作只允许本机请求' });
+    if (!localOnly && !W.key) return send(res, 503, { error: '请先由 Liu 配置网页口令' });
+    if (!localOnly && req.headers.origin && req.headers.origin !== `http://${req.headers.host}`) return send(res, 403, { error: '请求来源不符' });
     let body = '', tooLarge = false;
     req.on('data', d => { body += d; if (Buffer.byteLength(body) > 4096) { tooLarge = true; body = ''; } }); req.on('end', () => {
       if (tooLarge) return send(res, 413, { error: '请求过大' });

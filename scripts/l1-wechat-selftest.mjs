@@ -13,7 +13,7 @@ if (process.argv[2] === '--browser-child') { await browserChild(); process.exit(
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const folder = fs.mkdtempSync(path.join(root, '_l1-selftest-wechat-'));
 Object.assign(process.env, { MAITIAN_HOME: folder, MAITIAN_DB: path.join(folder, 'hub.db'), MAITIAN_CONFIG: path.join(folder, 'config.json') });
-fs.writeFileSync(process.env.MAITIAN_CONFIG, JSON.stringify({ rootPath: folder }));
+fs.writeFileSync(process.env.MAITIAN_CONFIG, JSON.stringify({ rootPath: folder, web: { requireLocalToken: false } }));
 globalThis.fetch = () => { throw new Error('禁止外部网络'); };
 globalThis.WebSocket = class { constructor() { throw new Error('禁止调试连接'); } };
 const output = [], log = line => { output.push(line); console.log(line); };
