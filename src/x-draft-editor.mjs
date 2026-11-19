@@ -124,15 +124,28 @@ function editorView(editorSelector, fileSelector, action, expectedText, expected
   if (location.href !== 'https://x.com/compose/post') return null;
   const visible = el => el.getClientRects().length > 0 && getComputedStyle(el).visibility === 'visible';
   const editors = [...document.querySelectorAll(editorSelector)].filter(el => el.isContentEditable && visible(el));
-  if (editors.length !== 1) return null;
-  const editor = editors[0];
-  const dialog = editor.closest('[role="dialog"]');
-  const inputs = dialog?.querySelectorAll(fileSelector);
-  if (inputs?.length !== 1 || !visible(dialog)) return null;
-  const removers = [...dialog.querySelectorAll('[data-testid="removeMedia"]')].filter(visible);
-  const images = [...dialog.querySelectorAll('[data-testid="attachments"] img')].filter(visible);
-  const busy = [...dialog.querySelectorAll('[role="progressbar"], [aria-busy="true"]')].some(visible);
-  const errors = [...dialog.querySelectorAll('[role="alert"]')].some(visible);
+  // The home inline editor can also be rendered behind the compose dialog.
+  const dialogEditors = editors.map(editor => ({ editor, composer: editor.closest('[role="dialog"]') }))
+    .filter(({ composer }) => composer && visible(composer));
+  if (dialogEditors.length !== 1) return null;
+  const { editor, composer } = dialogEditors[0];
+  if (editors.some(other => other !== editor && other.innerText.trim())) return null;
+  const inputs = composer?.querySelectorAll(fileSelector);
+  if (inputs?.length !== 1) return null;
+  const removers = [...composer.querySelectorAll('[data-testid="removeMedia"], [data-testid="attachments"] button[aria-label="Remove media"]')].filter(visible);
+  const images = [...composer.querySelectorAll('[data-testid="attachments"] img')].filter(visible);
+  const busy = [...composer.querySelectorAll('[role="progressbar"], [aria-busy="true"]')].some(el => {
+    if (!visible(el)) return false;
+    // X renders determinate counters in the composer footer before any upload starts.
+    const footer = el.parentElement?.querySelector('[data-testid="tweetButton"]');
+    const toolbarCounter = el.closest('[role="toolbar"], [data-testid="toolBar"]') &&
+      el.getAttribute('aria-valuemin') === '0' && el.querySelectorAll('circle').length === 3;
+    const textCounter = (footer || toolbarCounter) && el.getAttribute('role') === 'progressbar' &&
+      el.getAttribute('aria-valuemax') === '100' && /^\d+(?:\.\d+)?$/.test(el.getAttribute('aria-valuenow') || '') &&
+      !el.closest('[data-testid="attachments"]');
+    return el.getAttribute('aria-busy') === 'true' || !textCounter;
+  });
+  const errors = [...composer.querySelectorAll('[role="alert"]')].some(visible);
   const actual = editor.innerText.replace(/\r\n?/g, '\n');
   const empty = !actual.trim() && !removers.length && !images.length && !inputs[0].files.length && !busy && !errors;
   if (action === 'focus') {
@@ -142,7 +155,7 @@ function editorView(editorSelector, fileSelector, action, expectedText, expected
   }
   if (action === 'input') return actual === expectedText && !busy && !errors && !removers.length &&
     !images.length && !inputs[0].files.length ? inputs[0] : null;
-  const r = dialog.getBoundingClientRect();
+  const r = composer.getBoundingClientRect();
   const ready = actual === expectedText && removers.length === expectedImages && images.length === expectedImages &&
     images.every(image => image.complete && image.naturalWidth > 0) && !busy && !errors;
   return { empty, ready, imageCount: images.length, clip: {
@@ -184,7 +197,7 @@ export async function fillXEditor({ account, profile, job, folder }, connect = c
     const text = job.content.replace(/\r\n?/g, '\n');
     evidence.stage = 'open-new-editor';
     record();
-    const { targetId } = await send('Target.createTarget', { url: compose, background: true });
+    const { targetId } = await send('Target.createTarget', { url: compose, background: false });
     if (!targetId || oldTabs.some(target => target.targetId === targetId)) throw new Error('没有确认新建独立 X 标签');
     const { sessionId } = await send('Target.attachToTarget', { targetId, flatten: true });
     if (!sessionId) throw new Error('没有确认独立 X 标签调试会话');

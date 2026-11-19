@@ -81,6 +81,22 @@ export function acceptPrepResult(platform, kind, code, result) {
   if (platform === 'xhs' && result.dryRun === true && result.submitted === false) return 'awaiting_user';
   throw new Error('缺少填好 / 草稿保存证明，状态保持未确认');
 }
+
+const wechatErrorCodes = new Set(['USAGE', 'LOGIN_REQUIRED', 'PAGE_CHANGED', 'UPLOAD_FAILED', 'PUBLISH_FAILED', 'BROWSER_FAILED', 'RENDER_FAILED']);
+function wechatFailureEvidence(code, result) {
+  const bool = value => typeof value === 'boolean' ? value : null;
+  const knownCode = value => wechatErrorCodes.has(value) ? value : null;
+  return {
+    exitCode: Number.isInteger(code) ? code : null,
+    receiptParsed: result !== undefined,
+    resultOk: bool(result?.ok),
+    submitted: bool(result?.submitted),
+    savedAsDraft: bool(result?.savedAsDraft),
+    skillCode: knownCode(result?.code),
+    operationCode: knownCode(result?.operationCode),
+  };
+}
+
 const jobDigest = file => {
   const bytes=fs.readFileSync(file), job=JSON.parse(bytes);
   return crypto.createHash('sha256').update(bytes).update(JSON.stringify(job.images.map(f=>crypto.createHash('sha256').update(fs.readFileSync(f)).digest('hex')))).digest('hex');
@@ -181,9 +197,9 @@ export function createPrepService({ db, home, root, config, secrets = [], spawnC
     r.state = 'running'; r.kind = kind; r.error = ''; save(r);
     const finish = (code, error) => {
       if (done) return; done = true;
+      let result;
       try {
         if (error) throw error;
-        let result;
         try { result = JSON.parse(output); } catch { throw new Error('本地 skill 回执不是有效 JSON；结果未确认'); }
         if (kind === 'check' && result?.ok !== true) throw new Error('本地 skill 离线检查未通过；请检查素材、逐图审阅记录和图片哈希，不代表可上传');
         r.state = acceptPrepResult(r.platform, kind, code, result);
@@ -197,7 +213,13 @@ export function createPrepService({ db, home, root, config, secrets = [], spawnC
           ...(typeof result.screenshot === 'string' && path.isAbsolute(result.screenshot) && !/^(?:\\\\|\/\/)/.test(result.screenshot) ? { screenshot: result.screenshot } : {}),
           ...(r.platform === 'xhs' ? { dryRun: result.dryRun === true, account: 'ai', keepBrowser: true } : {}),
           ...(r.platform === 'wechat' ? { savedAsDraft: result.savedAsDraft === true, draftVerified: result.draftVerified === true } : {}) };
-      } catch (e) { r.state = kind === 'execute' ? 'unknown' : 'check_failed'; r.error = redactL1(e.message, secrets); }
+      } catch (e) {
+        r.state = kind === 'execute' ? 'unknown' : 'check_failed';
+        r.error = redactL1(e.message, secrets);
+        if (r.platform === 'wechat' && kind === 'execute') {
+          r.failureEvidence = wechatFailureEvidence(code, result);
+        }
+      }
       // 不保存 skill 原始 stdout/stderr：其中可能含认证 URL、会话或无界 DOM。
       r.finishedAt = new Date().toISOString(); save(r);
     };

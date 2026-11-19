@@ -5,6 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { EventEmitter } from 'node:events';
 import { setImmediate as nextTurn } from 'node:timers/promises';
+import { runInNewContext } from 'node:vm';
 import { DatabaseSync } from 'node:sqlite';
 import { normalizePrep, prepCommand, acceptPrepResult, createPrepService, prepCapabilities } from '../src/publish-prep.mjs';
 import { selectPublishedLink, inspectPlatform, publishedTarget, writePublishedLink,preparationTarget,writePreparationLink } from '../src/l1-inspect.mjs';
@@ -76,6 +77,24 @@ try {
   enabled.start(w.id,'check'); child.stdout.emit('data',JSON.stringify({ok:true,offline:true})); child.emit('close',0);
   enabled.start(w.id,'execute'); child.stdout.emit('data',JSON.stringify({ok:true,submitted:false,savedAsDraft:false})); child.emit('close',0);
   assert.equal(enabled.get(w.id).state,'unknown'); assert.throws(() => enabled.start(w.id,'execute'));
+  assert.deepEqual(enabled.get(w.id).failureEvidence, {
+    exitCode:0, receiptParsed:true, resultOk:true, submitted:false, savedAsDraft:false, skillCode:null, operationCode:null,
+  });
+  const cleanup = enabled.create({platform:'wechat',title:'草稿浏览器清理失败',content:'只模拟'});
+  enabled.start(cleanup.id,'check'); child.stdout.emit('data',JSON.stringify({ok:true,offline:true})); child.emit('close',0);
+  enabled.start(cleanup.id,'execute');
+  child.stdout.emit('data',JSON.stringify({ok:false,savedAsDraft:false,code:'BROWSER_FAILED',operationCode:'PUBLISH_FAILED',message:'receipt-private-marker'}));
+  child.stderr.emit('data','stderr-private-marker'); child.emit('close',6);
+  const failure = enabled.get(cleanup.id);
+  assert.equal(failure.state,'unknown');
+  assert.deepEqual(failure.failureEvidence,{exitCode:6,receiptParsed:true,resultOk:false,submitted:null,savedAsDraft:false,skillCode:'BROWSER_FAILED',operationCode:'PUBLISH_FAILED'});
+  assert.doesNotMatch(JSON.stringify(failure),/private-marker/);
+  const malformed = enabled.create({platform:'wechat',title:'草稿回执无法解析',content:'只模拟'});
+  enabled.start(malformed.id,'check'); child.stdout.emit('data',JSON.stringify({ok:true,offline:true})); child.emit('close',0);
+  enabled.start(malformed.id,'execute'); child.stdout.emit('data','malformed private-marker'); child.emit('close',0);
+  assert.equal(enabled.get(malformed.id).state,'unknown');
+  assert.equal(enabled.get(malformed.id).failureEvidence.receiptParsed,false);
+  assert.doesNotMatch(JSON.stringify(enabled.get(malformed.id)),/private-marker/);
   assert.throws(()=>enabled.releaseWindow(w.id));
   const x = enabled.create({platform:'x',content:'文字草稿',test:true});
   assert.match(JSON.parse(fs.readFileSync(enabled.jobFile(x.id))).content,/测试稿/);
@@ -92,11 +111,34 @@ try {
   const profile = path.join(folder,'agent-publish','x','chrome-profile');
   const configX = { xHandle:'Example', publishPrep:{x:{browserExecution:true,browserProfile:profile}} };
   const xCalls = [];
-  function fakeBrowser({ oldCompose = false, restoredDraft = false, wrongAccount = false } = {}) {
+  function fakeBrowser({ oldCompose = false, restoredDraft = false, wrongAccount = false, inlineEditorBehindDialog = false } = {}) {
     const old = { type:'page', targetId:'protected', url:oldCompose ? 'https://x.com/compose/post' : 'https://x.com/home' };
     const editor = { type:'page', targetId:'new-editor', url:'https://x.com/compose/post' };
     let opened = false, typed = false, attached = false;
     const clip = { x:0, y:0, width:400, height:300, scale:1 };
+    const visible = { getClientRects: () => [clip], getBoundingClientRect: () => ({ ...clip, right:400, bottom:300 }) };
+    const fileInput = { files:[] };
+    const body = {};
+    const inlineEditor = { ...visible, isContentEditable:true, closest:() => null, innerText:'' };
+    const document = { body, querySelectorAll: () => [editorNode, inlineEditor] };
+    const textCounter = { ...visible, closest:() => null,
+      getAttribute(name) { return ({role:'progressbar','aria-valuemax':'100','aria-valuenow':typed ? '8.1' : '0'})[name] ?? null; },
+      parentElement:{ querySelector:selector => selector === '[data-testid="tweetButton"]' ? visible : null },
+    };
+    const toolbarCounter = { ...visible, closest:selector => selector.includes('toolBar') ? visible : null, querySelectorAll:() => [{}, {}, {}],
+      getAttribute(name) { return ({role:'progressbar','aria-valuemin':'0','aria-valuemax':'100','aria-valuenow':'30'})[name] ?? null; },
+    };
+    const composer = { ...visible, parentElement:body, querySelectorAll(selector) {
+      if (selector.startsWith('input')) return [fileInput];
+      if (selector.includes('progressbar')) return typed ? [textCounter, toolbarCounter] : [textCounter];
+      if (attached && selector.includes('button[aria-label="Remove media"]')) return [visible];
+      if (attached && selector.includes('attachments')) return [{ ...visible, complete:true, naturalWidth:1 }];
+      return [];
+    } };
+    const editorNode = { ...visible, isContentEditable:true, parentElement:composer, closest:() => composer,
+      get innerText() { return typed ? '完整正文\n第二段' : ''; },
+      focus() { document.activeElement = editorNode; },
+    };
     return {
       pid:1234,
       close:() => xCalls.push('close connection'),
@@ -105,7 +147,7 @@ try {
         if (method === 'SystemInfo.getProcessInfo') return { processInfo:[{type:'browser',id:1234}] };
         if (method === 'Target.getTargets') return {targetInfos:opened ? [old,editor] : [old]};
         if (method === 'Target.createTarget') {
-          assert.deepEqual(params,{url:editor.url,background:true}); opened = true; return {targetId:editor.targetId};
+          assert.deepEqual(params,{url:editor.url,background:false}); opened = true; return {targetId:editor.targetId};
         }
         if (method === 'Target.attachToTarget') {
           assert.equal(params.targetId,editor.targetId); return {sessionId:'new-editor-session'};
@@ -113,6 +155,10 @@ try {
         assert.equal(session,'new-editor-session');
         if (method === 'Runtime.evaluate') {
           if (params.expression.includes('function visibleXIdentity(')) return {result:{value:{url:editor.url,handle:wrongAccount?'@Wrong':'@Example'}}};
+          if (inlineEditorBehindDialog) {
+            const value = runInNewContext(params.expression, { document, location:{href:editor.url}, getComputedStyle:() => ({visibility:'visible'}), scrollX:0, scrollY:0, innerWidth:400, innerHeight:300 });
+            return {result:params.returnByValue ? {value} : {objectId:value === fileInput ? 'file-input' : undefined}};
+          }
           if (params.expression.includes(',"focus",')) return {result:{value:true}};
           if (!params.returnByValue) { assert.ok(typed); return {result:{objectId:'file-input'}}; }
           return {result:{value:{empty:!restoredDraft&&!typed,ready:typed&&attached,imageCount:Number(attached),clip}}};
@@ -129,7 +175,7 @@ try {
       },
     };
   }
-  const xEnabled = createPrepService({...opts,config:configX,runX:params=>fillXEditor(params,()=>fakeBrowser())});
+  const xEnabled = createPrepService({...opts,config:configX,runX:params=>fillXEditor(params,()=>fakeBrowser({inlineEditorBehindDialog:true}))});
   const xJob = JSON.parse(fs.readFileSync(xEnabled.jobFile(xp.id),'utf8'));
   fs.appendFileSync(xJob.images[0],'modified');
   assert.throws(() => xEnabled.start(xp.id,'execute'),/素材已变化/);
