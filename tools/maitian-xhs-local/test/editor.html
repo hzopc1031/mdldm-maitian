@@ -1,0 +1,67 @@
+<!doctype html>
+<html lang="zh-CN">
+<meta charset="utf-8">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src blob:; connect-src 'none'; form-action 'none'">
+<title>小红书图文填写离线验收页</title>
+<style>
+  body { font: 18px system-ui; margin: 24px; }
+  .ProseMirror { white-space: pre-wrap; min-height: 70px; border: 1px solid #aaa; }
+  #images { display: flex; gap: 12px; }
+  figure { margin: 4px; }
+  figure img { width: 110px; display: block; }
+  section[hidden], input[hidden] { display: none; }
+</style>
+<h1>离线验收页</h1>
+<input id="files" type="file" accept=".png" multiple aria-label="上传图片">
+<div id="images" aria-label="图片预览"></div>
+<section id="editor" hidden>
+  <input id="title" placeholder="填写标题会有更多赞哦" aria-label="标题">
+  <div class="tiptap ProseMirror" aria-label="正文" contenteditable="true"></div>
+  <label>添加话题 <input id="topic"></label>
+  <button type="button" id="suggestion" hidden></button>
+  <div id="topics" aria-label="已选话题"></div>
+  <label><input type="checkbox" id="schedule-switch"> 定时发布</label>
+  <input id="schedule" aria-label="定时时间" hidden>
+  <button type="button" id="submit" data-clicks="0">发布（离线占位）</button>
+</section>
+<script>
+  const byId = id => document.getElementById(id);
+  byId('files').addEventListener('change', event => {
+    const images = byId('images');
+    images.replaceChildren();
+    for (const file of event.target.files) {
+      const figure = document.createElement('figure');
+      const thumbnail = new Image();
+      const url = URL.createObjectURL(file);
+      thumbnail.onload = () => { figure.dataset.ready = 'yes'; URL.revokeObjectURL(url); };
+      thumbnail.onerror = () => { figure.dataset.ready = 'no'; URL.revokeObjectURL(url); };
+      thumbnail.alt = file.name;
+      thumbnail.src = url;
+      const caption = document.createElement('figcaption');
+      caption.textContent = file.name;
+      figure.append(thumbnail, caption);
+      images.append(figure);
+    }
+    byId('editor').hidden = !images.childElementCount;
+  });
+  const topic = byId('topic');
+  const suggestion = byId('suggestion');
+  topic.addEventListener('input', () => {
+    suggestion.textContent = '#' + topic.value;
+    suggestion.hidden = !topic.value;
+  });
+  suggestion.addEventListener('click', () => {
+    const chip = document.createElement('span');
+    chip.textContent = topic.value;
+    byId('topics').append(chip);
+    topic.value = '';
+    suggestion.hidden = true;
+  });
+  byId('schedule-switch').addEventListener('change', event => {
+    byId('schedule').hidden = !event.target.checked;
+  });
+  byId('submit').addEventListener('click', event => {
+    event.target.dataset.clicks = String(Number(event.target.dataset.clicks) + 1);
+  });
+</script>
+</html>
