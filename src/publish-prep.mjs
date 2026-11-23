@@ -300,6 +300,7 @@ export function createPrepService({ db, home, root, config, secrets = [], spawnC
           db.prepare('UPDATE tasks SET state=?,detail=?,updated_at=? WHERE episode_id=? AND platform=?').run(r.state, r.note, new Date().toISOString(), r.episodeId, r.platform);
         }
         r.evidence = { submitted: result.submitted === false ? false : null,
+          ...(Array.isArray(result.browserCleanup)?{browserCleanup:result.browserCleanup.map(item=>({remaining:Number.isInteger(item.remaining)?item.remaining:null,kept:item.kept===true}))}:{}),
           ...(typeof result.titleFinal==='string' ? {titleFinal:result.titleFinal.slice(0,100)} : {}),
           ...(typeof result.screenshot === 'string' && path.isAbsolute(result.screenshot) && !/^(?:\\\\|\/\/)/.test(result.screenshot) ? { screenshot: result.screenshot } : {}),
           ...(r.platform === 'xhs' ? { dryRun: result.dryRun === true, account: 'ai', keepBrowser: true } : {}),
@@ -309,6 +310,7 @@ export function createPrepService({ db, home, root, config, secrets = [], spawnC
         r.error = redactL1(e.message, secrets);
         if (r.platform === 'wechat' && kind === 'execute') {
           r.failureEvidence = wechatFailureEvidence(code, result);
+          if(Array.isArray(result?.browserCleanup))r.failureEvidence.browserCleanup=result.browserCleanup.map(item=>({remaining:Number.isInteger(item.remaining)?item.remaining:null,kept:item.kept===true}));
           // 不把上一步离线检查的证据冒充本次执行回执。
           delete r.evidence;
           if(r.failureEvidence.saveConfirmed) r.evidence={submitted:false,savedAsDraft:true,draftVerified:result.draftVerified===true};

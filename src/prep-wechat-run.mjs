@@ -23,6 +23,7 @@ export async function runGuardedWechat({skill,jobFile,expected='TwoPeanuts的AI'
     process.stderr.write=stopSkillRetry(originalWrite);
     result=await wechat.publish(job,{port:9335});
     result.identity={account:expected,verified:true};
+    result.screenshot=result.draftListCheck?.verified&&result.draftListCheck.screenshot||result.savedScreenshot||result.screenshot;
   }catch(error){exit=util.codeToExit(error.code??'USAGE');result={ok:false,platform:'wechat',submitted:false,savedAsDraft:error.savedAsDraft===true,code:error.code??'USAGE',message:'公众号操作停止，请按错误码核对原平台；不自动重跑',...(error.shot?{screenshot:error.shot}:{})};}
   finally{process.stderr.write=originalWrite;await page?.dispose().catch(()=>{});try{result.browserCleanup=await lifecycle.cleanupBrowsers();}catch{result={...result,ok:false,operationCode:result.code,code:'BROWSER_FAILED',message:'操作后浏览器收尾未确认，请先核对，不重复建稿'};exit=6;}}
   return {result,exit};
