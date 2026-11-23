@@ -25,6 +25,16 @@
 
 部署、真实测试稿ID、结果与脱敏截图统一记录在项目 `evidence/publish-redesign-20261123/wechat-fix-回报.md`；维护回执和数据库备份也位于该目录。实测任一失败只记录一次，不自动重试。
 
+## 真实验收结果（15:50补记）
+
+修复提交a8c769415c84e0273ea4d2e69ad80d04af0d84cb已推送origin/l1-real；一致性备份后仅将8787从PID5360更新为16604，仍监听127.0.0.1。首页、GET /api/prep及契约均200，submit:false。remote-view PID16600、ssh PID21908及18790监听保留，SSH到22端口仍Established；8788在操作前即无监听，未启动或停止它。
+
+通过本机HTTP创建原稿956c2a46-edf5-4702-bec4-b06a30e20ba6，只生成公众号版，通读后补回用户指定的测试原句；关联准备任务a901973a-d516-49c0-8083-e3be16c89ba7。三张自制图逐张看过，封面在原上传清单第二位，最终HTML第一占位且只出现一次。1440/390真实预览通过。
+
+仅一次fill，15:45:25开始、15:45:57结束（北京时间）：savedAsDraft:true、submitted:false、confirmation“已保存”、bodyImageCount:3、coverBodyImageIndex:0、remaining:0。skill原始draftVerified:false，draftListCheck报“找不到草稿箱入口，未能核对草稿列表”，不能改称true。额外只读补核后台首页“全部草稿”区域，唯一同名卡片为“【测试】公众号存草稿修复，核对3张图”，显示“更新于15:45”；裁剪卡片截图保留完整标题、封面和时间，不含账号、头像、地址栏。未再创建、编辑或保存草稿。旧c3b0b6af整条记录SHA-256前后相同。
+
+9335填写前只有后台列表页，无编辑路由。按当前skill规则，复用窗口在fill结束时关闭；只读补核重新打开相同精确profile，也在finally确认remaining:0；最终9335无监听。未连接小红书9333或X9336。skill的自动列表入口识别仍有限制，本轮按禁止修改skill的要求保留原状，以可见草稿卡片补足本次验收，不把它当作再次fill的理由。
+
 ## 回退
 
-用 `git log --oneline -- docs/wechat-draft-fix-20261123.md` 定位本修复提交，然后 `git revert <修复commit>` 并推送，不force push。也可在独立回退工作副本检出519d94e，保留当前data/config与专用profile，再用既有Update-Maitian.ps1先CheckOnly、备份hub.db后仅重启8787。不reset当前工作副本、不覆盖其他人的未提交改动；不自动恢复旧数据库、不改旧单状态。回退后旧USAGE风险会重新出现，应停止公众号填写直至重新修复。
+代码回退用 `git revert a8c769415c84e0273ea4d2e69ad80d04af0d84cb` 并推送，不force push；本节所在文档的后续补记提交仅记录验收。也可在独立回退工作副本检出519d94e，保留当前data/config与专用profile，再用既有Update-Maitian.ps1先CheckOnly、备份hub.db后仅重启8787。不reset当前工作副本、不覆盖其他人的未提交改动；不自动恢复旧数据库、不改旧单状态。回退后旧USAGE风险会重新出现，应停止公众号填写直至重新修复。
