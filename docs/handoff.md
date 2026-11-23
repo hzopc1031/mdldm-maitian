@@ -53,7 +53,9 @@
 | 小红书 | 20 / 1000 / 1–18 图 | 填好留窗，状态 `awaiting_user` | 支持，`save-draft` 存草稿箱，状态 `draft_saved`（**尚未真实实测**） | 草稿绑定浏览器 profile，重复跑会多份同名稿 |
 | 公众号 | 32 / 50000 / 摘要120 / 作者16 / ≤20 图 | 仅存草稿 | 支持（本来就是这样） | 作者需在草稿里手填 |
 
-X 草稿验证：关闭编辑框 → 弹窗点「保存」→ 先读页面提示（saved to drafts / 已保存 / 草稿箱），没有再点编辑框右上角「Drafts」核对首行文字。两处都没有就记 `unknown`，不谎报。
+X 草稿验证：关闭编辑框 → 弹窗点「保存」→ 先读页面提示（saved to drafts / 已保存 / 草稿箱），没有再重开编辑框点右上角「Drafts」核对首行文字。两处都没有就记 `unknown`，不谎报。
+
+**2026-11-23 22:11 实测通过**：测试稿 `5a18a6eb` 走 `check → fill(mode:draft)`，状态 `draft_saved`，核验方式 `drafts-panel`，@PeanutPair 的 Drafts「Unsent posts」里确有其文。证据：`evidence/x-draft-20261123/`（drafts-panel.png、x-editor.json）。踩坑记录：关闭后的确认按钮是 `[data-testid="confirmationSheetConfirm"]`，用 `[role="dialog"]` 文本匹配会漏；保存后页面不一定有 toast，必须用 Drafts 列表核验。X 草稿箱里现留 2 条【测试】草稿，待本人删除。
 
 ## 今天做过的改动（2026-11-23 晚）
 

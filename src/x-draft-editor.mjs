@@ -263,17 +263,24 @@ export async function fillXEditor({ account, profile, job, folder }, connect = c
     if (saveDraft) {
       evidence.stage = 'save-draft';
       record();
-      // 关闭编辑框 → 弹窗里点「保存 / Save」→ 读确认提示。
-      await evaluate(() => {
+      // 关闭编辑框 → 确认弹窗「保存 / Save」。
+      const closed = await evaluate(() => {
         const visible = el => el.getClientRects().length > 0;
         const close = [...document.querySelectorAll('[data-testid="app-bar-close"]')].filter(visible)[0];
         if (!close) return false;
         close.click();
         return true;
       });
+      if (!closed) {
+        evidence.draftSaved = false;
+        record();
+        throw new Error('没有找到 X 编辑框关闭按钮，结果未确认；请到草稿箱核对');
+      }
       await delay(1200);
       const saved = await evaluate(() => {
         const visible = el => el.getClientRects().length > 0 && getComputedStyle(el).visibility === 'visible';
+        const confirm = document.querySelector('[data-testid="confirmationSheetConfirm"]');
+        if (confirm && visible(confirm)) { confirm.click(); return true; }
         const buttons = [...document.querySelectorAll('[role="dialog"] [role="button"], [role="dialog"] button')].filter(visible);
         const target = buttons.find(el => /^(save|保存)$/i.test((el.innerText || '').trim()));
         if (!target) return false;
@@ -285,13 +292,15 @@ export async function fillXEditor({ account, profile, job, folder }, connect = c
         record();
         throw new Error('没有出现 X 保存草稿确认，结果未确认；请到草稿箱核对');
       }
-      await delay(1800);
+      await delay(2200);
       const toast = await evaluate(() => document.body.innerText);
       evidence.draftToast = typeof toast === 'string' ? toast.slice(-2000) : '';
       evidence.draftSaved = /saved to drafts|保存到草稿|已保存|草稿箱|saved/i.test(evidence.draftToast);
       evidence.draftCheckedBy = evidence.draftSaved ? 'toast' : null;
       if (!evidence.draftSaved) {
-        // 兜底：打开编辑框右上角「Drafts」核对首行文字。
+        // 兜底：重开编辑框，点右上角 Drafts，按首行文字核对。
+        await command('Page.navigate', { url: compose }).catch(() => {});
+        await delay(3500);
         const opened = await evaluate(() => {
           const visible = el => el.getClientRects().length > 0 && getComputedStyle(el).visibility === 'visible';
           const button = [...document.querySelectorAll('[role="button"], button, a, span')]
@@ -301,14 +310,9 @@ export async function fillXEditor({ account, profile, job, folder }, connect = c
           return true;
         });
         if (opened) {
-          await delay(1800);
+          await delay(2200);
           const head = text.split(/\r?\n/).map(line => line.trim()).filter(Boolean)[0]?.slice(0, 20) || '';
-          const found = head ? await evaluate(needle => {
-            const visible = el => el.getClientRects().length > 0 && getComputedStyle(el).visibility === 'visible';
-            const panel = [...document.querySelectorAll('[role="dialog"], [data-testid="Draft"]')].filter(visible)
-              .map(el => el.innerText).join('\n');
-            return (panel || document.body.innerText).includes(needle);
-          }, [head]) : false;
+          const found = head ? await evaluate(needle => document.body.innerText.includes(needle), [head]) : false;
           if (found) {
             evidence.draftSaved = true;
             evidence.draftCheckedBy = 'drafts-panel';
@@ -317,7 +321,12 @@ export async function fillXEditor({ account, profile, job, folder }, connect = c
         }
       }
       evidence.stage = 'draft-saved';
-      evidence.after = await shot('x-draft-after', after.clip).catch(() => evidence.after);
+      const full = await command('Page.captureScreenshot', { format: 'png' }).catch(() => null);
+      if (full?.data) {
+        const file = path.join(folder, 'x-draft-after.png');
+        fs.writeFileSync(file, Buffer.from(full.data, 'base64'));
+        evidence.draftScreenshot = file;
+      }
       record();
       if (!evidence.draftSaved) throw new Error('未读到 X 草稿保存确认（提示和 Drafts 列表都没有），结果未确认；请到草稿箱核对');
       return { submitted: false, editorFilled: true, draftSaved: true, imageCount: after.imageCount, screenshot: evidence.after };
