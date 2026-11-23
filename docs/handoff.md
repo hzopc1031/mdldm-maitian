@@ -103,6 +103,13 @@ db.close();
 4. 页面桌面/390px 视觉验收未做。
 5. 真实公众号草稿需带新字段再验一次。
 
+## 工作约定（Liu 2026-11-23 定，后续都这么做）
+
+- 开工先读本文件，再 `Update-Maitian.ps1 -CheckOnly` 核对服务。
+- 每次改动后更新本文件的「今天做过的改动」「待办」，发布入口相关再写 `publishing-status-20261123.md`。
+- 三组自测通过才重启；重启后把 PID、备份路径、契约写进文档。
+- 改动提交 Git；只讲摘要，关键结论必须落盘。
+
 ## 必读顺序
 
 1. 本文件 → 2. `repo/docs/publish-api.md` → 3. `repo/docs/ai-publish-prompt.md` → 4. `repo/docs/publishing-status-20261123.md` → 5. `repo/docs/issue-register.md` 顶部。

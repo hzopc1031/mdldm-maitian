@@ -18,6 +18,14 @@
 4. 需要上线时用 `scripts/Update-Maitian.ps1 -Restart -Confirm:$false`（会先备份再重启 8787）。
 5. 把进展写回 `docs/handoff.md` 或 `docs/publishing-status-20261123.md`，不要只留在聊天里。
 
+## 每次都做（Liu 2026-11-23 定的长期约定）
+
+1. 开工先读 `docs/handoff.md`，再用 `scripts/Update-Maitian.ps1 -CheckOnly` 核对 8787 归属与空闲。
+2. 每次改动后更新 `docs/handoff.md` 的「今天做过的改动」和「待办与下一步」；涉及发布入口的追加到 `docs/publishing-status-20261123.md`。
+3. 自测三组通过才重启；重启后把 PID、备份路径和新契约写进文档。
+4. 改动提交到 Git，提交信息写清做了什么；不要把 `data/`、`config.json`、profile 提交上去。
+5. 结论、证据、备份路径都落盘，聊天里只讲摘要，不把关键信息只留在对话里。
+
 ## Git
 
 - `data/`、`config.json`、`chrome-profile*` 已在 `.gitignore`，不要强加。
