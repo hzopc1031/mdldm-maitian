@@ -7,6 +7,7 @@ import http from 'node:http';
 import { once } from 'node:events';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
+import {pathToFileURL} from 'node:url';
 
 const home = fs.mkdtempSync(path.join(os.tmpdir(), 'maitian-intake-'));
 const socket = net.createServer().listen(0, '127.0.0.1');
@@ -19,7 +20,12 @@ const skills = path.join(home,'mock-skills');
 const mockScript = path.join(skills,'wechat-publish','scripts','wechat.mjs');
 const mockLib=path.join(path.dirname(mockScript),'lib');fs.mkdirSync(mockLib,{recursive:true});
 fs.writeFileSync(path.join(mockLib,'util.mjs'),`import fs from 'node:fs';export const readJob=file=>({...JSON.parse(fs.readFileSync(file,'utf8')),jobFile:file});export const preflight=()=>({errors:[]});export const codeToExit=()=>5;`);
-fs.writeFileSync(path.join(mockLib,'wechat.mjs'),`import {execFileSync} from 'node:child_process';export const ensureBrowser=async()=>({eval:async()=>({trustedOrigin:true,names:['TwoPeanuts的AI'],login:false}),dispose:async()=>{}});export const publish=async job=>JSON.parse(execFileSync(process.execPath,[${JSON.stringify(mockScript)},'post','--job',job.jobFile]));`);
+fs.writeFileSync(path.join(mockLib,'wechat.mjs'),`// const maxAttempts = 2; 尚未点击保存，自动重试一次 await sleep(2000);
+import {execFileSync} from 'node:child_process';export const ensureBrowser=async()=>({eval:async()=>({trustedOrigin:true,names:['TwoPeanuts的AI'],login:false}),dispose:async()=>{}});export const publish=async job=>JSON.parse(execFileSync(process.execPath,[${JSON.stringify(mockScript)},'post','--job',job.jobFile]));`);
+// 只在模拟skill包装器子进程替换9335只读盘点；不会接触真实专用窗口。
+const preload=path.join(home,'mock-cdp-preload.mjs');
+fs.writeFileSync(preload,`if(process.argv[1]?.endsWith('prep-wechat-run.mjs'))globalThis.fetch=async()=>({ok:true,json:async()=>[]});`);
+process.env.NODE_OPTIONS=(process.env.NODE_OPTIONS??'')+' --import '+JSON.stringify(pathToFileURL(preload).href);
 fs.writeFileSync(path.join(mockLib,'browser-lifecycle.mjs'),`export const installCleanupHandlers=()=>{};export const keepBrowser=()=>{};export const cleanupBrowsers=async()=>({remaining:0});`);
 fs.mkdirSync(path.dirname(mockScript),{recursive:true});
 fs.writeFileSync(mockScript,`import fs from 'node:fs';

@@ -20,11 +20,15 @@
 | GET `/api/prep/posts/asset?id=ID&platform=x&index=0` | 本篇有序图片；index=cover 为封面，platform 可为 master |
 | POST `/api/prep/image?name=test.png` | 原始图片二进制入本地素材库，返回 path、sha256；不上传平台 |
 
-`input` 字段：`title,content,images,cover,topics,video,digest,caption,author,imagePositions,promotionReview`。images 是有序本机绝对路径数组，cover 是其中一张图或另一张本机图片。视频只预留，校验明确报暂不支持。imagePositions 是公众号 `{image:"本稿图片路径",afterParagraph:1}` 数组，空行分段，0表示正文前。未指定的图在正文末尾，封面默认在正文前；独立封面需加入正文供现有 skill 选择。服务生成安全 section HTML 和 `WECHAT_INLINE_IMAGE` 占位，交给 skill 的 htmlFile/inlineImages；不直接传入网页 HTML。
+`input` 字段：`title,content,images,cover,topics,video,digest,caption,author,imagePositions,promotionReview`。images 是有序本机绝对路径数组，cover 是其中一张图或另一张本机图片。视频只预留，校验明确报暂不支持。imagePositions 是公众号 `{image:"本稿图片路径",afterParagraph:1}` 数组，空行分段，0表示正文前。未指定的普通图片在正文末尾。**公众号封面固定移到最终HTML正文的第一个 `WECHAT_INLINE_IMAGE` 占位**，其段落位置设置不生效；封面已在正文时移位并去重，独立封面只加入一次。服务生成安全 section HTML 和 htmlFile/inlineImages，任务只用 `coverFromBody:true`，不传 `coverImage`。本地skill按最接近2.35:1挑正文图，同分取正文靠前者；建议封面1280×545、普通配图采用其他比例，并核对check回执的cover.file与实际封面。首图位置本身不能改变skill的比例评分规则。不直接传入网页 HTML。
 
 公众号摘要用 digest（兼容 caption），最多120字；作者最多16字。现有 wechat.mjs 没有作者填写实现，作者保存在版本中，需在草稿里手填。图片上限：X 4、小红书18、公众号20。标题上限：小红书20（与本地 util.mjs 半字算法一致）、公众号32。X默认加权280；本地 `config.publishPrep.x.premium:true` 时25000。X话题计入实际下载正文及加权计数；小红书正文计数含skill为话题预留的字数。修改配置须先备份 config.json；本次没有改配置。前端和后端共用 `src/platform-rules.mjs`。
 
 公众号执行由仓库 `prep-wechat-run.mjs` 包装原 skill 库：先精确profile核验，再读可见昵称，必须为TwoPeanuts的AI；仍调用原草稿保存实现及原清理函数。当前skill内置的第二次填写尝试在首次失败日志处被工作台保护中止；PAGE_CHANGED/UPLOAD_FAILED不会进入第二次尝试。不修改skill。若本地skill的重试边界发生变化，包装器停止而不继续填写。
+
+2026-11-23修复评估：正式CLI `node <skill>/scripts/wechat.mjs post --job <file>` 已核对，但不能在首次失败处拦截内置重试；另开一次CLI身份检查也会按finally关闭整个专用窗口。因此保留单进程库包装，维持首次失败即停、同进程昵称核验和原skill生命周期，不加 `--keep-browser` 或 `--submit`。当前skill允许保存前重试一次，工作台沿用更严格的不重试约束。第一次重试边界只提供日志文本，包装器保留其code/message，不能虚构该处未提供的hint/截图。
+
+填写前只读盘点9335标签页。发现 `action=edit` 或 `isNew` 编辑页立即停止并保留原窗口；不得把其他任务的编辑页当作本次编辑器。只有列表页且精确profile、可见昵称均核实才继续。当前skill的launch会把**复用的窗口**也登记到cleanup，因此运行结束会关闭已核验的整个9335公众号Chrome；不是仅关闭本次创建的标签页。9333、9336不受此流程操作。
 
 ## 调用示例
 
@@ -90,7 +94,9 @@ request.json 的建稿例子：
 | unknown | 结果未确认；**不得重跑、改稿解除锁或换ID重建**，先人工核对原窗口/草稿箱 |
 | submitted/published/already_exists | 历史回执，只读展示；新接口不能提交 |
 
-错误返回 `{code,error}`。常见：403 LOCAL_ONLY（来源不符）、403 PUBLISH_DISABLED（禁止发布）、400 INVALID_INPUT、400 VALIDATION_FAILED、400 CHECK_REQUIRED、400 EDITION_LOCKED、404 NOT_FOUND、409 BUSY、413 TOO_LARGE。已有 skill 错误保存在关联任务 failureEvidence.skillCode：LOGIN_REQUIRED 停止请本人扫码；PAGE_CHANGED/UPLOAD_FAILED 停在该平台，不盲目重试。Codex 无法启动为 CODEX_UNAVAILABLE，超时 GENERATION_TIMEOUT，非零或非JSON为 GENERATION_FAILED；进程只取约定JSON，不保存原始stdout/stderr。默认4分钟超时，重启中断标 failed。
+错误返回 `{code,error}`。常见：403 LOCAL_ONLY（来源不符）、403 PUBLISH_DISABLED（禁止发布）、400 INVALID_INPUT、400 VALIDATION_FAILED、400 CHECK_REQUIRED、400 EDITION_LOCKED、404 NOT_FOUND、409 BUSY、413 TOO_LARGE。skill错误保存在关联任务 `failureEvidence`：`skillCode,message,hint,screenshot,stderrTail`（尾部最多4KB）及保存/清理状态；无错误码保留为 `UNKNOWN`，包装器另保留errorName。消息、提示、截图路径和stderr在入库前去除认证参数值、任意token=片段及Cookie/Set-Cookie/Authorization头。记录页、平台版本页的“脱敏原始错误”和record接口均可查看；原始stdout/DOM不落库。LOGIN_REQUIRED停止请本人扫码；PAGE_CHANGED/UPLOAD_FAILED停在该平台，不盲目重试。结果未知锁保持，错误信息增加不解除锁。原记录c3b0b6af保持不变。Codex无法启动为CODEX_UNAVAILABLE，超时GENERATION_TIMEOUT，非零或非JSON为GENERATION_FAILED；生成进程不保存stdout/stderr。默认4分钟超时，重启中断标failed。
+
+修复依据、回退及验证见[公众号草稿USAGE修复记录](wechat-draft-fix-20261123.md)。
 
 给 Codex 等 AI 的顺序：建原稿 → 生成 → 查状态 → 通读并修改各版 → 逐图审阅 → 检查 → 查至 checked → 按授权填写 → 查状态并核对本篇回执。全程不调用平台内部接口、不传凭据、不点发布。X下载 ZIP 后由本人使用。
 

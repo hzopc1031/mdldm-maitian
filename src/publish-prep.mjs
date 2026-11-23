@@ -12,7 +12,8 @@ import { l1Account } from './l1-account.mjs';
 import { fillXEditor, isDedicatedXProfile } from './x-draft-editor.mjs';
 import { normalizePrepAgent } from './prep-agent.mjs';
 import {validateEdition,xEditionText} from './platform-rules.mjs';
-import {wechatEditionJob} from './prep-wechat.mjs';
+import {wechatRichJob} from './prep-wechat.mjs';
+import {skillText,skillError,stderrTail} from './prep-skill-errors.mjs';
 
 export const BROWSER_BLOCK = '此平台的专用浏览器操作已由本地配置停用；不会改用其它账号、profile 或旧发布引擎。';
 export function prepCapabilities(config = {}, env = process.env) {
@@ -95,14 +96,16 @@ export function normalizePrep(input, config = {}) {
   if (input.test && !/勿发布|勿发表/.test(job.content)) job.content = `工作台改版测试稿，请勿发布\n${content}`;
   const cover=input.cover??input.coverImage??(platform==='xhs'?files[0]:null);
   if(cover!=null){if(typeof cover!=='string'||!path.isAbsolute(cover)||/^(?:\\\\|\/\/)/.test(cover)||! /\.(png|jpe?g|webp)$/i.test(cover)||!fs.statSync(cover).isFile())throw Error('封面须为本机图片');normalizePrep({platform:'x',content:'封面检查',images:[cover]});job.coverImage=path.resolve(cover);if(platform==='xhs'){const index=files.indexOf(job.coverImage);job.images=index<0?[job.coverImage,...files]:[files[index],...files.slice(0,index),...files.slice(index+1)];}}
-  if(platform==='wechat')job.coverFromBody=input.coverFromBody===true;
+  if(platform==='wechat')job.coverFromBody=true;
   if(input.htmlFile!=null){if(platform!=='wechat'||!path.isAbsolute(input.htmlFile)||! /\.html?$/i.test(input.htmlFile)||!fs.statSync(input.htmlFile).isFile())throw Error('HTML须为本机公众号正文文件');job.htmlFile=input.htmlFile;}
   if(input.inlineImages!=null){if(!job.htmlFile||!Array.isArray(input.inlineImages)||input.inlineImages.length>20)throw Error('章节图片需要HTML且最多20张');job.inlineImages=input.inlineImages.map(im=>{if(!im||! /^[\w-]{1,64}$/.test(im.id)||!path.isAbsolute(im.file)||! /\.(png|jpe?g|webp)$/i.test(im.file)||!fs.statSync(im.file).isFile())throw Error('章节图片格式不正确');return {id:im.id,file:im.file};});}
   if(input.imagePositions!=null){if(platform!=='wechat'||!Array.isArray(input.imagePositions)||input.imagePositions.length>20||input.imagePositions.some(p=>!p||!files.includes(p.image)||!Number.isInteger(p.afterParagraph)||p.afterParagraph<0))throw Error('正文图片位置格式不正确');job.imagePositions=input.imagePositions;}
   const validation=validateEdition(platform,{...job,images:[...job.images,...(job.inlineImages??[]).map(im=>im.file)],video:input.video},config);
   if(!publication&&!validation.ok)throw Error(validation.issues.map(i=>i.message).join('；'));
   if(platform==='x')job.content=xEditionText(job);
-  return { platform, job, episodeId: input.episodeId || null, test: input.test === true, ...(source ? {source} : {}), ...(publication ? {publication} : {}) };
+  const wechatCover=platform==='wechat'?job.coverImage:undefined;
+  if(platform==='wechat')delete job.coverImage;
+  return { platform, job, ...(wechatCover?{wechatCover}:{}), episodeId: input.episodeId || null, test: input.test === true, ...(source ? {source} : {}), ...(publication ? {publication} : {}) };
 }
 export function prepCommand(platform, kind, { script, jobFile }) {
   if (!['xhs', 'wechat'].includes(platform) || !['check', 'execute'].includes(kind)) throw new Error('只支持检查和填写，不能发布');
@@ -122,10 +125,9 @@ export function acceptPrepResult(platform, kind, code, result) {
   throw new Error('缺少填好 / 草稿保存证明，状态保持未确认');
 }
 
-const wechatErrorCodes = new Set(['USAGE', 'LOGIN_REQUIRED', 'PAGE_CHANGED', 'UPLOAD_FAILED', 'PUBLISH_FAILED', 'BROWSER_FAILED', 'RENDER_FAILED']);
-function wechatFailureEvidence(code, result) {
+function wechatFailureEvidence(code, result, stderr, error) {
   const bool = value => typeof value === 'boolean' ? value : null;
-  const knownCode = value => wechatErrorCodes.has(value) ? value : null;
+  const knownCode = value => typeof value==='string' && value ? skillText(value,80) : null;
   const saveConfirmed=result?.savedAsDraft===true && result?.submitted===false;
   const cleanupFailed=result?.code==='BROWSER_FAILED' && (saveConfirmed || knownCode(result?.operationCode)!==null);
   return {
@@ -134,7 +136,13 @@ function wechatFailureEvidence(code, result) {
     resultOk: bool(result?.ok),
     submitted: bool(result?.submitted),
     savedAsDraft: bool(result?.savedAsDraft),
-    skillCode: knownCode(result?.code),
+    skillCode: knownCode(result?.code) ?? 'UNKNOWN',
+    message: skillText(result?.message ?? error?.message),
+    hint: skillText(result?.hint),
+    screenshot: typeof result?.screenshot==='string' ? skillText(result.screenshot) : null,
+    stderrTail: stderr,
+    ...(result?.errorName?{errorName:skillText(result.errorName,80)}:{}),
+    ...(result?.operationMessage?{operationMessage:skillText(result.operationMessage)}:{}),
     operationCode: knownCode(result?.operationCode),
     saveConfirmed, cleanupFailed,
     draftVerified: bool(result?.draftVerified),
@@ -183,7 +191,7 @@ export function createPrepService({ db, home, root, config, secrets = [], spawnC
   }
   function create(input) {
     if (db.prepare("SELECT 1 FROM publish_preparations WHERE json_extract(record,'$.state')='running'").get()) throw new Error('已有准备操作在运行');
-    const {source, publication, ...data} = normalizePrep(input, config);
+    const {source, publication, wechatCover, ...data} = normalizePrep(input, config);
     if (publication && publication.account.toLowerCase() !== l1Account(config,'x').toLowerCase()) throw new Error('原帖账号与工作台 X 账号不符');
     const contentDigest = contentDigestFor(data);
     const same = source
@@ -208,7 +216,7 @@ export function createPrepService({ db, home, root, config, secrets = [], spawnC
     const id = crypto.randomUUID(), folder = path.join(home, 'data', 'publish-prep', id);
     if (publication && findPublication.get(publication.postId, publication.url)) throw new Error('该原帖已关联另一条发布记录');
     fs.mkdirSync(folder, { recursive: true });
-    if(data.platform==='wechat'&&data.job.imagePositions&&!data.job.htmlFile){Object.assign(data.job,wechatEditionJob({...data.job,cover:data.job.coverImage},folder));delete data.job.imagePositions;}
+    if(data.platform==='wechat'){Object.assign(data.job,wechatRichJob(data.job,wechatCover,folder));delete data.job.imagePositions;delete data.job.coverImage;}
     // X 下载包冻结素材，源文件后来改动不会改变已经准备的草稿。
     if (data.platform === 'x') data.job.images = data.job.images.map((file,i) => {
       const target=path.join(folder,`${String(i+1).padStart(2,'0')}${path.extname(file).toLowerCase()}`);
@@ -282,7 +290,7 @@ export function createPrepService({ db, home, root, config, secrets = [], spawnC
     const digest = jobDigest(file);
     if (kind !== 'check' && r.checkedDigest !== digest) throw new Error('任务已变化，必须重新检查');
     const executionFile=file;
-    let output = '', done = false;
+    let output = '', stderr = Buffer.alloc(0), stderrTruncated=false, done = false;
     const operation={kind,actor,startedAt:new Date().toISOString()};
     r.operations=[...(r.operations??[]),operation];
     r.state = 'running'; r.kind = kind; r.error = ''; save(r);
@@ -302,14 +310,18 @@ export function createPrepService({ db, home, root, config, secrets = [], spawnC
         r.evidence = { submitted: result.submitted === false ? false : null,
           ...(Array.isArray(result.browserCleanup)?{browserCleanup:result.browserCleanup.map(item=>({remaining:Number.isInteger(item.remaining)?item.remaining:null,kept:item.kept===true}))}:{}),
           ...(typeof result.titleFinal==='string' ? {titleFinal:result.titleFinal.slice(0,100)} : {}),
-          ...(typeof result.screenshot === 'string' && path.isAbsolute(result.screenshot) && !/^(?:\\\\|\/\/)/.test(result.screenshot) ? { screenshot: result.screenshot } : {}),
+          ...(typeof result.screenshot === 'string' && path.isAbsolute(result.screenshot) && !/^(?:\\\\|\/\/)/.test(result.screenshot) ? { screenshot: redactL1(skillText(result.screenshot),secrets) } : {}),
           ...(r.platform === 'xhs' ? { dryRun: result.dryRun === true, account: 'ai', keepBrowser: true } : {}),
-          ...(r.platform === 'wechat' ? { savedAsDraft: result.savedAsDraft === true, draftVerified: result.draftVerified === true } : {}) };
+          ...(r.platform === 'wechat' ? { savedAsDraft: result.savedAsDraft === true, draftVerified: result.draftVerified === true,
+            confirmation:skillText(result.confirmation),bodyImageCount:result.bodyImageCount??null,coverBodyImageIndex:result.coverBodyImageIndex??null,
+            skill:{code:skillText(result.code,80),message:redactL1(skillText(result.message),secrets),hint:redactL1(skillText(result.hint),secrets),stderrTail:redactL1(stderrTail(stderr.toString('utf8'),stderrTruncated),secrets)},
+            draftListCheck:result.draftListCheck?{verified:result.draftListCheck.verified===true,matches:result.draftListCheck.matches??null,screenshot:skillText(result.draftListCheck.screenshot),error:skillText(result.draftListCheck.error)}:null } : {}) };
       } catch (e) {
         r.state = kind !== 'check' ? 'unknown' : 'check_failed';
-        r.error = redactL1(e.message, secrets);
-        if (r.platform === 'wechat' && kind === 'execute') {
-          r.failureEvidence = wechatFailureEvidence(code, result);
+        r.error = redactL1(skillText(e.message), secrets);
+        if (r.platform === 'wechat') {
+          r.failureEvidence = wechatFailureEvidence(code, result,redactL1(stderrTail(stderr.toString('utf8'),stderrTruncated),secrets),e);
+          for(const key of ['message','hint','screenshot','operationMessage'])if(r.failureEvidence[key])r.failureEvidence[key]=redactL1(r.failureEvidence[key],secrets);
           if(Array.isArray(result?.browserCleanup))r.failureEvidence.browserCleanup=result.browserCleanup.map(item=>({remaining:Number.isInteger(item.remaining)?item.remaining:null,kept:item.kept===true}));
           // 不把上一步离线检查的证据冒充本次执行回执。
           delete r.evidence;
@@ -319,10 +331,10 @@ export function createPrepService({ db, home, root, config, secrets = [], spawnC
             saved_but_incomplete:'已收到显式草稿保存证明，但进程未完整成功；先核对浏览器收尾，勿重复建稿。',
             operation_and_cleanup_failed:'草稿保存未确认，且浏览器收尾失败；先核对草稿箱和专用窗口，勿重跑。',
             save_unconfirmed:'未收到有效的显式草稿保存证明；先核对草稿箱，勿重复建稿。'};
-          r.error=messages[r.failureEvidence.stage];
+          r.error=(kind==='check'?'公众号离线检查失败；':messages[r.failureEvidence.stage]+' ')+r.failureEvidence.skillCode+'：'+r.failureEvidence.message;
         }
       }
-      // 不保存 skill 原始 stdout/stderr：其中可能含认证 URL、会话或无界 DOM。
+      // 不保存原始stdout/DOM；仅白名单回执及脱敏后的stderr尾部。
       r.finishedAt = new Date().toISOString();
       Object.assign(operation,{finishedAt:r.finishedAt,state:r.state});
       save(r);
@@ -331,10 +343,10 @@ export function createPrepService({ db, home, root, config, secrets = [], spawnC
       const child = spawnChild(process.execPath, prepCommand(r.platform, kind, { script: cap.script, jobFile: executionFile }),
         { cwd: root, env: { ...env, HUB_NO_WEB: '1', ...(r.platform==='wechat'?{PUBLISH_SKILL_DATA:'D:/AIInfra/agent-publish'}:{}) }, shell: false, windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'] });
       child.stdout?.on('data', d => { output += d; if (output.length > 2e6) { output = ''; finish(null, new Error('回执过大，结果未确认')); } });
-      child.stderr?.on('data', () => {});
-      child.once('error', () => finish(null, new Error('本地 skill 进程启动失败，未确认平台结果')));
+      child.stderr?.on('data', d => {stderr=Buffer.concat([stderr,Buffer.from(d)]);if(stderr.length>65536){stderr=stderr.subarray(-65536);stderrTruncated=true;}});
+      child.once('error', error => finish(null, Object.assign(new Error('本地 skill 进程启动失败：'+skillError(error).message),{code:error.code})));
       child.once('close', code => finish(code));
-    } catch { finish(null, new Error('本地 skill 进程启动失败，未确认平台结果')); }
+    } catch(error) { finish(null, new Error('本地 skill 进程启动失败：'+skillError(error).message)); }
     return get(id);
   }
   function uploadImage(name, bytes) {
