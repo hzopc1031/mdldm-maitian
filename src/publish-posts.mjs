@@ -114,9 +114,7 @@ export function createPostService({db,home,config,prep,spawnChild=spawn,env=proc
   }
   function fill(id,p,caller,mode='fill') {
     if(!['fill','draft'].includes(mode))fail('INVALID_INPUT','填写方式只接受 fill 或 draft');
-    if(!['xhs','wechat'].includes(p))fail('UNSUPPORTED','X仅下载文图包，不使用编辑器填写');
-    if(mode==='draft'&&p==='x')fail('UNSUPPORTED','X 不支持仅存草稿');
-    const r=raw(id),e=r.editions[p];if(!e?.preparationId)fail('CHECK_REQUIRED','请先检查平台版本');const validation=validateEdition(p,e,config);if(!validation.ok)fail('VALIDATION_FAILED','平台版本校验未通过');
+    const r=raw(id),e=r.editions[p];if(!e)fail('NOT_FOUND','平台不存在');if(!e?.preparationId)fail('CHECK_REQUIRED','请先检查平台版本');const validation=validateEdition(p,e,config);if(!validation.ok)fail('VALIDATION_FAILED','平台版本校验未通过');
     prep.start(e.preparationId,mode==='draft'?'draft':'execute',caller);return get(id);
   }
   return {create,meta,get,list:()=>all().map(view),update,generate,check,fill,busy,

@@ -19,7 +19,7 @@
 | GET `/api/prep/posts` | 最近50份原稿及状态；不是全历史分页接口 |
 | POST `/api/prep/posts`，`type:update,id,platform,input:{...}` | 修改完整平台版本；platform 为 master 时只改原稿，不覆盖已编辑版本 |
 | POST 同上，`type:check,id,platform` | 共用规则检查；合格后建关联准备任务，并调用本地 skill 离线检查（X仅规则检查） |
-| POST 同上，`type:fill,id,platform[,mode:"fill"\|"draft"]` | 小红书填写留窗或只存草稿；公众号仅存草稿；必须先检查成功。X 不支持填写 |
+| POST 同上，`type:fill,id,platform[,mode:"fill"\|"draft"]` | 小红书/X 填写留窗或只存草稿；公众号仅存草稿；必须先检查成功 |
 | GET `/api/prep/posts/bundle?id=ID` | X ZIP：全文、按顺序编号的全部配图、manifest；不含本机绝对路径 |
 | GET `/api/prep/posts/asset?id=ID&platform=x&index=0` | 本篇有序图片；index=cover 为封面，platform 可为 master |
 | POST `/api/prep/image?name=test.png` | 原始图片二进制入本地素材库，返回 path、sha256；不上传平台 |
@@ -34,7 +34,7 @@
 | --- | --- | --- |
 | 公众号 | 支持 | 一直是只存草稿；执行后状态 `draft_saved`，附保存成功回执 |
 | 小红书 | 支持（待实测） | 调本地 `xhs-publish/scripts/save-draft.mjs`，固定 ai 号；草稿绑定当前浏览器 profile，反复运行会积多份同名稿，需在草稿箱核对 |
-| X | 不支持 | 入口只出文图包；要存 X 草稿需另用 x-publish 的 save-draft，工作台不代为操作 |
+| X | 支持（需启用专用编辑器） | 填完关闭编辑框并在弹窗点「保存」，读到保存确认才记 `draft_saved`；未确认按 `unknown` 处理。专用 Chrome 需在 9336 运行且登录正确账号 |
 
 `mode` 省略等同 `"fill"`（小红书填好留窗、公众号存草稿）。draft 与 fill 都要先检查通过；结果未确认时同样按 `unknown` 处理，不重跑。实际可用性看 `/api/prep` 返回的每平台 `draft.supported`。
 

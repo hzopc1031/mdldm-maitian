@@ -173,7 +173,7 @@ function existingXEditor(url) {
 }
 
 // 只管理本次新建的目标。保留新编辑页及所有旧标签，断开调试连接。
-export async function fillXEditor({ account, profile, job, folder }, connect = connectDedicatedBrowser) {
+export async function fillXEditor({ account, profile, job, folder }, connect = connectDedicatedBrowser, { saveDraft = false } = {}) {
   if (!/^[A-Za-z0-9_]{1,15}$/.test(account) || !isDedicatedXProfile(profile) || job.submit !== false ||
       !job.content.trim() || job.content.length > 2000 || job.images.length > 4) {
     throw new Error('X 文图草稿配置或素材未通过校验');
@@ -260,6 +260,41 @@ export async function fillXEditor({ account, profile, job, folder }, connect = c
     evidence.imageCount = after.imageCount;
     evidence.existingTabsPreserved = true;
     record();
+    if (saveDraft) {
+      evidence.stage = 'save-draft';
+      record();
+      // 关闭编辑框 → 弹窗里点「保存 / Save」→ 读确认提示。
+      await evaluate(() => {
+        const visible = el => el.getClientRects().length > 0;
+        const close = [...document.querySelectorAll('[data-testid="app-bar-close"]')].filter(visible)[0];
+        if (!close) return false;
+        close.click();
+        return true;
+      });
+      await delay(1200);
+      const saved = await evaluate(() => {
+        const visible = el => el.getClientRects().length > 0 && getComputedStyle(el).visibility === 'visible';
+        const buttons = [...document.querySelectorAll('[role="dialog"] [role="button"], [role="dialog"] button')].filter(visible);
+        const target = buttons.find(el => /^(save|保存)$/i.test((el.innerText || '').trim()));
+        if (!target) return false;
+        target.click();
+        return true;
+      });
+      if (!saved) {
+        evidence.draftSaved = false;
+        record();
+        throw new Error('没有出现 X 保存草稿确认，结果未确认；请到草稿箱核对');
+      }
+      await delay(1800);
+      const toast = await evaluate(() => document.body.innerText);
+      evidence.draftToast = typeof toast === 'string' ? toast.slice(-2000) : '';
+      evidence.draftSaved = /saved to drafts|保存到草稿|已保存|草稿箱|saved/i.test(evidence.draftToast);
+      evidence.stage = 'draft-saved';
+      evidence.after = await shot('x-draft-after', after.clip).catch(() => evidence.after);
+      record();
+      if (!evidence.draftSaved) throw new Error('未读到 X 草稿保存确认，结果未确认；请到草稿箱核对');
+      return { submitted: false, editorFilled: true, draftSaved: true, imageCount: after.imageCount, screenshot: evidence.after };
+    }
     return { submitted: false, editorFilled: true, imageCount: after.imageCount, screenshot: evidence.after };
   } finally {
     browser?.close();

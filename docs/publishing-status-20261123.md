@@ -4,6 +4,8 @@
 
 2026-11-23 21:47：按 Liu 指示清理历史不规则数据：删除 10 条缺栏目的测试准备记录（含占用中的《【测试稿】填写后停下》）和 2 条测试原稿，并清掉对应任务目录；保留 10 条带栏目的真实已发布 X 记录。清理前一致性备份 `evidence/publish-redesign-20261123/hub-before-cleanup-2026-11-23T13-47-18-560Z.db`。状态页现为 10 行、无空栏目、无待办、无失败。
 
+2026-11-23 22:08：X 接入填好留窗与存草稿两种收尾。`fill` 不带 mode 时填好留窗（本人点 Post）；`mode:"draft"` 时关闭编辑框并点保存，读到保存提示才记 `draft_saved`，读不到记 `unknown`。X 专用编辑器已启用（`browserExecution:true`，profile 未变，配置备份 `evidence/publish-redesign-20261123/config-before-x-draft-20261123-220709.json`）。三平台草稿能力现均为 supported。离线三组自测通过，正式 8787 已重启（PID 8404，备份 `hub-before-20261123-220745-092.db`）。X 真实存草稿仍需 9336 专用 Chrome 登录后实测。
+
 2026-11-23 22:00：按 Liu 两项要求更新。①「仅存草稿」做成 `fill` 的 `mode:"draft"`：公众号沿用只存草稿；小红书调本地 `xhs-publish/scripts/save-draft.mjs`，成功记 `draft_saved`（待真实实测，草稿绑定当前 profile，重复运行会多份）；X 不支持写草稿，只出文图包。能力矩阵由 `/api/prep` 的每平台 `draft.supported` 返回。②状态页增加按栏目筛选，仅在出现两个及以上栏目时显示；`rows[].column` 早已随汇总返回。离线自测通过，正式 8787 已重启（PID 28740，备份 `hub-before-20261123-220023-953.db`）。
 
 2026-11-23 21:54：Liu 看过截图后要求连剩余旧记录一并删除。已将 10 条已发布 X 旧记录完整导出到 `evidence/publish-redesign-20261123/removed-legacy-posts-2026-11-23T13-54-28-268Z.json`（含公开链接与时间），备份 `hub-before-cleanup-all-2026-11-23T13-54-28-268Z.db`，随后删除记录与 10 个任务目录。发布记录现为 0 条；X 原帖仍在平台上，仅工作台本地不再保留这些旧回执。

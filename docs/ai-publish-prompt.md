@@ -38,7 +38,7 @@ POST /api/prep/posts，例如（Windows 用 curl.exe，JSON 存成 UTF-8 文件�
 3. GET /api/prep/posts/record?id=ID，轮询 generation.state 到 done；failed 立即停止、保留原稿、不自动重试。
 4. 通读 editions 各平台版本；要改就 POST {"type":"update","id":"ID","platform":"wechat","input":{完整平台版本},"actor":{...}}。
 5. POST {"type":"check","id":"ID","platform":"wechat","actor":{...}}，看返回的 validation.ok 和 issues。超限不截断，改完再查。
-6. 只有小红书和公众号能填：{"type":"fill","id":"ID","platform":"xhs","actor":{...}}，返回 202；要只存平台草稿箱就加 "mode":"draft"（公众号、小红书支持；X 不支持草稿，只能 GET /api/prep/posts/bundle?id=ID 下载文图 ZIP）。
+6. 小红书 / X / 公众号都能填：{"type":"fill","id":"ID","platform":"xhs","actor":{...}}，返回 202；要只存平台草稿箱就加 "mode":"draft"（三个平台都支持，X 需工作台启用专用编辑器）。X 也可以 GET /api/prep/posts/bundle?id=ID 下载文图 ZIP。
 7. 再查一次 record，读取每个平台的最终 state 与回执。
 
 【禁止】

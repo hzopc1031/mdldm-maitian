@@ -33,7 +33,7 @@ export function prepCapabilities(config = {}, env = process.env) {
     const draftScript = platform === 'xhs' ? path.join(root, 'xhs-publish', 'scripts', 'save-draft.mjs') : null;
     const draft = platform === 'wechat' ? { supported: true, label: '保存公众号草稿（不发表）' }
       : platform === 'xhs' ? (draftScript && fs.existsSync(draftScript) ? { supported: true, label: '保存小红书草稿箱（不发布）' } : { supported: false, label: '本地未安装小红书存草稿脚本' })
-      : { supported: false, label: 'X 只提供文图包下载，不写草稿' };
+      : { supported: enabled, label: enabled ? '保存 X 草稿箱（不发布）' : 'X 专用编辑器未启用；启用后才可填写或存草稿' };
     return [platform, { script, installed, browserEnabled: enabled, inspectEnabled, publishEnabled:false, draft, ...(draftScript ? { draftScript } : {}),
       mode: platform === 'x' ? '正文和最多4张图可下载为文图包；编辑器填写须显式启用专用 Chrome，仅填写不发布' : platform === 'xhs' ? '本地 xhs-publish，固定 --account ai；只填写留窗，由本人点击发布' : '本地 wechat-publish，只保存草稿并核对成功提示',
       reason: platform === 'x' ? enabled ? '已启用专用 Chrome 填写；执行时重新核验账号、空白编辑页和完整文图，填好后由本人处理。' : 'X 编辑器填写未启用；需在本地配置启用并指定专用 Chrome，仍可下载文图包。' : !installed ? '本地 DSH skill 未安装；不回退旧 hub' : !keepWindow ? '本地 skill 不支持保留窗口，未适配' : enabled ? '使用本地技能专用窗口；执行时核验可见账号。登录、素材检查和本次保存回执决定结果。' : BROWSER_BLOCK }];
@@ -235,8 +235,9 @@ export function createPrepService({ db, home, root, config, secrets = [], spawnC
   }
   const jobFile = id => { get(id); return path.join(home, 'data', 'publish-prep', id, 'job.json'); };
   function startX(r, kind, cap, actor) {
-    if (kind !== 'execute') throw new Error('X 文图任务不运行本地 skill 离线检查');
-    if (r.state === 'awaiting_user') return r;
+    if (!['execute','draft'].includes(kind)) throw new Error('X 文图任务不运行本地 skill 离线检查');
+    if (kind==='draft' && !cap.draft?.supported) throw new Error(cap.draft?.label||'X 草稿未启用');
+    if (r.state === 'awaiting_user'||r.state === 'draft_saved') return r;
     if (r.state !== 'prepared') throw new Error('X 编辑器结果需本人核对，禁止直接重跑');
     if (!cap.browserEnabled) throw new Error(cap.reason);
     const file = jobFile(r.id), job = JSON.parse(fs.readFileSync(file, 'utf8'));
@@ -252,13 +253,20 @@ export function createPrepService({ db, home, root, config, secrets = [], spawnC
     save(r);
     void (async () => {
       try {
-        const receipt = await runX({ account, profile, job, folder: path.dirname(file) });
+        const receipt = await runX({ account, profile, job, folder: path.dirname(file) }, undefined, { saveDraft: kind === 'draft' });
         if (receipt?.submitted !== false || receipt.editorFilled !== true || receipt.imageCount !== job.images.length) {
           throw new Error('缺少 X 编辑器完整文图回执');
         }
-        r.state = 'awaiting_user';
-        r.evidence = receipt;
-        r.note = '完整正文和图片已在 X 新编辑页读回，留给本人核对。';
+        if (kind === 'draft') {
+          if (receipt.draftSaved !== true) throw new Error('未读到 X 草稿保存确认，结果未确认；请到草稿箱核对');
+          r.state = 'draft_saved';
+          r.evidence = { submitted: false, savedAsDraft: true, imageCount: receipt.imageCount, screenshot: receipt.screenshot };
+          r.note = '已存 X 草稿箱（未发布）；请到 X 草稿箱核对，不要重复填写';
+        } else {
+          r.state = 'awaiting_user';
+          r.evidence = receipt;
+          r.note = '完整正文和图片已在 X 新编辑页读回，留给本人核对。';
+        }
         if (r.episodeId) db.prepare('UPDATE tasks SET state=?,detail=?,updated_at=? WHERE episode_id=? AND platform=?')
           .run(r.state, r.note, new Date().toISOString(), r.episodeId, r.platform);
       } catch (error) {
@@ -279,8 +287,7 @@ export function createPrepService({ db, home, root, config, secrets = [], spawnC
     const r = get(id), cap = prepCapabilities(config, env)[r.platform];
     if(kind==='draft'){
       if(r.platform==='wechat')kind='execute';
-      else if(r.platform!=='xhs')throw new Error('此平台不支持仅存草稿：X 只下载文图包');
-      else if(!cap.draft?.supported)throw new Error(cap.draft?.label||'小红书存草稿未安装');
+      else if(!cap.draft?.supported)throw new Error(cap.draft?.label||'此平台存草稿未启用');
     }
     if (r.readOnlyReceipt) throw new Error('历史回执只读；不能重新检查或上传');
     if (r.platform === 'x') return startX(r, kind, cap, actor);
