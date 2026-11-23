@@ -26,7 +26,7 @@ if (process.argv[2] === '--fake-child') {
           reads++;
           if (process.env.L1_FAKE_SCENARIO === 'read-error') throw new Error('模拟 DOM 读取失败');
           const scenario = process.env.L1_FAKE_SCENARIO;
-          const loggedIn = !['timeout', 'hidden-only'].includes(scenario) && (scenario !== 'success' || reads > 1);
+          const loggedIn = !['timeout', 'hidden-only', 'unknown', 'challenge'].includes(scenario) && (scenario !== 'success' || reads > 1);
           const name = scenario === 'wrong' ? 'OtherAccount' : scenario === 'case' ? 'twopeanuts' : 'TwoPeanuts';
           const handle = scenario === 'wrong' ? '@OtherAccount' : '@pEaNuTpAiR';
           const node = (text, hidden = false) => ({ innerText: text,
@@ -40,13 +40,13 @@ if (process.argv[2] === '--fake-child') {
                 return [node('OtherHiddenAccount', true), ...(loggedIn ? [node(name)] : []),
                   ...(scenario === 'hidden-only' ? [node('TwoPeanuts', true)] : [])];
               }
-              if(selector === 'input[autocomplete="username"], [data-testid="loginButton"], a[href="/i/flow/login"]')return [];
+              if(selector === 'input[autocomplete="username"], [data-testid="loginButton"], a[href="/i/flow/login"]')return !loggedIn && !['unknown','challenge'].includes(scenario) ? [node('登录')] : [];
               assert.equal(selector, '[data-testid="SideNav_AccountSwitcher_Button"]');
               return loggedIn ? [node(`Display Name\n${handle}`)] : [];
             },
           };
           // X 登录后通常跳到 /home；不能依赖当前页面是 PeanutPair 的主页。
-          const href = platform === 'wechat' ? 'https://mp.weixin.qq.com/' : platform === 'xhs' ? 'https://creator.xiaohongshu.com/new/home' : 'https://x.com/home';
+          const href = platform === 'wechat' ? 'https://mp.weixin.qq.com/' : platform === 'xhs' ? 'https://creator.xiaohongshu.com/new/home' : scenario==='challenge' ? 'https://x.com/i/jf/onboarding/web' : 'https://x.com/home';
           return vm.runInNewContext(`(${fn.toString()})()`, { document, location: { href, origin: new URL(href).origin },
             getComputedStyle: () => ({ display: 'block', visibility: 'visible' }) });
         },
@@ -83,23 +83,27 @@ if (process.argv[2] === '--fake-child') {
       const state = JSON.parse(lines[0].slice('FAKE_CLOSED '.length));
       const platform = args.includes('--login-wechat') ? 'wechat' : args.includes('--login-xhs') ? 'xhs' : 'x';
       assert.equal(state.platform, platform);
-      assert.deepEqual(state.urls, [platform === 'wechat' ? 'https://mp.weixin.qq.com/' : platform === 'xhs' ? 'https://creator.xiaohongshu.com/new/home' : 'https://x.com/i/flow/login']);
+      const xNeedsLogin=['success','timeout','hidden-only'].includes(scenario);
+      assert.deepEqual(state.urls, platform==='x' ? ['https://x.com/home',...(xNeedsLogin?['https://x.com/i/flow/login']:[])] : [platform === 'wechat' ? 'https://mp.weixin.qq.com/' : 'https://creator.xiaohongshu.com/new/home']);
       if (reads != null) assert.equal(state.reads, reads);
-      if (scenario === 'success') assert.equal(state.sleeps, 1);
+      if (scenario === 'success') assert.equal(state.sleeps, platform==='x'?0:1);
       if (scenario === 'timeout' || scenario === 'hidden-only') assert.equal(state.clock, Number(timeout));
     }
     passed++;
   }
   for (const flag of ['--login-xhs', '--login-x', '--login-wechat']) {
-    run([flag, '--wait-login'], { reads: flag === '--login-wechat' ? 3 : 2 });
+    run([flag, '--wait-login'], { reads: 2 });
     run([flag, '--wait-login'], { scenario: 'wrong', status: 1, message: /OtherAccount|账号.*不符/, reads: 1 });
-    run([flag, '--wait-login'], { scenario: 'timeout', status: 1, message: /等待登录超时（5000 毫秒）/, reads: 3 });
+    run([flag, '--wait-login'], { scenario: 'timeout', status: 1, message: /等待登录超时（5000 毫秒）/, reads: flag==='--login-x'?4:3 });
     run([flag, '--wait-login'], { scenario: 'read-error', status: 1, message: /模拟 DOM 读取失败/, reads: 1 });
     run([flag], { status: 1, message: /需要交互终端/, closed: false });
     for (const timeout of ['0', '-1', 'invalid', '1.5']) {
       run([flag, '--wait-login'], { timeout, status: 1, message: /必须为正整数毫秒数/, closed: false });
     }
   }
+  run(['--login-x','--wait-login'],{scenario:'existing-session',reads:1,message:/已复用本专用窗口的登录状态/});
+  run(['--login-x','--wait-login'],{scenario:'unknown',status:1,reads:1,message:/没有提供可确认的账号或登录入口/});
+  run(['--login-x','--wait-login'],{scenario:'challenge',status:1,message:/等待登录超时/});
   run(['--login-xhs', '--wait-login'], { scenario: 'case', status: 1, message: /实际 twopeanuts/, reads: 1 });
   run(['--login-xhs', '--wait-login'], { scenario: 'hidden-only', status: 1, message: /等待登录超时/ });
   run(['--login-wechat', '--wait-login'], { scenario: 'hidden-only', status: 1, message: /等待登录超时/ });

@@ -1,5 +1,96 @@
 # L1 发布准备
 
+2026-11-21 新入口在顶栏「发布」，网址仍为 `/p#/prepare`。先写原稿，再多选 X、小红书、公众号。各端可分别改正文、选图和预览，公众号有摘要，小红书有话题。未单独修改的字段跟随原稿，修改后可选择恢复为原稿。一次保存各端本地草稿，在「发布记录」继续：X 可下载文图包，小红书用「检查稿件」和「填入小红书」，公众号用「检查稿件」和「保存公众号草稿」。
+
+原版[麦田发布助手](https://github.com/CzzzzzzJ/mdldm-maitian-publisher)现有[官方 Chrome 商店版](https://chromewebstore.google.com/detail/eaaipbilkhibicihiollecmbpneikpnj)，用于多平台视频填写和 X 长文。本地工作台继续使用各自的图文准备入口。本轮未安装或接入该扩展。下文旧安装记录仅作历史参考。
+
+## 本地视频预填与作品核对
+
+在「发布 → 视频」选择本机工程，可下载麦田视频预填助手 0.4.1。由专用 Chrome 加载解压后的目录，从麦田发起会先确认所选平台的当前账号。填好后在平台核对成片、封面与文案，再由本人发布。
+
+「预填任务历史」保存各平台的进度和结果。重复点击会复用原任务。助手可在页面关闭后回传，状态不明时会保留已知结果。已发布的作品可在采集后通过「核对作品」预览并关联，凭账号、作品 ID 和采集证据确认；视频号暂缺可核验的公开链接。
+
+使用隔离库和模拟平台完成了桌面、窄屏、刷新、断线恢复、重复操作以及作品关联验收。真实平台账号和正式公开发布需要另行验收。
+
+## Codex 项目交稿与回执
+
+2026-11-23 最新实现：显式小红书发布已独立于填写入口实现，接入契约为version3。09:59首次加载后，10:05补齐原任务防重锁与日历状态并正常更新正式8787，当前PID22164，根页面200、version3和CLI查询真实历史记录通过；原库备份与过程见[本次交付](../../evidence/publication-entry-20261123/执行记录.md)。真实稿件公开发布尚未验收。下方较早的未部署记录属于同日历史状态。
+
+把下面的稿件对象写成 JSON，执行 `node scripts/l1-submit-prep.mjs <稿件.json>`。麦田写入已有 `publish_preparations`，在「发布 → 发布记录」只按栏目筛选，显示交稿AI和后续操作来源。历史分类字段只作兼容，不再要求或显示。测试与验收记录折叠保存，不作为正式发布成果。
+
+```json
+{
+  "platform": "x",
+  "title": "稿件标题",
+  "content": "待审核的正文",
+  "source": {
+    "project": "AI发帖助手",
+    "column": "每日 AI 精选",
+    "runId": "2026-11-21T08:30"
+  }
+}
+```
+
+同一项目、栏目、运行编号及平台重复提交复用原记录，内容或已登记AI来源冲突时报错，不能用重交来覆盖交稿人。交稿是本地待核对记录，已有发布动作继续由用户在原入口处理。已发布且读回过正文的 X 普通帖，也可执行 `node scripts/l1-submit-prep.mjs --x-receipt <receipt.json> <项目> <栏目>`，同步发布时间和公开链接。此类记录明确标为外部发布回执，不证明经过麦田执行，也不推断原发布AI。旧脚本多带一个分类参数仍兼容；旧运行版仅保留原回执入库能力并明确AI未记录，不影响原栏目定时与发布授权。
+
+`accepted` 表示麦田已入库，`queued` 表示本机暂存。免口令直连版麦田在启动时和运行期间导入暂存稿，成功后移除暂存文件，不合格的保存到 `data/publish-prep/inbox/rejected/`。提交暂存稿后请保留其所引用的图片，直到麦田读入。无需由各 Codex 项目访问数据库文件。
+
+### 从同一记录继续检查、填写和查询
+
+2026-11-23 补齐 AI 命令入口。交稿时填写 `source.project`（项目）、`column`（栏目）和稳定的 `runId`，不另分内容分类。交稿回执返回原记录 ID、标题、栏目、实际状态和 `reviewUrl`。打开链接直接定位该篇稿件，即使它已经不在最近 30 条记录中。
+
+在仓库根目录执行：
+
+```powershell
+node scripts/l1-submit-prep.mjs 稿件.json
+node scripts/l1-submit-prep.mjs --status <记录ID>
+node scripts/l1-submit-prep.mjs --check <记录ID>
+node scripts/l1-submit-prep.mjs --prepare <记录ID>
+node scripts/l1-submit-prep.mjs --status <记录ID>
+```
+
+`--check` 沿用工作台的本地 skill 离线检查；检查实际变为 `checked` 后，`--prepare` 才能沿用原记录填写小红书 AI 号，或保存微信公众号草稿。每一步须属于本篇既有授权；交稿本身不授权打开平台。这两个命令没有最终发布动作；小红书填写留窗供本人处理，公众号始终只存草稿。需要经麦田公开发布小红书时使用下方独立动作，X没有新增发布动作。
+
+本篇用户明确授权小红书公开发布时，从`checked`直接使用独立动作，不先用`--prepare`另开待手动处理的稿件：
+
+```powershell
+node scripts/l1-submit-prep.mjs --publish <原记录ID> --authorization-ref <本篇明确发布指令的真实引用>
+node scripts/l1-submit-prep.mjs --status <原记录ID>
+```
+
+真实引用应指向本篇用户指令、已批准任务或审核记录；一个自填引用不产生授权。接入层绑定本次检查通过的稿件和图片摘要、实际执行AI与会话，原`job.json`仍为submit:false，仅为本次授权生成独立submit:true执行快照。只调用本地`xhs-publish post --account ai --submit`，最终发布不带keep-browser；公众号和X不能调用该动作。测试/验收稿、未知结果、已提交或已公开记录不能提交；同稿换运行编号亦不能重复提交。
+
+`submitted`只代表本地skill已确认平台接收本次提交，公开与审核状态待核对，不自动写published。`already_exists`代表平台已有同名稿，本次未提交，不计为本次发布成功。错误、非零退出、回执无法解析或收尾未成功一律unknown，先核对平台不重发。获得原可见公开链接核验证据后，沿原取链接入口将同一记录更新为published，并保留实际提交AI与授权痕迹。没有实际公开URL就保持待核对，不猜链接。
+
+页面“发布小红书”按钮只在运行版支持且稿件离线检查通过时可用，按本篇确认后执行同一动作；测试记录没有此按钮。填写留窗和公开发布是两条路径，已有待手动处理的编辑页继续受保护，不会为发布新稿覆盖它。公众号仍只存草稿。
+
+命令返回 `draftState: running` 仅代表操作已启动，须再用 `--status` 读回最终状态和证据。`draft_saved` 加 `savedAsDraft: true` 才是公众号保存回执；`awaiting_user` 是待本人处理；`unknown` 不能重跑。操作超时不暂存、不自动重试，先查询原 ID，不能换运行编号重建。`--status` 对失败或未知结果返回非零退出码。`queued` 的 ID 是暂存文件编号，不是正式记录 ID；此时不得继续填写，先等待导入后以原稿再次交稿取得正式 ID。
+
+本机默认连接 `http://127.0.0.1:8787`；隔离测试可用 `MAITIAN_PREP_BASE` 指向另一本机端口，拒绝外网地址。外网审阅使用工作台既有 HTTPS 入口加回执的 `reviewPath`；命令不读取登录密码或会话信息。
+
+2026-11-23 较早阶段：服务更新和独立浏览器启动曾被自动审批拒绝，当时新接口未加载。[原始证据](../../evidence/project-publish-entry-20261123/执行记录.md)保持不改。09:59受限维护入口经正常执行通道成功备份/更新正式服务，当前以version3读回为准，不代表旧拒绝触发细则已定位或所有启动方式都已获准。后续独立浏览器启动仍被blocked by policy拒绝，因此未新增真实桌面/390px验收。续办前先用`--status`核对原记录，失败停止，不改走平台脚本。
+
+### 谁交稿、谁执行，以及怎样接入另一个 AI
+
+Codex入口从当前运行环境中的真实 `CODEX_THREAD_ID` / `CODEX_SESSION_ID` 取得会话编号，两者冲突即停止。不猜模型版本、Bot名称或旧稿作者。其他AI使用本机已授权的命令通道时传入各自实际会话信息，例如：
+
+```powershell
+node scripts/l1-submit-prep.mjs 稿件.json --agent dsh --agent-name "DSH内容助手" --session <本次实际会话ID>
+node scripts/l1-submit-prep.mjs --check <记录ID> --agent dsh --session <本次实际会话ID>
+node scripts/l1-submit-prep.mjs --prepare <记录ID> --agent dsh --session <本次实际会话ID>
+node scripts/l1-submit-prep.mjs --status <记录ID>
+```
+
+支持 `codex`、`dsh`、`grok`、`other` 类型。没有本机命令权限的AI需要现有且获准的连接器传递稿件与会话信息；仅能读写允许目录内文字的Grok不能因此运行Windows Shell。本轮未实际接通DSH/Grok调用，也没有新增对外免认证API。
+
+`source.agent` 是本次交稿方。工作台在真正启动检查/填写/发布子进程时，另记录操作者、会话、开始时间、结束时间及实际结果；交稿与后续执行可由不同AI完成。网页或旧客户端未传来源时显示未记录，不沿用交稿人充当执行人。调用方来源上报不是身份认证，不能把一个自填的名字称为已经认证的AI；旧数据没有来源证据就保持未记录。平台账号昵称是发布到哪个账号，另有含义，不能用来代替AI来源。
+
+给已接入AI的任务可以写：“将本篇已批准稿件交到麦田，栏目用『工具解读』，按本篇获准范围检查并发布到小红书AI号／保存公众号草稿，最后回报原记录链接、执行AI和真实回执。”本机接入版本由 `/api/prep/contract` 返回；来源/准备要求version2及以上，显式小红书发布要求version3及finalPublishPlatforms包含xhs。先交稿，再检查，检查通过才执行，最后读取同一ID状态。`accepted`不代表发布，`draft_saved`只是公众号草稿，`awaiting_user`是填写待本人处理，`submitted`不代表公开链接已核验。真实平台验证未完成时须明确报告，不能用隔离回归替代。
+
+### 正常维护与运行版验证
+
+本机维护入口`scripts/Update-Maitian.ps1`默认只检查，也可显式`-CheckOnly`：先核对Node/PowerShell语法、8787精确进程、正式SQLite记录匹配、全部运行任务是否空闲。`-Restart`才会在备份SQLite后停止核实的工作台并调用项目既有启动器，记录旧进程退出、新PID、启动异常与version3读回。只作用8787，不碰远程入口、3351、Chrome、凭据、ACL、自启或其他服务。此前工具拒绝没有因此自动解除；必须通过正常获准维护入口执行，不能更换通道绕过。
+
 ## 2026-11-18 网页填写上传
 
 网页准备任务显式填写上传小红书

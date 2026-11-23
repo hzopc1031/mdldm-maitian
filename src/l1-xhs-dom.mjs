@@ -33,7 +33,9 @@ export function visibleNoteCards() {
     const dateLine = dateNode?.innerText || text.replace(title, '').split('\n').map(s => s.trim()).find(s => /^(?:发布于?\s*|发布时间\s*[:：]?\s*)?20\d{2}[年/.-]\d{1,2}[月/.-]\d{1,2}(?:日)?(?:\s+\d{1,2}:\d{2}(?::\d{2})?)?$/.test(s)) || '';
     const date = (dateLine.match(/\b(20\d{2})[年/.-](\d{1,2})[月/.-](\d{1,2})(?:日)?/) || []).slice(1);
     const dateText = date.length ? `${date[0]}-${date[1].padStart(2,'0')}-${date[2].padStart(2,'0')}` : null;
-    return { id: id == null ? null : String(id), url, text: title, date: dateText, date_status: dateText ? 'visible-date' : 'unknown', stats: [...card.querySelectorAll('.note-card__stat')].map(el => visible(el) ? el.innerText.trim() : null), state: /审核中/.test(text) ? 'reviewing' : /未通过|草稿/.test(text) ? 'skipped' : 'published' };
+    const time = /\s([01]?\d|2[0-3]):([0-5]\d)(?::([0-5]\d))?$/.exec(dateLine.trim());
+    const publishedAt=dateText&&time ? `${dateText}T${time[1].padStart(2,'0')}:${time[2]}:${time[3]||'00'}+08:00` : null;
+    return { id: id == null ? null : String(id), url, text: title, date: dateText, publishedAt, date_status: dateText ? 'visible-date' : 'unknown', stats: [...card.querySelectorAll('.note-card__stat')].map(el => visible(el) ? el.innerText.trim() : null), state: /审核中/.test(text) ? 'reviewing' : /未通过|草稿/.test(text) ? 'skipped' : 'published' };
   });
 }
 export function scrollNotes() {

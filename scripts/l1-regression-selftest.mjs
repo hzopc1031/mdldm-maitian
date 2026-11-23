@@ -18,6 +18,7 @@ fs.writeFileSync(process.env.MAITIAN_CONFIG, JSON.stringify({ rootPath: folder, 
 globalThis.fetch = () => { throw new Error('离线自测禁止网络请求'); };
 const { importX } = await import('./import-x-public.mjs');
 const { db } = await import('../src/l1-store.mjs');
+db.prepare('INSERT OR REPLACE INTO meta(key,value) VALUES (?,?)').run('l1:platform-selection',JSON.stringify(['x','xhs','wechat']));
 const { writeLocalReport } = await import('../src/local-report.mjs');
 const { episodeView, overviewData, episodeFile, coverFile, feed, handle } = await import('../src/web.mjs');
 const fixture = JSON.parse(fs.readFileSync(path.join(root, 'examples/x-sample.json'), 'utf8'));
@@ -125,6 +126,11 @@ try {
   assert.match(elements.get('#screen').innerHTML, /讲解示例代码/);
   assert.ok(vm.runInContext('SL.length > 0 && SL.every(e => e.episode == null)', context));
   assert.equal(vm.runInContext('timeOf(O.episodes[0])', context), overview.episodes[0].observedAt);
+  assert.match(elements.get('#screen').innerHTML, /已入库作品/);
+  assert.match(elements.get('#screen').innerHTML, /可能包含置顶帖，不代表账号最新发布/);
+  assert.doesNotMatch(vm.runInContext('heroHTML(O.episodes[0], O.episodes[1])', context), /刚发布|上一期「/);
+  vm.runInContext('O.episodes[0].publishedAt = new Date().toISOString()', context);
+  assert.doesNotMatch(vm.runInContext('heroHTML(O.episodes[0], O.episodes[1])', context), /刚发布|上一期「/);
   const pages = fs.readFileSync(path.join(root, 'src/web/pages.html'), 'utf8').match(/<script>([\s\S]*?)<\/script>/)[1];
   new vm.Script(pages);
   console.log('PASS NULL 期数按发布时间/观测时间排序；大屏模板可渲染导入帖；页面脚本语法正确。');

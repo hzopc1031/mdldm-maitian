@@ -2,8 +2,9 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import {home} from './l1-config.mjs';
+import {PLATFORM_IDS} from './platform-registry.mjs';
 export function l1Account(config, platform) {
-  if(!['x','xhs','wechat'].includes(platform))throw new Error('未知 L1 平台');
+  if(!PLATFORM_IDS.includes(platform))throw new Error('未知 L1 平台');
   if(platform==='x' && config.xHandle && config.l1?.x?.account && config.xHandle.toLowerCase()!==config.l1.x.account.toLowerCase())throw new Error('X 预期账号配置冲突；未启动浏览器');
   const file=process.env.MAITIAN_ACCOUNTS || path.join(home,'l1-accounts.local.json');
   const local=fs.existsSync(file)?JSON.parse(fs.readFileSync(file,'utf8').replace(/^\uFEFF/,'')):{};

@@ -1,6 +1,7 @@
 // 流量采集：只读自己创作者后台的数据，每天一次。按作品 ID 匹配（标题在平台上可能改过）。
 import { evaluate, withTab, sleep } from './driver.mjs';
 import { SITE } from './site.mjs';
+import { collectChannelMetrics } from './native-collectors.mjs';
 
 const J = JSON.stringify;
 // "1.2万" "6,017" "5.3K" → 数字
@@ -29,11 +30,7 @@ export const collectors = {
     const st = await withTab('https://creator.douyin.com/creator-micro/content/manage', async (t) => { for (let i = 0; i < 15 && !(await evaluate(t, `document.querySelectorAll('[class*=video-card-info]').length`).catch(() => 0)); i++) await sleep(2000); await sleep(1500); return evaluate(t, `(()=>{for(const c of document.querySelectorAll('[class*=video-card-info]')){const k=Object.keys(c).find(k=>k.startsWith('__reactFiber'));let f=c[k];for(let i=0;i<25&&f;i++,f=f.return){const pr=f.memoizedProps;if(!pr)continue;const v=Object.values(pr).find(v=>v&&typeof v==='object'&&v.aweme_id&&v.desc!==undefined);if(v){if((${J(id)}&&v.aweme_id===${J(id)})||v.item_title===${J(p.title)})return v.statistics||null;break;}}}return null})()`); }, { wait: 6000 });
     return st && { views: st.play_count, likes: st.digg_count, comments: st.comment_count, favorites: st.collect_count, shares: st.share_count };
   },
-  async channels({ p }) {
-    const first = p.body.split('\n')[0].trim().slice(0, 30);
-    const n = await withTab('https://channels.weixin.qq.com/platform/post/list', (t) => evaluate(t, `(()=>{const R=document.querySelector('wujie-app')&&document.querySelector('wujie-app').shadowRoot;if(!R)return null;const c=[...R.querySelectorAll('.post-feed-item')].find(c=>c.innerText.trim().startsWith(${J(first)}));if(!c)return null;const o={};for(const d of c.querySelectorAll('.data-item')){const k=/eyes/.test(d.innerHTML)?'views':/outlined-like/.test(d.innerHTML)?'likes':/comment/.test(d.innerHTML)?'comments':/icon-share/.test(d.innerHTML)?'shares':/thumb/.test(d.innerHTML)?'recommend':'';if(k)o[k]=d.innerText.trim()}return o})()`), { wait: 14000 });
-    return n && { views: num(n.views), likes: num(n.likes), comments: num(n.comments), shares: num(n.shares), extra: { 推荐: num(n.recommend) } };
-  },
+  channels: ({ p }) => collectChannelMetrics(p, { withTab, evaluate }),
   async youtube({ url, p }) {
     const id = idOf(url, /youtu\.be\/([\w-]+)/);
     const c = await withTab('https://studio.youtube.com/', async (t) => {

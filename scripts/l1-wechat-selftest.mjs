@@ -56,10 +56,25 @@ let store;
 try {
   const dom = await import('../src/l1-wechat-dom.mjs');
   const { collectWechat, wechatAccount, assertWechatAccount } = await import('../src/l1-wechat.mjs');
-  const { browserSettings, allowedPage, assertBrowserOwner } = await import('../src/l1-browser.mjs');
+  const { browserSettings, allowedPage, assertBrowserOwner, restoredWechatTarget } = await import('../src/l1-browser.mjs');
+  assert.deepEqual(restoredWechatTarget([{type:'page',targetId:'home',url:'https://mp.weixin.qq.com/cgi-bin/home?token=FAKE_ONLY'}]),{targetId:'home'});
+  assert.equal(restoredWechatTarget([{type:'page',targetId:'editor',url:'https://mp.weixin.qq.com/cgi-bin/appmsg?token=FAKE_ONLY'}]),null);
+  assert.equal(restoredWechatTarget([{type:'page',targetId:'other',url:'https://mp.weixin.qq.com.evil/cgi-bin/home'}]),null);
+  assert.equal(restoredWechatTarget([{type:'page',targetId:'a',url:'https://mp.weixin.qq.com/cgi-bin/home'},{type:'page',targetId:'b',url:'https://mp.weixin.qq.com/cgi-bin/home'}]),null);
   const config = { chromeBinary: process.execPath, chromePort: 9333, chromeProfile: 'forbidden', l1: { wechat: { account: 'TestAccount' } } };
   const base = doc([article('101'), article('102', '2026-10-19'), article('103', '2026-10-18'), article('104', null), article('105', '2026-11-18'), article('106', '2026-02-30'), article('107', '2026-11-17', { state: '草稿' })]);
   assert.deepEqual(Array.from(read(dom.visibleWechatIdentity, base).names), ['TestAccount']);
+  const sidebarName = name => el('div', {class:'mp_account_box'}, '', [el('div', {class:'account_box-body'}, '', [el('span', {class:'acount_box-nickname'}, name)])]);
+  const dashboardName = name => el('div', {class:'weui-personal_info'}, '', [el('div', {class:'weui-desktop-person_info'}, '', [el('div', {class:'weui-desktop_name'}, name)])]);
+  const qrImage = el('img', {alt:'二维码'});
+  function dashboardIdentity(route, children) {
+    const page = el('document', {}, '', children);
+    return vm.runInNewContext(`(${dom.visibleWechatIdentity.toString()})()`, {...context, location:{...context.location, pathname:route}, document:page});
+  }
+  assert.deepEqual(Array.from(dashboardIdentity('/cgi-bin/home', [sidebarName('TestAccount'), dashboardName('TestAccount'), qrImage]).names), ['TestAccount']);
+  assert.deepEqual(Array.from(dashboardIdentity('/cgi-bin/home', [sidebarName('OtherAccount'), dashboardName('TestAccount')]).names), ['OtherAccount','TestAccount']);
+  assert.equal(dashboardIdentity('/cgi-bin/home', [qrImage]).login, false);
+  assert.equal(dashboardIdentity('/', [qrImage]).login, true);
   assert.equal(dom.wechatNumber(read(dom.visibleWechatFollowers, base)), 1234);
   assert.equal(dom.wechatNumber(read(dom.visibleWechatFollowers, doc([], [], '0'))), 0);
   for (const value of [null, '', '--', '昨日新增 2', '10%', '-1']) assert.equal(dom.wechatNumber(value), null);
@@ -68,6 +83,8 @@ try {
   const ambiguousFans = doc(); ambiguousFans.children.push(metric('总粉丝数', '999'));
   assert.equal(read(dom.visibleWechatFollowers, ambiguousFans), null);
   const cards = read(dom.visibleWechatArticles, base);
+  assert.equal(read(dom.visibleWechatArticles, doc([article('exact','2026年11月17日 9:05')]))[0].publishedAt,'2026-11-17T09:05:00+08:00');
+  assert.equal(read(dom.visibleWechatArticles, doc([article('day','2026-11-17')]))[0].publishedAt,null);
   assert.deepEqual(dom.wechatMetrics(Array.from(cards[0].stats)), { views: 12000, likes: 0, comments: null, shares: 3, watching: 7 });
   assert.equal(dom.wechatMetrics([['阅读', '1'], ['阅读', '2']]).views, null);
   assert.equal(dom.wechatMetrics([['收藏', '20']]).watching, null);
@@ -92,7 +109,7 @@ try {
     try { return await fn({ goto: async url => assert.equal(url, 'https://mp.weixin.qq.com/'), evaluate: async (fn, ...args) => read(fn, document, ...args) }); }
     finally { closes++; }
   };
-  const options = { withBrowser: fakeBrowser(base), wait, now: () => new Date('2026-11-17T16:30:00Z'), persist: async observation => { writes++; assert.equal(closes, writes + 3); return observation; } };
+  const options = { history:true, withBrowser: fakeBrowser(base), wait, now: () => new Date('2026-11-17T16:30:00Z'), persist: async observation => { writes++; assert.equal(closes, writes + 3); return observation; } };
   assert.equal(wechatAccount({}), null);
   assert.throws(() => wechatAccount({ l1: { wechat: { account: ' x' } } }), /可见名称/);
   for (const names of [['Wrong'], [], ['TestAccount', 'Second']]) {
@@ -205,6 +222,7 @@ try {
   vm.runInContext(fs.readFileSync(path.join(root, 'src/web/health.js'), 'utf8'), board);
   vm.runInContext(fs.readFileSync(path.join(root, 'src/web/board.html'), 'utf8').match(/<script>([\s\S]*?)<\/script>/)[1], board);
   board.input = overviewData();
+  board.input.platforms=board.input.platforms.map(p=>({...p,selected:p.id==='wechat'}));
   vm.runInContext("O = { ...input, health: { login: {} }, actions: [] }; draw = () => {}; render();", board);
   assert.match(elements.get('#screen').innerHTML, /公众号/); assert.ok(!elements.get('#screen').innerHTML.includes('undefined'));
   log('PASS 临时SQLite：episode/task/snapshot/sample幂等，appmsgId与platforms.wechat；NULL合并/字段时间/旧观测保护/在看0/跨账号回滚；日报与overview/detail/UI模板。');

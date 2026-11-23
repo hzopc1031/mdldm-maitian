@@ -16,6 +16,7 @@ assert.equal(allowedPage('https://x.com/ConfiguredUser/status/123','x','Configur
 assert.equal(allowedPage('https://x.com/Other/status/123','x','ConfiguredUser'),false);
 assert.equal(allowedPage('https://x.com/ConfiguredUser/status/123?anything=1','x','ConfiguredUser'),false);
 await assertXAccount({evaluate:async()=>({handle:'@ConfiguredUser',url:'https://x.com/ConfiguredUser'})},'ConfiguredUser');
+await assertXAccount({evaluate:async()=>({handle:'ConfiguredUser',url:'https://x.com/home'})},'ConfiguredUser');
 await assert.rejects(assertXAccount({evaluate:async()=>({handle:'@Other',url:'https://x.com/ConfiguredUser'})},'ConfiguredUser'),/不是/);
 const card={id:'123',author:'ConfiguredUser',permalinkAuthor:'ConfiguredUser',kind:'original',created_at:new Date().toISOString()};
 assert.equal(selectXPosts([card],new Date(),'ConfiguredUser').posts[0].url,'https://x.com/ConfiguredUser/status/123');

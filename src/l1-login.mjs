@@ -1,4 +1,5 @@
 import { pause } from './l1-browser.mjs';
+import { reportL1Progress } from './l1-progress.mjs';
 
 export function loginTimeoutMs(value = process.env.L1_LOGIN_TIMEOUT_MS ?? 600000) {
   const timeout = Number(value);
@@ -9,9 +10,12 @@ export function loginTimeoutMs(value = process.env.L1_LOGIN_TIMEOUT_MS ?? 600000
 // 只轮询已渲染 DOM；不刷新页面，以免打断二维码或登录流程。
 export async function waitForVisibleLogin(page, readIdentity, checkIdentity, timeoutMs) {
   const deadline = Date.now() + timeoutMs;
+  let phase;
   while (Date.now() < deadline) {
     const identity = await page.evaluate(readIdentity);
-    if (checkIdentity(identity)) return;
+    if (checkIdentity(identity)) return identity;
+    const nextPhase = identity.login ? 'login_required' : 'checking_login';
+    if (phase !== nextPhase) { phase=nextPhase; reportL1Progress(phase, Math.max(1,deadline-Date.now())); }
     const remaining = deadline - Date.now();
     if (remaining > 0) await pause(Math.min(1800, remaining), Math.min(3200, remaining));
   }

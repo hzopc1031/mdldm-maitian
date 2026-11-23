@@ -20,15 +20,16 @@
 <script src="/static/mt.js"></script>
 <script src="/static/publish-prep.js"></script>
 <script>
-let O = null, F = {}, timer = null, pick = null;
+let O = null, F = {}, timer = null, pick = null, pendingAction = null, actionError = '', libraryQuery = '', libraryPlatform = '', libraryPage = 0, calendarOffset = 0, focusedPlatform = '';
 const dayStr = (d) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
 const gainN = (p, n) => { const t = dayStr(new Date()), b = dayStr(new Date(Date.now() - n * 864e5)); return F[p] && F[p][t] != null && F[p][b] != null ? F[p][t] - F[p][b] : null; };
 const latest = (p) => { const d = Object.keys(F[p] || {}).sort(); return d.length ? { day: d[d.length - 1], total: F[p][d[d.length - 1]], n: d.length } : null; };
 const M = (e, p) => ((e.tasks.find(t => t.platform === p) || {}).m) || null;
 const timeOf = e => e.publishedAt || e.schedule || e.observedAt || e.createdAt;
+const publishedLabel=(e,at)=>e.dateOnly?`${new Intl.DateTimeFormat('zh-CN',{timeZone:'Asia/Shanghai',year:'numeric',month:'numeric',day:'numeric'}).format(new Date(at))}（仅日期）`:when(at);
 const episodeLabel = e => e.episode == null ? '已导入作品' : `第 ${esc(e.episode)} 期`;
-const busy = () => O.actions.some(a => !a.done);
-const abtn = (a, text, cls = '', cf = '') => `<button class="btn ${cls}" ${busy() && a.type !== 'mark' ? 'disabled' : ''} data-act='${esc(JSON.stringify(a))}' data-confirm="${esc(cf)}">${text}</button>`;
+const busy = () => !!O?.actions?.some(a => !a.done);
+const abtn = (a, text, cls = '', cf = '') => `<button class="btn ${cls}" ${(pendingAction || busy() && !['mark','show-login','cancel-login'].includes(a.type)) ? 'disabled' : ''} data-act='${esc(JSON.stringify(a))}' data-confirm="${esc(cf)}" ${pendingAction && pendingAction.type===a.type && pendingAction.platform===a.platform ? 'aria-busy="true"' : ''}>${text}</button>`;
 const collectButtons = () => ['x', 'xhs', 'wechat'].map(platform => abtn({ type: 'collect', platform }, `采集 ${PN[platform]}`)).join('');
 const tile = (lab, val, sub = '') => `<div class="panel tile"><div class="lab">${lab}</div><div class="val">${val}</div><div class="dl">${sub}</div></div>`;
 const sec = (t, note = '') => `<div class="sec"><h2>${t}</h2><span class="note">${note}</span></div>`;
@@ -37,15 +38,14 @@ const samplesOf = (e) => PL.map(p => ({ name: PN[p], pts: O.samples.filter(s => 
 let after = () => {};
 
 function vTraffic() {
-  const eps = O.episodes.filter(e => e.views > 1); if (!eps.length) return `<div class="h1">流量</div>${accountSummaryHTML(O.accountSummaries)}<p class="lead">还没采到流量。先到系统页登录，再选择平台采集。</p><div class="btns">${collectButtons()}<a class="btn" href="#/system">登录与采集状态</a></div>`;
+  const eps = O.episodes.filter(e => e.tasks.some(t=>PL.includes(t.platform)&&t.m?.views!=null)); if (!eps.length) return `<div class="h1">数据统计</div>${accountSummaryHTML(O.accountSummaries)}<p class="lead">尚无已选平台的作品浏览数据，可到「账号与采集」更新数据。</p><div class="btns"><a class="btn" href="#/system">前往账号与采集</a></div>`;
   const all = sum(eps, 'views'), it = sum(eps, 'inter'), byP = PL.map(p => ({ p, v: eps.reduce((s, e) => s + ((M(e, p) || {}).views || 0), 0) })).sort((a, b) => b.v - a.v);
   const e = eps.find(x => x.id === pick) || eps[0], rows = PL.map(p => ({ p, m: M(e, p), t: e.tasks.find(t => t.platform === p) })).filter(r => r.m), mx = Math.max(...rows.map(r => r.m.views || 0), 1);
   after = () => { const el = $('#c-line'); if (el) drawLines(el, samplesOf(e)); };
-  return `<div class="h1">流量</div>${accountSummaryHTML(O.accountSummaries)}<p class="lead">各平台已采到的播放和互动。采集需手动发起，日报保存在本机。</p>
-  <div class="grid g4">${tile('累计播放', fmt(all), `${eps.length} 期合计`)}${tile('累计互动', fmt(it), `互动率 ${pct(it, all, 1)}`)}${tile('平均每期播放', fmt(all / eps.length))}${tile('播放最多的平台', PN[byP[0].p], `${fmt(byP[0].v)}，占 ${pct(byP[0].v, all)}`)}</div>
-  ${sec('每期 × 平台', '格子里是播放数，细条是这一期里的占比')}
-  <div class="panel"><div class="tw"><table><thead><tr><th>期</th>${PL.map(p => `<th class="n">${logo(p)}${PN[p]}</th>`).join('')}<th class="n">合计</th><th class="n">互动率</th></tr></thead><tbody>
-    ${eps.map(x => { const m2 = Math.max(...PL.map(p => (M(x, p) || {}).views || 0), 1); return `<tr><td><a href="#/ep/${encodeURIComponent(x.id)}" title="${esc(x.name)}">${epc(x)}</a></td>${PL.map(p => { const m = M(x, p); return `<td class="n">${m ? fmt(m.views) : '–'}<span class="cellbar"><i style="width:${m ? (m.views / m2 * 100).toFixed(0) : 0}%"></i></span></td>`; }).join('')}<td class="n"><b>${fmt(x.views)}</b></td><td class="n">${pct(x.inter, x.views, 1)}</td></tr>`; }).join('')}</tbody></table></div></div>
+  return `<div class="h1">数据统计</div>${accountSummaryHTML(O.accountSummaries)}<p class="lead">已保存作品的浏览与互动。日常采集按日期执行，历史累计包含不同时间的观测。</p>
+  <div class="grid g4">${tile('入库作品累计浏览', fmt(all), `${eps.length} 篇作品合计`)}${tile('累计互动', fmt(it), `互动率 ${pct(it, all, 1)}`)}${tile('平均每篇浏览', fmt(all / eps.length))}${tile('播放最多的平台', PN[byP[0].p], `${fmt(byP[0].v)}，占 ${pct(byP[0].v, all)}`)}</div>
+  <details class="panel traffic-all"><summary>全部作品数据明细（${eps.length} 篇）</summary><p class="note">按作品查看各平台累计浏览，查找作品可前往<a class="text-link" href="#/archive">作品库</a>。</p><div class="tw"><table><thead><tr><th>期</th>${PL.map(p => `<th class="n">${logo(p)}${PN[p]}</th>`).join('')}<th class="n">合计</th><th class="n">互动率</th></tr></thead><tbody>
+    ${eps.map(x => { const m2 = Math.max(...PL.map(p => (M(x, p) || {}).views || 0), 1); return `<tr><td><a href="#/ep/${encodeURIComponent(x.id)}" title="${esc(x.name)}">${epc(x)}</a></td>${PL.map(p => { const m = M(x, p); return `<td class="n">${m ? fmt(m.views) : '–'}<span class="cellbar"><i style="width:${m ? (m.views / m2 * 100).toFixed(0) : 0}%"></i></span></td>`; }).join('')}<td class="n"><b>${fmt(x.views)}</b></td><td class="n">${pct(x.inter, x.views, 1)}</td></tr>`; }).join('')}</tbody></table></div></details>
   <div class="sec traffic-detail"><h2>${esc(e.nick)} · 各平台明细</h2>${eps.length > 1 ? `<label class="traffic-picker" for="traffic-pick">选择作品<select id="traffic-pick">${eps.map(x => `<option value="${esc(x.id)}" ${x.id === e.id ? 'selected' : ''}>${esc(x.nick)} · ${when(timeOf(x)).split(' ')[0]}</option>`).join('')}</select></label>` : ''}</div>
   <div class="panel"><div class="tw"><table><thead><tr><th>平台</th><th class="n">播放</th><th class="n">赞</th><th class="n">评论</th><th class="n">收藏</th><th class="n">转发</th><th class="n">互动率</th><th class="n">收藏率</th><th></th></tr></thead><tbody>
     ${rows.sort((a, b) => b.m.views - a.m.views).map(r => { const u = safeUrl(r.t && r.t.url); return `<tr><td>${logo(r.p)}${PN[r.p]}</td><td class="n"><b>${fmt(r.m.views)}</b><span class="cellbar"><i style="width:${(r.m.views / mx * 100).toFixed(0)}%"></i></span></td><td class="n">${fmt(r.m.likes)}</td><td class="n">${fmt(r.m.comments)}</td><td class="n">${fmt(r.m.favorites)}</td><td class="n">${fmt(r.m.shares)}</td><td class="n">${r.m.views ? pct(inter(r.m), r.m.views, 1) : '–'}</td><td class="n">${r.m.views && r.m.favorites != null ? pct(r.m.favorites, r.m.views, 1) : '–'}</td><td class="n">${u ? `<a href="${u}" target="_blank" rel="noopener">打开 ↗</a>` : ''}</td></tr>`; }).join('')}</tbody></table></div></div>
@@ -53,7 +53,7 @@ function vTraffic() {
   ${sec('粉丝', '每天采一次')}
   <div class="panel"><div class="tw"><table><thead><tr><th>平台</th><th class="n">现在</th><th class="n">今日</th><th class="n">近 7 天</th><th class="n">近 30 天</th><th class="n">已记录</th></tr></thead><tbody>
     ${PL.map(p => { const l = latest(p); const g = (n) => { const v = gainN(p, n); return v == null ? '<span style="color:var(--t3)">–</span>' : sgn(v); }; return l ? `<tr><td>${logo(p)}${PN[p]}</td><td class="n"><b>${fmt(l.total)}</b></td><td class="n">${g(1)}</td><td class="n">${g(7)}</td><td class="n">${g(30)}</td><td class="n">${l.n} 天</td></tr>` : ''; }).join('')}</tbody></table></div></div>
-  <div class="btns" style="margin-top:18px">${collectButtons()}</div>`;
+  <div class="btns" style="margin-top:18px"><a class="btn" href="#/system">前往账号与采集</a></div>`;
 }
 
 function vConvert() {
@@ -78,93 +78,160 @@ function vConvert() {
 }
 
 function vCalendar() {
-  // 日历：上周、这周、下两周，每天列出这天发的期（已发布 / 已定时 / 等你点 / 计划中）
-  const DAY = 864e5, now = new Date(), dow = (now.getDay() + 6) % 7, mon0 = new Date(now.getFullYear(), now.getMonth(), now.getDate() - dow - 7);
-  const days = Array.from({ length: 28 }, (_, i) => new Date(mon0.getTime() + i * DAY)), key = (d) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
-  const st = (e) => { const s = e.tasks.map(t => t.state); return s.some(x => ['failed', 'not_logged_in'].includes(x)) ? ['bad', '异常'] : s.some(x => ['awaiting_user', 'filled'].includes(x)) ? ['todo', '等你点发布'] : s.every(x => x === 'published' || x === 'skipped') ? ['ok', '已发布'] : s.some(x => x === 'planned') ? ['plan', '计划中'] : ['sch', '已定时']; };
-  const by = {}; for (const e of O.episodes) { const d = new Date(timeOf(e)); (by[key(d)] ||= []).push(e); }
+  const DAY = 864e5, now = new Date(), dow = (now.getDay() + 6) % 7, mon0 = new Date(now.getFullYear(), now.getMonth(), now.getDate() - dow + calendarOffset*7);
+  const days = Array.from({ length: 7 }, (_, i) => new Date(mon0.getTime() + i * DAY)), key = (d) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+  const st = (e) => { const s = e.tasks.map(t => t.state); return s.some(x => ['failed', 'not_logged_in','unknown'].includes(x)) ? ['bad', '异常 / 需核对'] : s.some(x => ['submitted','already_exists'].includes(x)) ? ['todo','已提交，待核对'] : s.some(x => x==='draft_saved') ? ['todo','已保存草稿'] : s.some(x => ['awaiting_user', 'filled'].includes(x)) ? ['todo', '等你点发布'] : s.every(x => x === 'published' || x === 'skipped') ? ['ok', '已发布'] : s.some(x => x === 'planned') ? ['plan', '计划中'] : ['sch', '已定时']; };
+  const calendarTime = e => e.publishedAt || e.schedule;
+  const by = {}; for (const e of O.episodes) { const at = calendarTime(e); if (!at || !Number.isFinite(Date.parse(at))) continue; const d = new Date(at); (by[key(d)] ||= []).push(e); }
+  const unknown = O.episodes.filter(e => !calendarTime(e) || !Number.isFinite(Date.parse(calendarTime(e)))).length;
   const today = key(now), upcoming = O.episodes.filter(e => e.schedule && Date.parse(e.schedule) > Date.now()).length;
-  return `<div class="h1">日历</div><p class="lead">上周到未来两周的分发安排。${upcoming ? `接下来还有 <b>${upcoming}</b> 期要发。` : '接下来没有排期，可以用 <code>hub plan</code> 把下一期放进来。'}</p>
+  return `<div class="h1">发布日历</div><p class="lead">按发布时间和排期显示本机已入库作品。${upcoming ? `接下来还有 <b>${upcoming}</b> 期要发。` : '暂无已登记的后续排期。'}</p>
+  <p class="note">采集尚未覆盖完整历史；「暂无入库记录」不代表当天没有发布。${unknown ? `另有 ${unknown} 篇作品缺少发布时间，未放入日期格。` : ''}</p>
+  <div class="calendar-tools"><strong>${days[0].getMonth()+1}/${days[0].getDate()} — ${days[6].getMonth()+1}/${days[6].getDate()}</strong><div class="btns"><button class="btn" data-calendar-shift="-1">上一周</button><button class="btn" data-calendar-reset>本周</button><button class="btn" data-calendar-shift="1">下一周</button></div></div>
   <div class="panel cal"><div class="cal-h">${'一二三四五六日'.split('').map(x => `<div>周${x}</div>`).join('')}</div><div class="cal-g">${days.map(d => { const k = key(d), list = by[k] || [];
-    return `<div class="cal-d${k === today ? ' today' : ''}${d < new Date(now.getFullYear(), now.getMonth(), now.getDate()) ? ' past' : ''}"><div class="cal-n">${d.getDate() === 1 || d === days[0] ? `${d.getMonth() + 1}/` : ''}${d.getDate()}${k === today ? '<span>今天</span>' : ''}</div>
-      ${list.map(e => { const [c, t] = st(e), at = new Date(timeOf(e)); return `<a class="cal-e ${c}" href="#/ep/${encodeURIComponent(e.id)}" title="${esc(e.name)}">${e.covers.length ? `<img src="/cover?id=${encodeURIComponent(e.id)}&k=${e.covers.includes('3x4') ? '3x4' : e.covers[0]}" alt="">` : ''}<div><b>${esc(e.nick)}</b><span><i></i>${pad(at.getHours())}:${pad(at.getMinutes())} · ${t}${e.views > 1 ? ' · ' + fmt(e.views) : ''}</span></div></a>`; }).join('')}</div>`; }).join('')}</div></div>
+    return `<div class="cal-d${k === today ? ' today' : ''}${d < new Date(now.getFullYear(), now.getMonth(), now.getDate()) ? ' past' : ''}"><div class="cal-n">${d.getDate() === 1 || d === days[0] ? `${d.getMonth() + 1}/` : ''}${d.getDate()}${k === today ? '<span>今天</span>' : ''}<small>${list.length?list.length+'篇':''}</small></div><div class="cal-items">
+      ${list.length ? list.map(e => { const [c, t] = st(e), at = new Date(calendarTime(e)); return `<a class="cal-e ${c}" href="#/ep/${encodeURIComponent(e.id)}" title="${esc(e.name)}">${e.covers.length ? `<img src="/cover?id=${encodeURIComponent(e.id)}&k=${e.covers.includes('3x4') ? '3x4' : e.covers[0]}" alt="">` : ''}<div><b>${esc(e.nick)}</b><span><i></i>${e.dateOnly?'仅日期':`${pad(at.getHours())}:${pad(at.getMinutes())}`} · ${t}${e.views > 1 ? ' · ' + fmt(e.views) : ''}</span></div></a>`; }).join('') : `<p class="cal-empty">${k > today ? '暂无排期' : '暂无入库记录'}</p>`}</div></div>`; }).join('')}</div></div>
   <div class="cal-lg"><span><i class="ok"></i>已发布</span><span><i class="sch"></i>已定时</span><span><i class="todo"></i>等你点发布</span><span><i class="plan"></i>计划中</span><span><i class="bad"></i>异常</span></div>`;
 }
 function vArchive() {
-  if (!O.episodes.length) return `<div class="h1">档案</div><p class="lead">还没有登记的期数。</p>`;
-  return `<div class="h1">档案</div><p class="lead">每一期发了什么、发到哪、数据怎么样。</p>
-  <div class="wall">${O.episodes.map(e => `<a class="panel poster" href="#/ep/${encodeURIComponent(e.id)}"><div class="im" style="${e.covers.length ? `background-image:url('/cover?id=${encodeURIComponent(e.id)}&k=${e.covers.includes('4x3') ? '4x3' : e.covers[0]}')` : ''}"></div>
-    <div class="tx"><div class="ep">${episodeLabel(e)} · ${when(timeOf(e))}</div><h3>${esc(e.name)}</h3><div class="mt"><span class="gpill">${e.views > 1 ? fmt(e.views) + ' 播放' : '还没有播放数据'}</span><span class="gpill">${e.tasks.filter(t => t.state === 'published').length}/${e.tasks.length} 已发布</span></div></div></a>`).join('')}</div>`;
+  const filtered=O.episodes.filter(e=>(!libraryQuery||e.name.toLocaleLowerCase().includes(libraryQuery.toLocaleLowerCase()))&&(!libraryPlatform||e.tasks.some(t=>t.platform===libraryPlatform)));
+  const pages=Math.max(1,Math.ceil(filtered.length/20));libraryPage=Math.max(0,Math.min(libraryPage,pages-1));
+  const list=filtered.slice(libraryPage*20,libraryPage*20+20);
+  return `<div class="h1">作品库</div><p class="lead">已保存 ${O.episodes.length} 篇作品，点开查看原文、平台链接与采集数据。</p>
+  <form id="work-filter" class="work-filter"><label>搜索作品<input id="work-search" type="search" placeholder="输入标题关键词" value="${esc(libraryQuery)}"></label><label>平台<select id="work-platform"><option value="">全部平台</option>${(O.platforms?.map(p=>p.id)||PL).map(p=>`<option value="${p}" ${p===libraryPlatform?'selected':''}>${esc(PN[p])}</option>`).join('')}</select></label><button class="btn pri" type="submit">搜索</button><button class="btn" type="reset">重置</button></form>
+  <div class="work-count note">${libraryQuery||libraryPlatform?`筛选结果 ${filtered.length} 篇`:`共 ${filtered.length} 篇`} · 第 ${libraryPage+1}/${pages} 页</div>
+  <div class="panel work-list">${list.length?list.map(e=>`<a class="work-row" href="#/ep/${encodeURIComponent(e.id)}">${e.covers.length?`<img src="/cover?id=${encodeURIComponent(e.id)}&k=${e.covers.includes('4x3')?'4x3':e.covers[0]}" alt="">`:''}<div class="work-title"><h3>${esc(e.name)}</h3><p>${e.publishedAt?when(e.publishedAt):'发布时间暂无'} · ${esc(e.tasks.map(t=>PN[t.platform]||t.platform).join('、'))}</p></div><div class="work-metrics"><b>${fmt(e.views)}</b><span>累计浏览</span></div><span class="work-open">查看 ›</span></a>`).join(''):'<p class="note work-empty">没有匹配的作品，可更换关键词或重置筛选。</p>'}</div>
+  <div class="work-pagination"><button class="btn" data-library-page="${libraryPage-1}" ${libraryPage===0?'disabled':''}>上一页</button><span class="note">每页20篇</span><button class="btn" data-library-page="${libraryPage+1}" ${libraryPage+1===pages?'disabled':''}>下一页</button></div>`;
+}
+
+function ageReviewPanel(tracks) {
+  if (!tracks?.length) return '';
+  const labels = {views:'浏览',likes:'点赞',comments:'评论'};
+  const status = {pending:'还未到观察节点',missing:'窗口内未采到数据', 'unknown-date':'缺少准确发布时间'};
+  const cell = (values,key) => {
+    const point=values?.[key];
+    return point ? `<b>${fmt(point.value)}</b> <small class="note">发布后 ${point.ageHours.toFixed(1)} 小时</small>` : '–';
+  };
+  return `<div class="sec age-review-head"><h2>同龄复盘</h2><span class="note">比较发布满 1、3、7 天前 6 小时内的实测。</span></div>
+    <div class="panel age-review"><div class="tw"><table><thead><tr><th>平台／节点</th>${Object.values(labels).map(label=>`<th>${label}</th>`).join('')}<th>比同栏上一篇</th></tr></thead><tbody>
+      ${tracks.map(track=>track.milestones.map(point=>{
+        const comparison=Object.entries(point.delta).map(([key,value])=>`${labels[key]} ${sgn(value)}`).join(' · ');
+        const link=track.previous?.episodeId?`<a href="#/ep/${encodeURIComponent(track.previous.episodeId)}">${esc(track.previous.title)}</a>`:esc(track.previous?.title);
+        const late=Object.entries(point.late||{}).map(([key,value])=>`${labels[key]} ${fmt(value.value)}（发布后 ${value.ageHours.toFixed(1)} 小时）`).join(' · ');
+        const missed=point.coverage==='attempted'?'有采集尝试':point.coverage==='no-attempt'?'无自动采集记录':'';
+        return `<tr class="age-milestone"><td class="age-node">${esc(PN[track.platform]||track.platform)} · 第 ${point.day} 天</td>${point.values ? Object.keys(labels).map(key=>`<td class="age-value" data-label="${labels[key]}">${cell(point.values,key)}</td>`).join('') : `<td colspan="3" class="age-missing note">${status[point.state]}${missed?` · ${missed}`:''}</td>`}
+          <td class="${comparison?'age-comparison':'age-comparison age-no-comparison'}">${comparison ? `${comparison}<br><small class="note">${link}</small>` : track.previous ? '暂无可比实测' : '暂无同栏上一篇'}</td></tr>${late?`<tr class="age-late"><td colspan="5" class="note">迟采 · ${esc(late)}</td></tr>`:''}`;
+      }).join('')).join('')}
+    </tbody></table></div></div>`;
 }
 
 async function vEpisode(id) {
   const e = await api('/api/episode?id=' + encodeURIComponent(id)), [t1, t2] = e.name.split(/[｜|]/).map(x => x.trim());
-  const todo = e.tasks.filter(t => ['awaiting_user', 'filled'].includes(t.state));
+  const todo = e.tasks.filter(t => ['awaiting_user', 'filled','submitted','already_exists','unknown','draft_saved'].includes(t.state));
   after = () => { const el = $('#c-line'); if (el) drawLines(el, samplesOf(e)); };
-  return `<a class="back" href="#/archive">‹ 档案</a>
-  <div class="panel ephero">${e.covers.length ? `<img src="/cover?id=${encodeURIComponent(e.id)}&k=${e.covers.includes('4x3') ? '4x3' : e.covers[0]}" alt="">` : '<div></div>'}
+  return `<a class="back" href="#/archive">‹ 返回作品库</a>
+  <div class="panel ephero ${e.covers.length?'':'no-cover'}">${e.covers.length ? `<img src="/cover?id=${encodeURIComponent(e.id)}&k=${e.covers.includes('4x3') ? '4x3' : e.covers[0]}" alt="">` : ''}
     <div><div class="eyebrow">${episodeLabel(e)}</div><div class="h1" style="margin:6px 0">${esc(t1)}</div>${t2 ? `<p class="lead" style="margin:0 0 14px">${esc(t2)}</p>` : ''}
       <div style="display:flex;gap:34px;flex-wrap:wrap;margin:6px 0 16px"><div><div class="lab" style="font-size:12px;color:var(--t3)">全平台播放</div><div class="val">${e.views > 1 ? fmt(e.views) : '–'}</div></div><div><div style="font-size:12px;color:var(--t3)">互动</div><div class="val">${e.views > 1 ? fmt(e.inter) : '–'}</div></div><div><div style="font-size:12px;color:var(--t3)">互动率</div><div class="val">${e.views > 1 ? pct(e.inter, e.views, 1) : '–'}</div></div><div><div style="font-size:12px;color:var(--t3)">已发布</div><div class="val">${e.tasks.filter(t => t.state === 'published').length}/${e.tasks.length}</div></div></div>
-      <dl class="kv"><dt>发布时间</dt><dd>${e.publishedAt || e.schedule ? when(e.publishedAt || e.schedule) : e.episode == null ? '暂无' : '立即发布'}</dd>${e.durationSec ? `<dt>时长</dt><dd>${Math.floor(e.durationSec / 60)} 分 ${Math.round(e.durationSec % 60)} 秒</dd>` : ''}${e.campaign ? `<dt>链接标记</dt><dd>${esc(e.campaign)}</dd>` : ''}<dt>工程里有</dt><dd>${e.files.map(esc).join('、') || '读不到工程目录'}</dd></dl>
-      <div class="btns" style="margin-top:16px"><a class="btn pri" href="#/prepare?episode=${encodeURIComponent(e.id)}&platform=${e.tasks[0]?.platform || 'x'}">准备发布</a>${['x', 'xhs', 'wechat'].filter(platform => e.tasks.some(t => t.platform === platform)).map(platform => `${abtn({ type: 'collect', platform }, `采集 ${PN[platform]}（平台整轮）`)}${O.publishPrep?.[platform]?.inspectEnabled ? abtn({type:'sync',platform,id:e.id},`取 ${PN[platform]} 链接`) : `<button class="btn" disabled>取 ${esc(PN[platform])} 链接（本地已停用）</button>`}`).join('')}</div><p class="note">取链接优先匹配稳定平台 ID；无 ID 时按完整文字与发表日期唯一匹配，最多查看8轮可见列表；缺少公开链接不回写。</p></div></div>
+      <dl class="kv"><dt>发布时间</dt><dd>${e.publishedAt || e.schedule ? publishedLabel(e,e.publishedAt || e.schedule) : e.episode == null ? '暂无' : '立即发布'}</dd>${e.durationSec ? `<dt>时长</dt><dd>${Math.floor(e.durationSec / 60)} 分 ${Math.round(e.durationSec % 60)} 秒</dd>` : ''}${e.campaign ? `<dt>链接标记</dt><dd>${esc(e.campaign)}</dd>` : ''}<dt>本地素材</dt><dd>${e.files.map(esc).join('、') || '未关联本地文件'}</dd></dl>
+      <div class="btns" style="margin-top:16px"><a class="btn pri" href="#/prepare?episode=${encodeURIComponent(e.id)}&platform=${e.tasks[0]?.platform || 'x'}">准备发布</a>${['x', 'xhs', 'wechat'].filter(platform => e.tasks.some(t => t.platform === platform)).map(platform => `${abtn({ type: 'collect', platform }, `采集 ${PN[platform]}（今日作品）`)}${O.publishPrep?.[platform]?.inspectEnabled ? abtn({type:'sync',platform,id:e.id},`取 ${PN[platform]} 链接`) : `<button class="btn" disabled>取 ${esc(PN[platform])} 链接（本地已停用）</button>`}`).join('')}</div><p class="note">取链接优先匹配稳定平台 ID；无 ID 时按完整文字与发表日期唯一匹配，最多查看8轮可见列表；缺少公开链接不回写。</p></div></div>
   ${todo.length ? `${sec('待处理发布记录')}<div class="panel">${todo.map(t => `<div class="prow">${logo(t.platform)}<span>${esc(PN[t.platform] || t.name)} · ${esc(t.stateCn)} · ${esc(t.detail)}</span></div>`).join('')}</div>` : ''}
   ${sec('各平台')}
   <div class="panel"><div class="tw"><table><thead><tr><th>平台</th><th>状态</th><th class="n">播放</th><th class="n">赞</th><th class="n">评论</th><th class="n">收藏</th><th class="n">转发</th><th class="n">互动率</th><th></th></tr></thead><tbody>
-    ${PL.map(p => e.tasks.find(t => t.platform === p)).filter(Boolean).map(t => { const m = t.m || {}, u = safeUrl(t.url); return `<tr><td>${logo(t.platform)}${esc(PN[t.platform] || t.name)}</td><td>${chip(t)}</td><td class="n"><b>${fmt(m.views)}</b></td><td class="n">${fmt(m.likes)}</td><td class="n">${fmt(m.comments)}</td><td class="n">${fmt(m.favorites)}</td><td class="n">${fmt(m.shares)}</td><td class="n">${m.views ? pct(inter(m), m.views, 1) : '–'}</td><td class="n">${u ? `<a href="${u}" target="_blank" rel="noopener">打开 ↗</a>` : `<span style="color:var(--t3)">${esc(t.detail).slice(0, 18)}</span>`}</td></tr>`; }).join('')}</tbody></table></div></div>
-  ${e.reviews && e.reviews.length ? `${sec('复盘', '同龄对比：拿上一期发布后同样天数的数据比')}<div class="panel"><div class="tw"><table><thead><tr><th>发布后</th><th class="n">全平台播放</th><th class="n">互动率</th><th>上一期同龄</th><th class="n">对比</th><th class="n">期间涨粉</th>${O.siteOn ? '<th class="n">注册（按期）</th>' : ''}</tr></thead><tbody>
+    ${e.tasks.map(t=>t.platform).map(p => e.tasks.find(t => t.platform === p)).filter(Boolean).map(t => { const m = t.m || {}, u = safeUrl(t.url); return `<tr><td>${logo(t.platform)}${esc(PN[t.platform] || t.name)}</td><td>${chip(t)}</td><td class="n"><b>${fmt(m.views)}</b></td><td class="n">${fmt(m.likes)}</td><td class="n">${fmt(m.comments)}</td><td class="n">${fmt(m.favorites)}</td><td class="n">${fmt(m.shares)}</td><td class="n">${m.views ? pct(inter(m), m.views, 1) : '–'}</td><td class="n">${u ? `<a href="${u}" target="_blank" rel="noopener">打开 ↗</a>` : `<span style="color:var(--t3)">${esc(t.detail).slice(0, 18)}</span>`}</td></tr>`; }).join('')}</tbody></table></div></div>
+  ${e.episode != null && e.reviews && e.reviews.length ? `${sec('复盘', '同龄对比：拿上一期发布后同样天数的数据比')}<div class="panel"><div class="tw"><table><thead><tr><th>发布后</th><th class="n">全平台播放</th><th class="n">互动率</th><th>上一期同龄</th><th class="n">对比</th><th class="n">期间涨粉</th>${O.siteOn ? '<th class="n">注册（按期）</th>' : ''}</tr></thead><tbody>
     ${e.reviews.map(r => `<tr><td><b>第 ${r.age} 天</b>${r.partial ? '<span style="color:var(--t3);font-size:12px;margin-left:6px">进行中</span>' : ''}</td><td class="n"><b>${fmt(r.views)}</b></td><td class="n">${pct(r.ints, r.views, 1)}</td><td>${r.prev ? `「${esc(r.prev.nick)}」${fmt(r.prev.views)}` : '<span style="color:var(--t3)">没有可比的上一期</span>'}</td><td class="n">${r.prev && r.prev.views ? (r.views >= r.prev.views ? `<b style="color:var(--good)">${(r.views / r.prev.views).toFixed(1)} 倍</b>` : `<b style="color:var(--crit)">${pct(r.views, r.prev.views, 0)}</b>`) : '–'}</td><td class="n">${r.fans ? (r.fans > 0 ? '+' : '') + fmt(r.fans) : '–'}</td>${O.siteOn ? `<td class="n">${r.conv ? fmt(r.conv.reg) : '–'}</td>` : ''}</tr>`).join('')}</tbody></table></div></div>` : ''}
+  ${ageReviewPanel(e.ageReview)}
   ${sec('播放走势', '每次采样一个点')}<div class="panel"><div class="chartbox" id="c-line"></div></div>
   ${sec('当时发的文案', e.snapshotAt ? `存档于 ${when(e.snapshotAt)}` : '没有存档，显示的是工程目录里现在的内容')}
-  <div class="panel">${PL.map(p => e.tasks.find(t => t.platform === p)).filter(Boolean).map(t => `<details><summary>${logo(t.platform)}<b>${esc(PN[t.platform] || t.name)}</b><span>${esc(t.copy.title || t.copy.body.slice(0, 50))}</span></summary>${t.copy.title ? `<div class="copy"><b>${esc(t.copy.title)}</b></div>` : ''}${t.copy.body ? `<div class="copy">${esc(t.copy.body)}</div>` : ''}${t.copy.tags.length ? `<div style="margin-top:8px;font-size:12.5px;color:var(--t3)">${t.copy.tags.map(x => '#' + esc(x)).join('  ')}</div>` : ''}${t.shot ? `<img class="shot" loading="lazy" src="/shot?id=${encodeURIComponent(e.id)}&p=${t.platform}" alt="提交前的页面截图">` : ''}</details>`).join('')}</div>
+  <div class="panel">${e.tasks.map(t=>t.platform).map(p => e.tasks.find(t => t.platform === p)).filter(Boolean).map(t => `<details><summary>${logo(t.platform)}<b>${esc(PN[t.platform] || t.name)}</b><span>${esc(t.copy.title || t.copy.body.slice(0, 50))}</span></summary>${t.copy.title ? `<div class="copy"><b>${esc(t.copy.title)}</b></div>` : ''}${t.copy.body ? `<div class="copy">${esc(t.copy.body)}</div>` : ''}${t.copy.tags.length ? `<div style="margin-top:8px;font-size:12.5px;color:var(--t3)">${t.copy.tags.map(x => '#' + esc(x)).join('  ')}</div>` : ''}${t.shot ? `<img class="shot" loading="lazy" src="/shot?id=${encodeURIComponent(e.id)}&p=${t.platform}" alt="提交前的页面截图">` : ''}</details>`).join('')}</div>
   ${sec('过程记录')}<div class="panel"><div class="mono">${e.logs.length ? e.logs.map(l => { let r = l.result || ''; try { const j = JSON.parse(r); r = [j.status, j.url, j.note].filter(Boolean).join('  '); } catch {} return `${when(l.ts)}  ${esc(PN[l.platform] || l.platform || '-')}  ${esc(l.action)}  ${esc(r)}`; }).join('\n') : '没有记录'}</div></div>`;
 }
 
 function vSystem() {
-  const h = O.health, platforms = ['x', 'xhs', 'wechat'];
-  const wholeRound = capability => platforms.map(platform => abtn({ type: 'collect', platform }, `${capability} · ${PN[platform]}`, '', `${PN[platform]} 的流量和粉丝共用一次整轮采集，将同时读取可见数据并更新本地日报。缺失指标不保证更新，可能需要你在专用窗口完成登录。继续？`)).join('');
-  const unavailable = label => `<button class="btn" disabled>${label}（未适配）</button>`;
-  return `<div class="h1">系统</div><p class="lead">手动操作与最近动态。平台登录和校验位于下方附加区域。</p>
-  <div class="grid g4">${tile('守护进程', '未启用', '当前仅手动操作')}${tile('工程目录', '本地数据', 'L1 不使用原版 NAS 工程流程')}${tile('专用浏览器', '按需打开', '不探测现有浏览器的登录状态')}${tile('平台登录', '未实时检查', '最近成功记录不代表当前仍在线')}</div>
-  ${sec('手动操作', '同一时间只跑一个')}
-  <div class="panel system-manual">
-    <div class="system-op"><div><h3>准备发布</h3><p class="note">生成 X 文图草稿；小红书上传填写后留在专用窗口，公众号只保存草稿。需要时在各自窗口登录。</p></div><div class="btns"><a class="btn pri" href="#/prepare">准备发布</a></div></div>
-    <div class="system-op"><div><h3>体检</h3><p class="note">仅检查 X、小红书、公众号的可见账号身份，不采流量，不检查上传表单。其他平台未适配。使用各平台独立专用窗口核验。</p></div><div class="btns">${platforms.map(platform => O.publishPrep?.[platform]?.inspectEnabled ? abtn({type:'doctor',platform},`体检 · ${PN[platform]}`) : `<button class="btn" disabled>体检 · ${esc(PN[platform])}（本地已停用）</button>`).join('')}</div></div>
-    <div class="system-op"><div><h3>取链接</h3><p class="note">从作品详情按平台 ID 核对；新准备稿可按完整文字与实际发表日期匹配。只有真实公开链接才回写，缺失或歧义会停止。</p></div><div class="btns"><a class="btn" href="#/archive">选择作品取链接</a></div></div>
-    <div class="system-op"><div><h3>采流量</h3><p class="note">选择平台执行整轮采集，同时读取流量和粉丝。当前不支持只采流量。</p></div><div class="btns">${wholeRound('采流量')}</div></div>
-    <div class="system-op"><div><h3>采粉丝</h3><p class="note">与采流量共用平台整轮采集；可见数据才会更新，缺项不能视为已采到。当前不支持只采粉丝。</p></div><div class="btns">${wholeRound('采粉丝')}</div></div>
-    <div class="system-op"><div><h3>同步知识站数据</h3><p class="note">L1 尚未接入知识站 / 看板同步能力，此入口暂不可执行。</p></div><div class="btns">${unavailable('同步知识站数据')}</div></div>
-  </div>
-  <p class="note">目前仅支持 X、小红书、公众号的合并采集。其他原版平台尚未适配 L1。自动保活、定时体检、定时采集和自动日报发送均未启用。</p>
-  ${sec('最近动态')}<div class="panel">${O.feed.map(f => `<div class="fd"><span class="tm">${when(f.ts).split(' ')[1]}</span><span class="ep">${f.nick ? esc(f.nick) : ''}</span><span>${esc(f.platform)}</span><span class="rs">${esc(f.action)}${f.result ? ' · ' + esc(f.result) : ''}</span></div>`).join('') || '<div class="empty" style="height:60px">还没有动态</div>'}</div>
-  ${sec('平台登录与校验', '附加功能')}
-  <p class="note">登录时由你在本次打开的专用窗口完成扫码或验证；网页等待结果，完成后关闭该窗口。“采集数据”同样执行平台整轮采集。</p>
-  <div class="grid g3">${Object.entries(h?.platforms || {}).map(([platform, s]) => `<div class="panel"><h3>${logo(platform)} ${esc(PN[platform])}</h3><p>${esc(s.account)}</p><p>${s.state === 'running' ? '操作进行中' : '当前空闲'}</p><p class="note">${esc(s.login)}</p><div class="btns">${abtn({ type: 'login', platform }, '登录 / 校验', 'pri')}${abtn({ type: 'collect', platform }, '采集数据')}</div><p class="note">${s.last ? `最近${({login:'登录校验',collect:'采集',doctor:'体检',sync:'取链接'})[s.last.type] || '操作'}：${s.last.done ? s.last.ok ? '成功' : '失败' : '未确认结束'} · ${esc(when(s.last.endedAt || s.last.startedAt))}` : '暂无操作记录'}</p>${s.last?.error ? `<div class="copy">${esc(s.last.error)}</div>` : ''}</div>`).join('')}</div>
-  ${sec('操作记录', '同一时间只跑一个；失败后可重新登录或采集')}
-  <div class="panel">
-    ${O.actions.length ? `<div style="margin-top:14px">${O.actions.map(a => `<div class="prow"><span class="st-chip ${a.done ? (a.ok ? 'published' : 'failed') : 'scheduled'}"><i>${a.done ? (a.ok ? '✓' : '✕') : '…'}</i>${a.done ? (a.ok ? '完成' : '出错') : '进行中'}</span><span>${esc(a.label)}</span><span class="d">${ago(a.startedAt)}</span></div>${a.done && !a.ok ? `<div class="copy">${esc(a.tail)}</div>` : ''}`).join('')}</div>` : ''}</div>
-  <p class="note">日报保存在本地文件，网页操作不依赖 Bot。账号操作使用各自专用窗口，身份未确认时停止。小红书填好后由你核对发布，公众号只存草稿，X 由你手工附图和保存。</p>`;
+  const focusPlatform=location.hash.split('/')[2],chosen=visiblePlatforms(O),platforms=[...new Set([...chosen,...(O.platforms?.some(p=>p.id===focusPlatform)?[focusPlatform]:[])])], active = O.actions.find(a => !a.done);
+  const latestObserved = (O.accountSummaries || []).map(s=>s.observedAt?.to).filter(Boolean).sort().at(-1);
+  const actionName = a => ({login:'登录',collect:'更新数据',doctor:'检查账号',sync:'取链接',age:'同龄采样'})[a?.type] || '操作';
+  const errorText = a => a.loginState==='logged_in' ? '账号已确认，但窗口收尾未完成，请查看详情'
+    : /专用窗口已关闭/.test(a.error || '') ? '窗口已关闭，未完成登录确认；请重新登录，并等待这里显示已登录'
+    : /CDP 超时：Runtime.evaluate/.test(a.error || '') ? '读取账号信息超时，登录结果未确认；请重试并等待工作台确认后再关闭窗口'
+    : /取消/.test(a.error || '') ? '登录已取消，需要时可以重新登录'
+    : /等待登录超时/.test(a.error || '') ? '登录等待超时，请重新点击登录，并在电脑专用窗口完成操作'
+    : /页面会话已断开|Session with given id not found/i.test(a.error || '') ? '平台页面会话已断开，登录结果未确认；需要时重新打开专用窗口'
+    : /Runtime.evaluate/.test(a.error || '') ? '平台页面暂时无法读取，登录状态未确认；请检查专用窗口的页面提示'
+    : /navigate|加载|网络|ERR_|连接超时/i.test(a.error || '') ? '平台页面未能正常加载，请检查网络后重试'
+    : `${actionName(a)}未完成，请查看错误详情后重试`;
+  return `<div class="h1">账号与采集</div><p class="lead">选择常用平台、登录账号，采集作品和粉丝数据。</p>
+  <div class="grid g2 system-summary">${tile('采集安排',O.health?.schedule?.enabled?'每天零点采集昨日作品':'手动采集', '手动更新：今天00:00至点击时发布的作品；读取时的累计指标')}${tile('当前任务',active?`${esc(PN[active.platform])} ${esc(actionName(active))}中`:'暂无进行中的任务',active?'完成后会自动显示结果':'结果会保留在对应平台下方')}</div>
+  ${pendingAction?'<div class="system-notice" role="status">正在提交操作，请稍候…</div>':''}${actionError?`<div class="system-notice error" role="alert">${esc(actionError)}</div>`:''}
+  ${sec('常用平台')}${!platforms.length?'<p class="note">尚未选择常用平台，请在下方自由选择，或直接打开某个平台登录。</p>':''}
+  <div class="grid g3 system-accounts">${platforms.map(platform=>{
+    const s=O.health?.platforms?.[platform]||{},last=s.last,running=s.state==='running',summary=(O.accountSummaries||[]).find(a=>a.platform===platform),confirmedAt=s.identity?.confirmedAt;
+    const native=O.platforms?.find(p=>p.id===platform)?.native,configured=s.account&&!s.account.startsWith('尚未配置'),loggedIn=(s.loginStatus?.state || (confirmedAt?'logged_in':'unknown'))==='logged_in';
+    const remaining=last?.progress?.deadline?Math.max(0,Math.ceil((Date.parse(last.progress.deadline)-Date.now())/60000)):null;
+    return `<section class="panel system-account" id="platform-${platform}" data-system-platform="${platform}"><h3>${logo(platform)} ${esc(PN[platform])}${platformLoginHTML(s)}</h3><p class="system-account-name">${esc(configured?s.account:'尚未绑定账号')}</p>${!configured?`<form data-platform-account="${platform}" class="platform-account-form"><label>预期公开昵称（可选，也可先登录自动识别）<input name="account" required maxlength="100" placeholder="仅填写昵称，不填密码"></label><button class="btn" type="submit">保存账号名称</button></form>`:''}<p class="note account-freshness">${esc(summary?.freshness?.label||'尚无采集数据')}</p><p class="note system-login-state">${confirmedAt?`最近确认登录：${esc(when(confirmedAt))}`:'尚未确认账号登录'}</p>${native?'<p class="note">原生方式更新已登记作品；首次使用可直接登录，成功后自动识别账号并加入常用；作品采集按下方登记链接执行。</p>':''}
+    <p class="note system-action-scope">${native?'更新今天发布且已登记的作品数据':'更新今天00:00至点击时发布的作品数据'}，并读取当前粉丝数。</p><div class="btns">${configured||!native?abtn({type:'collect',platform},running&&last?.type==='collect'?'正在更新数据…':'更新今日作品数据',loggedIn?'pri':''):'<button class="btn" disabled>请先登录账号</button>'}${abtn({type:'login',platform},running&&last?.type==='login'?'正在登录…':'登录账号',loggedIn?'':'pri')}</div><p class="note">更新时自动确认登录；已有登录会直接复用。</p>
+    ${running?`<div class="system-progress" role="status" aria-live="polite"><strong>${esc(actionName(last))}进行中</strong><p>${esc(last?.progress?.message||'正在启动专用窗口')}</p>${last?.type==='login'?'<p class="note">请保持专用窗口打开。这里显示「已登录」和账号确认时间后，窗口会自动关闭。</p>':''}${remaining!==null?`<p class="note">最多再等待约 ${remaining} 分钟</p>`:''}${last?.type==='login'?`<div class="btns">${abtn({type:'show-login',platform},'显示登录窗口')}${abtn({type:'cancel-login',platform},'取消登录')}</div>`:''}</div>`:last?`<div class="system-result ${last.ok?'success':'error'}"><p>${last.ok?last.type==='login'?`已登录 · ${esc(configured?s.account:PN[platform])}`:`${esc(actionName(last))}已完成`:esc(errorText(last))}</p><p class="note">${esc(when(last.endedAt||last.startedAt))}${last.type==='collect'&&last.date?` · 发布日 ${esc(last.date)}`:''}</p>${last.error?`<details><summary>查看错误详情</summary><div class="copy">${esc(last.error)}</div></details>`:''}</div>`:'<p class="note system-result">首次使用请先登录，再更新数据</p>'}${native?`<details class="native-registration"><summary>登记已发布作品</summary><form data-native-work="${platform}" class="platform-account-form"><label>标题或正文第一段<input name="title" required maxlength="8000"></label><label>发布时间（北京时间）<input name="publishedAt" type="datetime-local" required></label><label>公开作品链接${platform==='channels'?'（可选）':''}<input name="url" type="url" ${platform==='channels'?'':'required'} placeholder="https://..."></label><button class="btn" type="submit">登记作品，供采集使用</button></form></details>`:''}</section>`;
+  }).join('')}</div>
+  <p class="note system-intro">更新数据时会自动确认账号，无需先点登录。仅首次使用或登录失效时需要登录；刷新工作台不会退出平台账号。</p>
+  ${platformPickerHTML(O)}
+  <details class="panel system-advanced"><summary>采集范围与运行说明</summary><p class="note">「更新今日作品数据」采集北京时间当天00:00至点击时发布的作品，同时采流量、采粉丝，并生成本地日报。指标是逐篇读取时的累计值，不是全账号这段时间新增的流量。缺失数据保留为「暂无」。</p><p class="note">${O.health?.schedule?.enabled?'已配置每天北京时间00:00采集昨日作品，仅处理有登录成功记录的平台。定时任务在Codex自动化中管理；电脑、Codex与工作台需保持运行。':'尚未启用零点定时采集。'}自动保活和自动发送日报未开启。</p><p class="note">登录或采集窗口在这台电脑上打开。发布用的窗口在「准备发布」中单独操作。</p><div class="btns">${platforms.map(platform=>O.publishPrep?.[platform]?.inspectEnabled?abtn({type:'doctor',platform},`检查账号 · ${PN[platform]}`):'').join('')}</div></details>
+  <details class="panel system-advanced"><summary>同龄自动采样 · ${O.health?.ageSampling?.enabled?'已开启':'已关闭'}</summary>
+    <p class="note">在作品满 1、3、7 天前读取指标。错过后 6 小时内补采一次，结果标为迟采。</p>
+    <p class="note">处理这些平台中有准确发布时间且登录已确认的已入库作品。${(O.health?.ageSampling?.platforms||[]).map(p=>esc(PN[p])).join('、')}。</p>
+    <button type="button" class="btn" data-age-sampling="${!O.health?.ageSampling?.enabled}">${O.health?.ageSampling?.enabled?'关闭同龄采样':'开启同龄采样'}</button>
+    ${O.health?.ageSampling?.last ? `<p class="note">最近一次 · ${esc(when(O.health.ageSampling.last.endedAt))} · ${O.health.ageSampling.last.ok?'已采样':'未确认'} · ${esc(O.health.ageSampling.last.tail)}</p>` : ''}
+  </details>
+  <details class="panel system-advanced"><summary>其他工具</summary><div class="system-manual"><div class="system-op"><div><h3>准备发布</h3><p class="note">准备X文图、小红书图文或公众号草稿。小红书填好后由你核对发布，公众号只存草稿。</p></div><a class="btn" href="#/prepare">准备发布</a></div><div class="system-op"><div><h3>取链接</h3><p class="note">选择作品后，核对并保存公开链接。</p></div><a class="btn" href="#/archive">选择作品</a></div></div></details>
+  <details class="panel system-advanced"><summary>操作记录与最近动态</summary><div class="system-history">${O.actions.length?O.actions.map(a=>`<div class="prow"><span class="st-chip ${a.done?(a.ok?'published':'failed'):'scheduled'}">${a.done?(a.ok?'完成':'未完成'):'进行中'}</span><span>${esc(PN[a.platform])} · ${esc(actionName(a))}</span><span class="d">${esc(when(a.endedAt||a.startedAt))}</span></div>`).join(''):'<p class="note">本次启动后暂无操作记录，最近结果保留在平台卡片中。</p>'}${O.feed.length?`<h3>最近动态</h3>${O.feed.map(f=>`<div class="fd"><span>${esc(when(f.ts))}</span><span>${esc(f.nick||'')}</span><span>${esc(f.platform)}</span><span>${esc(f.action)}</span></div>`).join('')}`:''}</div></details>`;
 }
 
 async function render() {
-  const h = location.hash || '#/traffic', key = h.startsWith('#/ep/') ? 'archive' : h.slice(2).split('/')[0], app = $('#app'); after = () => {};
+  const h = location.hash || '#/traffic', key = h.startsWith('#/ep/') ? 'archive' : h.slice(2).split(/[/?]/)[0], app = $('#app');
+  if (h === '#/prepare?format=video' && $('#video-project')) return;
+  after = () => {};
   let body; try { body = h.startsWith('#/prepare') ? await vPrepare() : h.startsWith('#/ep/') ? await vEpisode(decodeURIComponent(h.slice(5))) : ({ traffic: vTraffic, calendar: vCalendar, convert: vConvert, archive: vArchive, system: vSystem }[key] || vTraffic)(); } catch (e) { body = `<div class="empty" style="height:40vh">出错了：${esc(e.message)}</div>`; }
+  if ((location.hash || '#/traffic') !== h) return;
   app.innerHTML = topbar(O, key) + body; after();
+  const focus=key==='system'?h.split('/')[2]:null;if(focus&&focusedPlatform!==focus){document.getElementById?.(focus==='platforms'?'all-platforms':'platform-'+focus)?.scrollIntoView({block:'start'});focusedPlatform=focus;}if(!focus)focusedPlatform='';
 }
 async function load() {
-  try { O = await api('/api/overview'); if (!O.siteOn) PL = PL.filter(p => p !== 'zsz'); else { if (O.siteName) PN.zsz = O.siteName; if (O.siteLogo) LOGO.zsz = { img: '/site-logo' }; } F = {}; for (const r of O.followers) (F[r.platform] ||= {})[r.day] = r.total; await render(); }
+  try { O = await api('/api/overview'); PL=visiblePlatforms(O); if (O.siteOn) { if (O.siteName) PN.zsz = O.siteName; if (O.siteLogo) LOGO.zsz = { img: '/site-logo' }; } F = {}; for (const r of O.followers) (F[r.platform] ||= {})[r.day] = r.total; await render(); if(busy()&&!timer)poll(); }
   catch (e) { $('#app').innerHTML = `<div class="empty" role="alert" style="height:60vh">页面加载失败，请刷新重试（${esc(e.message)}）</div>`; console.error(e); }
 }
 function poll() { clearInterval(timer); timer = setInterval(async () => { await load(); if (!busy()) { clearInterval(timer); timer = null; } }, 4000); }
 document.addEventListener('click', async (e) => {
   const b = e.target.closest('[data-act]'); if (!b) return; const a = JSON.parse(b.dataset.act);
+  if(b.disabled || pendingAction)return;
   if (b.dataset.confirm && !confirm(b.dataset.confirm)) return;
-  const r = await fetch('/api/action', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(a) }), j = await r.json().catch(() => ({}));
-  toast(r.ok ? '已开始，跑完会自动刷新' : (j.error || '没成功')); if (r.ok) { await load(); poll(); }
+  pendingAction=a;actionError='';await render();
+  try {
+    const r = await fetch('/api/action', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(a) }), j = await r.json().catch(() => ({}));
+    if(!r.ok)throw new Error(j.error || '操作未能开始，请稍后重试');
+  } catch(error) { actionError=error instanceof TypeError?'请求未得到确认，请刷新页面查看操作状态':error.message; }
+  finally {pendingAction=null;await load();}
+});
+document.addEventListener('click',async e=>{
+  const button=e.target.closest('[data-age-sampling]');if(!button)return;
+  button.disabled=true;
+  try{
+    const response=await fetch('/api/age-sampling',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({enabled:button.dataset.ageSampling==='true'})});
+    if(!response.ok)throw new Error((await response.json()).error);
+    await load();
+  }catch(error){toast(error.message);button.disabled=false;}
 });
 document.addEventListener('change', (e) => { if (e.target.id === 'traffic-pick') { pick = e.target.value; render(); } });
+
+document.addEventListener('submit',e=>{if(e.target.id!=='work-filter')return;e.preventDefault();libraryQuery=$('#work-search').value.trim();libraryPlatform=$('#work-platform').value;libraryPage=0;render();});
+document.addEventListener('reset',e=>{if(e.target.id!=='work-filter')return;e.preventDefault();libraryQuery='';libraryPlatform='';libraryPage=0;render();});
+document.addEventListener('click',e=>{const b=e.target.closest('[data-library-page]');if(!b||b.disabled)return;libraryPage=Number(b.dataset.libraryPage);render();});
+document.addEventListener('click',e=>{const b=e.target.closest('[data-calendar-shift],[data-calendar-reset]');if(!b)return;calendarOffset=b.hasAttribute('data-calendar-reset')?0:calendarOffset+Number(b.dataset.calendarShift);render();});
+document.addEventListener('click',async e=>{const b=e.target.closest('[data-platform-toggle]');if(!b||b.disabled)return;actionError='';b.disabled=true;try{const r=await fetch('/api/platforms',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({platform:b.dataset.platformToggle,selected:b.dataset.selected==='true'})}),j=await r.json();if(!r.ok)throw new Error(j.error);await load();}catch(error){actionError=error.message;await render();}});
+document.addEventListener('submit',async e=>{const form=e.target,platform=form.dataset.platformAccount||form.dataset.nativeWork;if(!platform)return;e.preventDefault();actionError='';const button=form.querySelector('button');button.disabled=true;try{const a=form.dataset.nativeWork?{platform,title:form.elements.title.value,url:form.elements.url.value,publishedAt:new Date(form.elements.publishedAt.value).toISOString()}:{platform,account:form.elements.account.value,selected:true};const r=await fetch(form.dataset.nativeWork?'/api/native-work':'/api/platforms',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(a)}),j=await r.json();if(!r.ok)throw new Error(j.error);await load();}catch(error){button.disabled=false;actionError=error.message;await render();}});
+
 addEventListener('hashchange', () => { render(); scrollTo(0, 0); });
 addEventListener('resize', () => after());
-load(); setInterval(() => { if (!location.hash.startsWith('#/prepare') && !timer && !document.hidden && !document.querySelector('details[open]')) load(); }, 60000);
+load(); setInterval(() => { if (!location.hash.startsWith('#/prepare') && !timer && !document.hidden && !document.activeElement?.matches('input,select,textarea') && !document.querySelector('details[open]')) load(); }, 60000);
 </script>
 </body>
 </html>

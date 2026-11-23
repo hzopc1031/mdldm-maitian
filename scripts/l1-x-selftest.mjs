@@ -27,8 +27,8 @@ class Element {
       const tokens = part.trim().split(/\s+/), own = tokens.pop();
       const tag = own.match(/^[\w-]+/)?.[0];
       if (tag && tag !== this.tag) return false;
-      const attributes = [...own.matchAll(/\[([\w-]+)(?:(\$?=)["']?([^\]"']+)["']?)?\]/g)];
-      if (!attributes.every(([, key, op, value]) => key in this.attrs && (!op || (op === '$=' ? this.attrs[key].endsWith(value) : this.attrs[key] === value)))) return false;
+      const attributes = [...own.matchAll(/\[([\w-]+)(?:([\^$]?=)["']?([^\]"']+)["']?)?\]/g)];
+      if (!attributes.every(([, key, op, value]) => key in this.attrs && (!op || (op === '$=' ? this.attrs[key].endsWith(value) : op === '^=' ? this.attrs[key].startsWith(value) : this.attrs[key] === value)))) return false;
       if (!tokens.length) return true;
       let parent = this.parentElement;
       while (parent) { if (parent.matches(tokens.join(' '))) return true; parent = parent.parentElement; }
@@ -76,6 +76,14 @@ try {
   assert.equal(dom.xNumber(read(dom.visibleXFollowers, followersOnly, "PeanutPair")[0]), 2503);
   const bareIdentity = documentFor([], ''); bareIdentity.children[0].children.push(el('span', { 'data-testid': 'UserScreenName' }, 'PeanutPair'));
   assert.equal(read(dom.visibleXIdentity, bareIdentity).handle, 'PeanutPair');
+  const collapsed=documentFor([], '');collapsed.children[0].children.push(el('div',{'data-testid':'UserAvatar-Container-PeanutPair'}));
+  assert.equal(read(dom.visibleXIdentity,collapsed).handle,'PeanutPair');
+  const outside=documentFor([], '');outside.children.push(el('div',{'data-testid':'UserAvatar-Container-PeanutPair'}));
+  assert.equal(read(dom.visibleXIdentity,outside).handle,null);
+  const conflict=documentFor([], '@Other');conflict.children[0].children.push(el('div',{'data-testid':'UserAvatar-Container-PeanutPair'}));
+  assert.equal(read(dom.visibleXIdentity,conflict).handle,null);
+  const repeated=documentFor([],'@PeanutPair');repeated.children[0].children.push(el('div',{'data-testid':'UserAvatar-Container-peanutpair'}));
+  assert.equal(read(dom.visibleXIdentity,repeated).handle,'@PeanutPair');
   log('PASS 1 粉丝：已渲染 verified_followers 链接 → 2503。');
   assert.deepEqual(dom.parseXLabel(read(dom.visibleXMetricLabel, doc, '101', 'PeanutPair')), { views: 1234, likes: 12, comments: 3, favorites: 2, shares: 1 });
   assert.deepEqual(dom.parseXLabel('2.5K views, 0 likes'), { views: 2500, likes: 0, comments: null, favorites: null, shares: null });
@@ -104,7 +112,7 @@ try {
     } };
     try { return await fn(page); } finally { closed++; }
   };
-  const options = { wait: async () => {}, now: () => now, readRegistered: async () => { reads++; return []; }, persist: async observation => { writes++; return observation; } };
+  const options = { history:true, wait: async () => {}, now: () => now, readRegistered: async () => { reads++; return []; }, persist: async observation => { writes++; return observation; } };
   await assert.rejects(collectX({}, { ...options, withBrowser: fakeBrowser(documentFor([article('101')], '@WrongAccount')) }), /不是 @PeanutPair/);
   assert.equal(reads, 0); assert.equal(writes, 0); assert.equal(closed, 1);
   assert.equal(fs.existsSync(process.env.MAITIAN_DB), false);
@@ -121,6 +129,15 @@ try {
   } }) }), /不是 @PeanutPair/);
   assert.equal(writes, 1);
   log('PASS 浏览器全流程：发现→粉丝→逐帖→最终账号校验→关闭→写入；中途换号也不写库。');
+  const dailyReads=[];
+  const dailyObservation=await collectX({}, {...options,history:false,date:'2026-11-17',until:'2026-11-17T08:00:00Z',
+    readRegistered:async()=>[{id:'800',url:'https://x.com/PeanutPair/status/800',created_at:recent}],
+    persist:async value=>value,
+    withBrowser:async (_config,fn)=>fn({goto:async url=>{dailyReads.push(url);context.location={href:url};},evaluate:async(fn,...args)=>fn===dom.scrollXProfile ? true : read(fn,documentFor([article('801',{date:'2026-11-17T01:00:00Z'}),article('802',{date:recent})]),...args)})});
+  assert.deepEqual(dailyObservation.posts.map(p=>p.id),['801']);
+  assert.equal(dailyReads.some(url=>url.endsWith('/800')),false);
+  assert.equal(dailyObservation.collection.complete,true);
+  log('PASS 日期采集仅打开目标日帖子；旧登记不补读，保留指定截止时间及完成范围。');
   // binary 仅用当前 node 路径满足存在检查，不会启动任何进程。
   const config = { chromeBinary: process.execPath, chromePort: 9340, chromeProfile: path.join(folder, 'chrome-profile-l1-xhs') };
   assert.equal(browserSettings(config, 'x').port, 9341);
@@ -130,6 +147,8 @@ try {
   assert.throws(() => browserSettings({ ...config, l1: { x: { chromeProfile: config.chromeProfile } } }, 'x'));
   for (const url of ['https://x.com/intent/like', 'https://x.com/i/api/anything', 'https://x.com/SomeoneElse', 'https://x.com/PeanutPair?x=1', 'https://creator.xiaohongshu.com/new/home']) assert.equal(allowedPage(url, 'x'), false);
   assert.equal(allowedPage('https://x.com/i/flow/login', 'x'), true);
+  assert.equal(allowedPage('https://x.com/home','x','PeanutPair'),true);
+  assert.equal(allowedPage('https://x.com/home?unexpected=1','x','PeanutPair'),false);
   const owned = browserSettings(config, 'x'), pid = 12345;
   const args = [`--user-data-dir=${owned.profile}`, '--remote-debugging-port=9341', '--remote-debugging-address=127.0.0.1'];
   assertBrowserOwner(args, [{ type: 'browser', id: pid }], owned, pid);

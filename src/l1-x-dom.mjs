@@ -1,18 +1,25 @@
+import {inDayWindow} from './l1-collection-window.mjs';
 // 序列化到 Runtime.evaluate 的函数只读取已渲染 DOM；不读取 storage/框架状态或调用 X 接口。
 export function visibleXIdentity() {
   const visible = el => { const r = el.getBoundingClientRect(), s = getComputedStyle(el); return r.width > 0 && r.height > 0 && s.display !== 'none' && s.visibility !== 'hidden'; };
   // 只认当前账号切换器，不把正在浏览的主页作者当作登录账号。
   const controls = [...document.querySelectorAll('[data-testid="SideNav_AccountSwitcher_Button"]')].filter(visible);
-  const handles = [...new Set(controls.flatMap(el => {
+  const signals = controls.flatMap(el => {
     const tagged = (el.innerText || '').match(/@[A-Za-z0-9_]+/g) || [];
-    if (tagged.length) return tagged;
-    // 没有 @ 时只接受明确的屏幕账号节点，不把显示名称猜成登录账号。
-    return [...el.querySelectorAll('[data-testid="UserScreenName"]')].filter(visible)
-      .map(node => node.innerText.trim()).filter(text => /^[A-Za-z0-9_]+$/.test(text));
-  }))];
+    const names = [...el.querySelectorAll('[data-testid="UserScreenName"]')].filter(visible)
+      .map(node => node.innerText.trim()).filter(text => /^[A-Za-z0-9_]{1,15}$/.test(text));
+    // Collapsed navigation renders only the avatar. Its explicit test id belongs
+    // to the current account switcher; profile/tweet avatars outside it never count.
+    const avatars = [...el.querySelectorAll('[data-testid^="UserAvatar-Container-"]')].filter(visible)
+      .map(node => node.getAttribute('data-testid')?.match(/^UserAvatar-Container-([A-Za-z0-9_]{1,15})$/)?.[1]).filter(Boolean);
+    return [...tagged,...names,...avatars];
+  });
+  const normalize = value => value.replace(/^@/,'').toLowerCase();
+  const handles = signals.filter((value,index)=>signals.findIndex(other=>normalize(other)===normalize(value))===index);
   const login = [...document.querySelectorAll('input[autocomplete="username"], [data-testid="loginButton"], a[href="/i/flow/login"]')].some(visible) ||
     /电子邮箱或用户名|Phone, email, or username|手机号码、邮箱地址或用户名/.test(document.body?.innerText || '') && [...document.querySelectorAll('input[type="text"],input[name="text"]')].some(visible);
-  return { handle: handles.length === 1 ? handles[0] : null, url: location.href, login: !handles.length && login };
+  const loginRoute = /^https:\/\/x\.com\/i\/(?:flow\/login|jf\/onboarding)(?:\/|[?#]|$)/i.test(location.href);
+  return { handle: handles.length === 1 ? handles[0] : null, url: location.href, login: !handles.length && (login || loginRoute) };
 }
 
 export function visibleXFollowers(account) {
@@ -46,7 +53,7 @@ export function visibleXPosts() {
       [...el.querySelectorAll('a[href]')].some(a => visible(a) && /^\/[A-Za-z0-9_]+\/status\/\d+$/.test(new URL(a.href, location.href).pathname)));
     result.push({ id: match?.[2] || null, author, permalinkAuthor: match?.[1] || null,
       url: match ? `https://x.com/${match[1]}/status/${match[2]}` : null,
-      created_at: time?.getAttribute('datetime') || null, text, kind: repost ? 'repost' : reply ? 'reply' : quote ? 'quote' : 'original' });
+      created_at: time?.getAttribute('datetime') || null, text, pinned:/pinned|置顶/i.test(context), kind: repost ? 'repost' : reply ? 'reply' : quote ? 'quote' : 'original' });
   }
   return result;
 }
@@ -86,14 +93,14 @@ export function parseXLabel(label) {
   return Object.fromEntries(Object.entries(fields).map(([key, names]) => [key, xNumber((String(label || '').match(new RegExp(`([\\d,.]+\\s*[KMW万亿]?)\\s*(?:${names})(?=\\b|[,，]|$|\\s)`, 'i')) || [])[1])]));
 }
 
-export function selectXPosts(cards, now = new Date(), account) {
+export function selectXPosts(cards, now = new Date(), account, window = null) {
   if(!/^[A-Za-z0-9_]{1,15}$/.test(account || ''))throw new Error('需要已校验的 X 预期账号');
   const posts = new Map(), skipped = { unknownTime: 0, outsideWindow: 0, excluded: 0 };
   for (const card of cards) {
     if (!/^\d+$/.test(card.id || '') || card.author?.toLowerCase() !== account?.toLowerCase() || card.permalinkAuthor?.toLowerCase() !== account?.toLowerCase() || !['original', 'quote'].includes(card.kind)) { skipped.excluded++; continue; }
     if (!card.created_at || !/T.*(?:Z|[+-]\d{2}:\d{2})$/.test(card.created_at) || !Number.isFinite(Date.parse(card.created_at))) { skipped.unknownTime++; continue; }
     const age = new Date(now).getTime() - Date.parse(card.created_at);
-    if (age < 0 || age > 30 * 86400000) { skipped.outsideWindow++; continue; }
+    if (window ? !inDayWindow(card.created_at, window) : age < 0 || age > 30 * 86400000) { skipped.outsideWindow++; continue; }
     posts.set(card.id, { ...card, url: `https://x.com/${account}/status/${card.id}` });
   }
   return { posts: [...posts.values()], skipped };

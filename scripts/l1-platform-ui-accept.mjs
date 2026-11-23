@@ -1,0 +1,12 @@
+// Fixture server: real settings/registration routes, platform execution explicitly blocked.
+import fs from 'node:fs';import os from 'node:os';import path from 'node:path';import http from 'node:http';import {spawn} from 'node:child_process';import {once} from 'node:events';
+const folder=fs.mkdtempSync(path.join(os.tmpdir(),'l1-platform-ui-'));
+process.env.MAITIAN_HOME=folder;process.env.MAITIAN_DB=path.join(folder,'hub.db');process.env.MAITIAN_CONFIG=path.join(folder,'config.json');
+fs.writeFileSync(process.env.MAITIAN_CONFIG,JSON.stringify({xHandle:'FixtureX',web:{requireLocalToken:false},l1:{xhs:{account:'FixtureXhs'},wechat:{account:'FixtureWechat'}}}));
+const {db,saveObservation}=await import('../src/l1-store.mjs');const {handle}=await import('../src/web.mjs');
+db.prepare('INSERT OR REPLACE INTO meta(key,value) VALUES (?,?)').run('l1:platform-selection',JSON.stringify(['x','xhs','wechat']));
+for(const platform of ['x','xhs'])saveObservation({platform,account:platform==='x'?'FixtureX':'FixtureXhs',source:'isolated UI fixture',captured_at:new Date().toISOString(),posts:Array.from({length:30},(_,i)=>({id:String(platform==='x'?10000+i:20000+i),text:(i<10?'Codex ':'')+'fixture work '+i,url:platform==='x'?`https://x.com/FixtureX/status/${10000+i}`:null,created_at:new Date(Date.now()-i*600000).toISOString(),views:i+10,likes:1}))});
+const blocked=[];
+const server=http.createServer(async(req,res)=>{if(req.method==='POST'&&req.url==='/api/action'){let body='';for await(const c of req)body+=c;blocked.push(JSON.parse(body));res.writeHead(503,{'content-type':'application/json'});res.end(JSON.stringify({error:'隔离验收阻止真实平台动作'}));return;}try{await handle(req,res);}catch(e){res.writeHead(500);res.end(e.message);}});
+server.listen(0,'127.0.0.1');await once(server,'listening');
+try{const child=spawn(process.execPath,['scripts/l1-layout-ui-accept.mjs','after'],{cwd:process.cwd(),env:{...process.env,MAITIAN_QA_BASE:'http://127.0.0.1:'+server.address().port,MAITIAN_QA_INTERACTIVE_PLATFORMS:'1'},windowsHide:true,stdio:'inherit'});const [code]=await once(child,'close');if(code!==0)throw new Error('Platform UI acceptance failed');if(blocked.length!==2||blocked.some(a=>a.platform!=='bilibili'||a.type!=='login'))throw new Error('Unexpected platform operation');console.log('PLATFORM UI PASS: selection/reload/account/native-login-request/registration/removal at 1440 and 390; native requests mocked, no real platform browser.');}finally{await new Promise(r=>server.close(r));db.close();}

@@ -1,6 +1,7 @@
 // 仅依赖现有 SQLite schema；按观测时间写入，不调用 live/backfill 存储。
 import { db } from './db.mjs';
 import { beijingDay } from './l1-config.mjs';
+import {dayWindow, inDayWindow, collectionKey} from './l1-collection-window.mjs';
 db.exec(`CREATE TABLE IF NOT EXISTS followers (day TEXT, platform TEXT, total INTEGER, gain INTEGER, loss INTEGER, source TEXT, collected_at TEXT, PRIMARY KEY (day, platform));`);
 export { db };
 export function transaction(fn) {
@@ -8,7 +9,11 @@ export function transaction(fn) {
   try { const result = fn(); db.exec('COMMIT'); return result; }
   catch (error) { db.exec('ROLLBACK'); throw error; }
 }
-export function saveObservation({ platform, account, captured_at, source, posts, followers, example = false }) {
+export function saveObservation({ platform, account, captured_at, source, posts, followers, example = false, collection }) {
+  if (collection) {
+    const expected=dayWindow(collection.date,collection.until);
+    if (collection.scope!=='day' || collection.start!==expected.start || collection.until!==expected.until || Date.parse(captured_at)<Date.parse(collection.until) || posts.some(p=>!inDayWindow(p.created_at,expected))) throw new Error('日期采集范围或作品时间不符；未写库');
+  }
   const day = beijingDay(captured_at), imported = new Date().toISOString();
   let saved = 0, skipped = 0;
   for (const post of posts) {
@@ -27,10 +32,13 @@ export function saveObservation({ platform, account, captured_at, source, posts,
       db.prepare(`INSERT INTO tasks (episode_id,platform,state,detail,url,updated_at) VALUES (?,?,?,?,?,?) ON CONFLICT(episode_id,platform) ${platform === 'x' ? 'DO NOTHING' : 'DO UPDATE SET state=excluded.state, detail=excluded.detail, url=COALESCE(excluded.url,tasks.url), updated_at=excluded.updated_at'}`)
         .run(eid, platform, post.state || 'published', 'L1 只读观测', post.url || null, captured_at);
       const previous = oldSnapshot ? JSON.parse(oldSnapshot.project) : {};
-      const created_at = post.created_at || previous.created_at || null;
+      const earlier=previous.platforms?.[platform];
+      const keepExact=earlier?.dateAccuracy==='time'&&post.dateAccuracy==='day'&&beijingDay(earlier.created_at)===beijingDay(post.created_at);
+      const created_at = (keepExact?earlier.created_at:post.created_at) || previous.created_at || null;
+      const dateAccuracy=(keepExact||!post.created_at)?earlier?.dateAccuracy:post.dateAccuracy;
       const sources = [...new Set([...(previous.sources || []), previous.source, source].filter(Boolean))];
       const snapshot = { ...previous, account, postId: post.id, noteId: platform === 'xhs' ? post.id : undefined, appmsgId: platform === 'wechat' ? post.id : undefined, created_at, source, sources, text: post.text || previous.text || '', date_status: created_at ? 'known' : 'unknown', status: post.state || 'published', example,
-        platforms: { ...previous.platforms, [platform]: { ...previous.platforms?.[platform], id: post.id, title: (post.text || previous.text || '').slice(0, 100) || post.id, text: post.text || previous.text || '', url: post.url || previous.platforms?.[platform]?.url || (platform === 'wechat' ? null : ''), created_at } } };
+        platforms: { ...previous.platforms, [platform]: { ...earlier, id: post.id, title: (post.text || previous.text || '').slice(0, 100) || post.id, text: post.text || previous.text || '', url: post.url || earlier?.url || (platform === 'wechat' ? null : ''), created_at,dateAccuracy } } };
       db.prepare('INSERT OR REPLACE INTO snapshots (episode_id,taken_at,project) VALUES (?,?,?)').run(eid, captured_at, JSON.stringify(snapshot));
     }
     const old = db.prepare('SELECT * FROM metrics WHERE day=? AND episode_id=? AND platform=?').get(day, eid, platform);
@@ -38,6 +46,7 @@ export function saveObservation({ platform, account, captured_at, source, posts,
     const baseline = old || db.prepare('SELECT * FROM metrics WHERE episode_id=? AND platform=? AND julianday(collected_at)<=julianday(?) ORDER BY julianday(collected_at) DESC LIMIT 1').get(eid, platform, captured_at);
     const oldExtra = baseline ? JSON.parse(baseline.extra || '{}') : {};
     const extra = { ...oldExtra, source, sources: [...new Set([...(oldExtra.sources || []), oldExtra.source, source].filter(Boolean))], account, captured_at, precision: post.precision || 'public-reported; exactness unverified', example, field_observed_at: { ...oldExtra.field_observed_at } };
+    extra.publicationId=post.publicationId||undefined;
     const keys = ['views', 'likes', 'comments', 'favorites', 'shares'];
     const values = keys.map(key => {
       if (post[key] != null) extra.field_observed_at[key] = captured_at;
@@ -64,6 +73,16 @@ export function saveObservation({ platform, account, captured_at, source, posts,
     db.prepare(`INSERT INTO followers (day,platform,total,gain,loss,source,collected_at) VALUES (?,?,?,NULL,NULL,?,?) ON CONFLICT(day,platform) DO UPDATE SET total=excluded.total,gain=NULL,loss=NULL,source=excluded.source,collected_at=excluded.collected_at WHERE julianday(excluded.collected_at)>=julianday(followers.collected_at)`)
       .run(day, platform, followers, source, captured_at);
     db.prepare('INSERT OR REPLACE INTO meta (key,value) VALUES (?,?)').run(`l1:followers:${platform}:${captured_at}`, JSON.stringify({ account, total: followers, captured_at, source, example }));
+  }
+  if (collection) {
+    const key=collectionKey(platform,account,collection.date);
+    const oldRun=JSON.parse(db.prepare('SELECT value FROM meta WHERE key=?').get(key)?.value || 'null');
+    if (!oldRun || Date.parse(oldRun.capturedAt)<=Date.parse(captured_at)) {
+      const fields=['views','likes','comments','favorites','shares'];
+      const metrics=Object.fromEntries(fields.map(k=>[k,(collection.complete || collection.coverage==='registered-only'&&!collection.unknownDates) && posts.every(p=>Number.isFinite(p[k])) ? posts.reduce((n,p)=>n+p[k],0) : null]));
+      const run={...collection,account,platform,capturedAt:captured_at,count:posts.length,postIds:posts.map(p=>p.id),metrics,example};
+      db.prepare('INSERT OR REPLACE INTO meta (key,value) VALUES (?,?)').run(key,JSON.stringify(run));
+    }
   }
   return { imported: saved, skipped, validationErrors: 0, followers: followers != null };
 }

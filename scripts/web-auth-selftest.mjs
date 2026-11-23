@@ -15,7 +15,8 @@ const source = fs.readFileSync(new URL('../src/web/health.js', import.meta.url),
 for (const input of [undefined, null, {}, { login: {} }, { mode: 'l1', daemon: false }]) {
   const context = { input }; vm.createContext(context);
   const result = vm.runInContext(source + ';healthLights(input)', context);
-  assert.ok(result.includes('未实时检查')); assert.ok(!result.includes('今日已检')); assert.ok(!result.includes('守护进程 运行中'));
+  assert.ok(result.includes(input===null || input?.mode==='l1' ? '手动采集模式' : '未实时检查'));
+  assert.ok(!result.includes('今日已检')); assert.ok(!result.includes('守护进程 运行中'));
 }
 const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'maitian-web-auth-'));
 const testKey = 'fixture-key';
@@ -83,6 +84,25 @@ try {
   assert.equal((await request('/api/widget')).status, 401);
   assert.equal((await request('/api/widget', { headers: { 'x-widget-token': 'fixture-widget' } })).status, 200);
   console.log('PASS direct local pages and APIs without a token or cookie, with separate widget authentication');
+
+  const navigation = { 'sec-fetch-site': 'same-site', 'sec-fetch-mode': 'navigate', 'sec-fetch-dest': 'document', 'sec-fetch-user': '?1' };
+  for (const route of ['/', '/p', '/p?view=system', '/board']) {
+    const response = await request(route, { headers: navigation });
+    assert.equal(response.status, 200, `loopback app link: ${route}`);
+    assert.match(response.headers['content-type'], /text\/html/);
+    assert.equal(response.headers['access-control-allow-origin'], undefined);
+  }
+  for (const route of ['/api/overview', '/api/l1/status', '/api/prep', '/widget', '/static/health.js'])
+    assert.equal((await request(route, { headers: navigation })).status, 403, route);
+  for (const override of [
+    { 'sec-fetch-site': 'cross-site' }, { 'sec-fetch-mode': 'cors' },
+    { 'sec-fetch-dest': 'iframe' }, { 'sec-fetch-user': '' },
+    { origin: 'http://localhost:3351' }, { origin },
+    { forwarded: 'for=127.0.0.1' }, { host: `other.invalid:${port}` },
+  ]) assert.equal((await request('/p', { headers: { ...navigation, ...override } })).status, 403);
+  assert.equal((await request('/p', { headers: navigation, body: '{}' })).status, 403);
+  assert.equal(localRequestAllowed({ headers: { host, ...navigation }, method: 'GET', url: '/p', socket: { remoteAddress: '192.0.2.1', localPort: port } }), false);
+  console.log('PASS user-clicked loopback page navigation; API, iframe, cross-site, write and proxy requests remain denied');
 
   for (const headers of [
     { host: `other.invalid:${port}` }, { host: 'localhost:8788' }, { host: 'localhost' },

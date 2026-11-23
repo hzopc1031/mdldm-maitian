@@ -6,13 +6,20 @@ import { SITE } from './site.mjs';
 import { review } from './review.mjs';
 import { accessEmail } from './access.mjs';
 import { initLogin, sessionOk, handleLogin } from './login.mjs';
-import { L1_PLATFORMS, L1_PORTS, planL1Action, launchL1, redactL1 } from './l1-web.mjs';
+import { L1_PLATFORMS, L1_PORTS, planL1Action, launchL1, controlL1, redactL1 } from './l1-web.mjs';
 import { home } from './l1-config.mjs';
 import { authPage, cleanTarget, isLoopback, localRequestAllowed } from './web-auth.mjs';
 import { createPrepService, BROWSER_BLOCK } from './publish-prep.mjs';
+import { createAgeReviewReader } from './l1-age-review.mjs';
+import { videoPrefillJobs } from './video-prefill-jobs.mjs';
+import { videoPrefillPublications } from './video-prefill-publications.mjs';
+import {ageSamplingSchema,agePlatforms,dueAgeSamples,saveAgeAttempt} from './l1-age-sampling.mjs';
+import { drainProjectDrafts, prepRequestLimit } from './prep-intake.mjs';
 import { l1Account } from './l1-account.mjs';
 import { configuredSummaries } from './l1-summary.mjs';
 import { displayNick } from './web-text.mjs';
+import {collectionKey} from './l1-collection-window.mjs';
+import {PLATFORM_CATALOG,platformById,selectedPlatforms,choosePlatform} from './platform-registry.mjs';
 
 const DIR = path.dirname(fileURLToPath(import.meta.url)), ROOT = path.resolve(DIR, '..');
 const W = config.web || { port: 8787, key: '' };
@@ -22,7 +29,32 @@ const short = (n) => (n || '').split(/[｜|]/)[0].trim();
 const nickOf = (name, pj) => displayNick(name, pj?.nick);
 const latest = db.prepare('SELECT * FROM metrics WHERE episode_id=? AND platform=? ORDER BY day DESC LIMIT 1');
 const actions = [];   // 最近的操作（内存里）
+function collectionSchedule() {
+  try { const s=JSON.parse(fs.readFileSync(path.join(home,'data','l1-schedule.json'),'utf8'));return s.status==='ACTIVE' && s.automationId ? {enabled:true,time:'00:00',timezone:'Asia/Shanghai'} : {enabled:false}; } catch { return {enabled:false}; }
+}
 const prep = createPrepService({ db, config, home, root: ROOT, secrets: [W.key, W.widgetToken] });
+const videoJobs=videoPrefillJobs(db,{redact:value=>redactL1(value,[W.key,W.widgetToken])});
+const videoPublications=videoPrefillPublications(db,videoJobs);
+db.exec(ageSamplingSchema);
+const ageReview = createAgeReviewReader(db);
+const saveMeta=db.prepare('INSERT OR REPLACE INTO meta (key,value) VALUES (?,?)');
+const ageSamplingEnabled=()=>getMeta('l1:age:enabled')==='true';
+
+function launchDueAgeSampling(){
+  if(!ageSamplingEnabled()||actions.some(record=>!record.done)||prep.busy())return;
+  const status=l1Status(), accounts={};
+  for(const platform of agePlatforms){
+    const current=status[platform];
+    if(!current?.selected||current.loginStatus.state!=='logged_in'||!current.identity?.confirmedAt||config.l1?.[platform]?.browserExecution===false)continue;
+    try{accounts[platform]=l1Account(config,platform);}catch{}
+  }
+  const plan=dueAgeSamples(db,{accounts});
+  if(!plan.length)return;
+  saveAgeAttempt(db,plan);
+  const record=launchL1({type:'age',platform:plan[0].platform,plan},{root:ROOT,secrets:[W.key,W.widgetToken],
+    save:state=>{if(state.done)saveMeta.run('l1:age:last',JSON.stringify(state));}});
+  actions.push(record);
+}
 
 // 无工程目录的 L1 观测不能回退到进程当前目录读取文件。
 export function episodeFile(ep, rel) {
@@ -52,11 +84,13 @@ export function episodeView(ep, full = false) {
   });
   const out = { id: ep.id, episode: ep.episode, name: ep.name, short: short(ep.name), nick: nickOf(ep.name, pj), schedule: ep.schedule, createdAt: ep.created_at, dir: ep.dir,
     publishedAt: pj.created_at || ep.schedule || null, observedAt: snap?.taken_at || null,
+    dateOnly:['xhs-visible-dom','wechat-visible-dom'].includes(pj.source)&&!Object.values(platforms).some(item=>item?.dateAccuracy==='time'),
     campaign: (JSON.stringify(platforms).match(/utm_campaign=([\w-]+)/) || [])[1] || '', covers: Object.keys(pj.covers || {}).filter(k => episodeFile(ep, pj.covers[k])), durationSec: pj.durationSec || 0, tasks, views, inter };
   if (full) {
     out.logs = recentLogs(ep.id, 200);
     out.metrics = db.prepare('SELECT day, platform, views, likes, comments, favorites, shares FROM metrics WHERE episode_id=? ORDER BY day').all(ep.id);
     out.snapshotAt = snap && snap.taken_at;
+    out.ageReview = ep.episode == null ? ageReview.forEpisode(ep.id) : [];
     // 复盘：已经到了第 1/3/7 天的节点（和飞书卡片同一套算法）
     const t0 = Date.parse(ep.schedule || ep.created_at);
     out.reviews = tasks.some(t => t.state === 'published') ? [1, 3, 7].filter(a => Date.now() >= t0 + a * 864e5 || a === 1).map(a => { try { const r = review(ep, a); return { age: a, partial: Date.now() < t0 + a * 864e5, views: r.cur.views, ints: r.cur.ints, rows: r.cur.rows.map(x => ({ p: x.p, views: x.m.views, inter: x.m.likes + x.m.comments + x.m.favorites + x.m.shares })), prev: r.prev && { nick: r.prev.nick, views: r.prev.views, rows: r.prev.rows.map(x => ({ p: x.p, views: x.m.views })) }, fans: r.fans.sum, conv: r.conv || null }; } catch { return null; } }).filter(Boolean) : [];
@@ -77,12 +111,33 @@ export function l1Status() {
   return Object.fromEntries(L1_PLATFORMS.map(platform => {
     let last = null;
     try { last = JSON.parse(getMeta(`l1:web:${platform}`) || 'null'); } catch {}
-    const active = actions.find(a => a.platform === platform && !a.done);
+    const active = actions.find(a => a.platform === platform && a.type!=='age' && !a.done);
+    if (!active && last?.done === false) last = { ...last, done: true, ok: false,
+      error: '上次操作随工作台重启而中断，请重新登录', tail: '上次操作随工作台重启而中断，请重新登录' };
     let account; try { account=l1Account(config,platform); if(platform==='x')account='@'+account; } catch { account='尚未配置预期可见账号'; }
-    return [platform, { account,
-      port: L1_PORTS[platform], profile: path.resolve(config.l1?.[platform]?.chromeProfile || (platform==='xhs'?config.chromeProfile:null) || path.join(home, `chrome-profile-l1-${platform}`)),
-      state: active ? 'running' : 'idle', last: active || last,
-      login: '未实时检查；登录和采集均校验可见身份，完成后关闭本次专用窗口' }];
+    const profile = path.resolve(config.l1?.[platform]?.chromeProfile || (platform==='xhs'?config.chromeProfile:null) || path.join(home, `chrome-profile-l1-${platform}`));
+    let identity = null;
+    try { identity = JSON.parse(getMeta(`l1:web:identity:${platform}`) || 'null'); } catch {}
+    const hasIdentityHistory = !!identity;
+    if (identity?.account !== account || identity?.profile !== profile) identity = null;
+    // Compatibility for the persisted successful check from before identity history existed.
+    if (!hasIdentityHistory && last?.done && last.ok && ['login','doctor'].includes(last.type)) {
+      identity = { confirmedAt: last.endedAt, account, profile };
+    }
+    const lastAction = active || last;
+    const loginStatus = active?.type==='login' && active.loginState!=='logged_in'
+      ? {state:active.loginState==='logged_out'?'logged_out':'checking',checkedAt:active.progress?.at}
+      : {state:identity?.status || (identity?.confirmedAt?'logged_in':'unknown'),checkedAt:identity?.checkedAt || identity?.confirmedAt};
+    let collection = null;
+    if(lastAction?.type==='collect' && lastAction.date && lastAction.done && lastAction.ok) {
+      try { const saved=JSON.parse(getMeta(collectionKey(platform,l1Account(config,platform),lastAction.date)) || 'null');
+        if(saved && Date.parse(saved.capturedAt)>=Date.parse(lastAction.startedAt))collection=saved;
+      } catch {}
+    }
+    return [platform, { account, identity, loginStatus, selected:selectedPlatforms(db).includes(platform),
+      port: L1_PORTS[platform], profile,
+      state: active ? 'running' : 'idle', last:lastAction && {...lastAction,...(collection?{collection}:{})},
+      login: '点击登录后，在电脑专用窗口完成操作；系统自动确认账号并关闭本次窗口' }];
   }));
 }
 
@@ -90,6 +145,7 @@ export function l1Status() {
 export function overviewData() {
   const at = e => Date.parse(e.publishedAt || e.observedAt || e.createdAt) || 0;
   return {
+    platforms:PLATFORM_CATALOG.map(p=>({...p,selected:selectedPlatforms(db).includes(p.id)})),
     accountSummaries: configuredSummaries(db, config, l1Account),
     episodes: episodes().map(e => episodeView(e)).sort((a, b) => at(b) - at(a) || a.id.localeCompare(b.id)),
     site: { days: db.prepare('SELECT * FROM site_daily ORDER BY day').all(), channels: db.prepare('SELECT * FROM site_channels ORDER BY revenue DESC').all(),
@@ -152,6 +208,18 @@ function thumb(f, w) {
 }
 
 export async function handle(req, res) {
+  if(req.url==='/api/video-prefill/worker'){
+    const {headers,socket}=req;
+    if(req.method!=='POST'||!isLoopback(socket.remoteAddress)||headers.host!==`127.0.0.1:${socket.localPort}`||
+      !/^chrome-extension:\/\/[a-p]{32}$/.test(headers.origin??'')||!headers['content-type']?.startsWith('application/json'))
+      return send(res,403,{error:'只接受本机预填助手回执'});
+    let raw='';for await(const chunk of req){raw+=chunk;if(raw.length>10000)return send(res,413,{error:'预填回执过大'});}
+    try{
+      const input=JSON.parse(raw);
+      return input.action==='claim' ? send(res,200,{accounts:videoJobs.claim(input)}) :
+        input.action==='receipt' ? send(res,200,{job:videoPublications.annotate(videoJobs.record(input))}) : send(res,400,{error:'未知预填请求'});
+    }catch(error){return send(res,400,{error:redactL1(error.message)});}
+  }
   const localOnly = W.requireLocalToken === false;
   if (localOnly) {
     if (!localRequestAllowed(req)) return send(res, 403, { error: '仅允许同源本机直连请求' });
@@ -211,10 +279,50 @@ export async function handle(req, res) {
   if (u.pathname === '/api/overview') {
     return send(res, 200, { name: config.name || '麦田', siteOn: !!SITE, siteName: SITE ? SITE.name : '', siteLogo: !!(SITE && config.site.logo), board: config.board && config.board.url, driver: config.driver,
       ...overviewData(), actions: actions.slice(-8).reverse(),
-      health: { mode: 'l1', daemon: false, platforms: l1Status() }, publishPrep: prep.publicCapabilities(), now: new Date().toISOString() });
+      health: { mode: 'l1', daemon: false, schedule:collectionSchedule(), ageSampling:{enabled:ageSamplingEnabled(),platforms:agePlatforms,last:JSON.parse(getMeta('l1:age:last')||'null')}, platforms: l1Status() }, publishPrep: prep.publicCapabilities(), now: new Date().toISOString() });
+  }
+  if (u.pathname === '/api/age-sampling' && req.method === 'POST') {
+    if (!isLoopback(req.socket.remoteAddress)||req.headers.origin!==`http://${req.headers.host}`||!req.headers['content-type']?.startsWith('application/json')) return send(res,403,{error:'只接受麦田本机页面操作'});
+    let raw='';
+    for await(const chunk of req){raw+=chunk;if(raw.length>64)return send(res,413,{error:'设置内容过大'});}
+    let input;try{input=JSON.parse(raw);}catch{}
+    if(typeof input?.enabled!=='boolean'||Object.keys(input).length!==1)return send(res,400,{error:'请选择是否开启同龄采样'});
+    saveMeta.run('l1:age:enabled',String(input.enabled));
+    return send(res,200,{enabled:input.enabled});
+  }
+  if (u.pathname === '/api/video-prefill/assistant' && req.method==='GET') {
+    const file=path.join(ROOT,'_local-video-prefill','maitian-video-prefill.zip');
+    if(!fs.existsSync(file))return send(res,404,{error:'预填助手安装包尚未构建'});
+    return send(res,200,fs.readFileSync(file),'application/zip',{'content-disposition':'attachment; filename="maitian-video-prefill.zip"'});
+  }
+  if (u.pathname === '/api/video-prefill/history' && req.method==='GET') return send(res,200,{jobs:videoJobs.history().map(videoPublications.annotate)});
+  if (['/api/video-prefill/receipt','/api/video-prefill/reserve','/api/video-prefill/publication'].includes(u.pathname)) {
+    if(u.pathname.endsWith('/receipt')&&req.method==='GET'){
+      const id=u.searchParams.get('id');
+      return send(res,200,{job:videoPublications.annotate(id ? videoJobs.get(id) : videoJobs.latest())});
+    }
+    if(u.pathname.endsWith('/publication')&&req.method==='GET'){
+      try{return send(res,200,{candidates:videoPublications.candidates(u.searchParams.get('id'),u.searchParams.get('platform'))});}
+      catch(error){return send(res,400,{error:redactL1(error.message)});}
+    }
+    if(req.method!=='POST'||!isLoopback(req.socket.remoteAddress)||req.headers.origin!==`http://${req.headers.host}`||
+      !req.headers['content-type']?.startsWith('application/json'))return send(res,403,{error:'只接受麦田本机页面操作'});
+    let raw='';
+    for await(const chunk of req){raw+=chunk;if(raw.length>10000)return send(res,413,{error:'预填回执过大'});}
+    try {
+      const input=JSON.parse(raw);
+      if (u.pathname.endsWith('/reserve')) return send(res,200,{ok:true,...videoJobs.reserve(input,platform=>l1Account(config,platform))});
+      if (u.pathname.endsWith('/publication'))return send(res,200,{ok:true,publication:videoPublications.verify(input)});
+      return send(res,200,{ok:true,job:videoPublications.annotate(videoJobs.record(input))});
+    } catch(error) {return send(res,400,{error:redactL1(error.message,[W.key,W.widgetToken])});}
   }
   if (u.pathname === '/api/l1/status' && req.method === 'GET') return send(res, 200, { platforms: l1Status(), actions: actions.slice(-8).reverse() });
-  if (u.pathname === '/api/prep' && req.method === 'GET') return send(res, 200, { capabilities: prep.publicCapabilities(), records: prep.list() });
+  if (u.pathname === '/api/prep' && req.method === 'GET') return send(res, 200, { capabilities: prep.publicCapabilities(), records: ageReview.forRecords(prep.list()) });
+  if (u.pathname === '/api/prep/contract' && req.method === 'GET') return send(res,200,{version:3,columnOnly:true,agentAttribution:'caller_reported',operationActors:true,finalPublishPlatforms:['xhs'],publicationApproval:'checked_digest_and_user_reference'});
+  if (u.pathname === '/api/prep/record' && req.method === 'GET') {
+    try { return send(res,200,{ok:true,record:ageReview.forRecords([prep.get(u.searchParams.get('id'))])[0]}); }
+    catch { return send(res,404,{error:'准备任务不存在'}); }
+  }
   if (u.pathname === '/api/prep/bundle' && req.method === 'GET') {
     try { return send(res, 200, prep.bundle(u.searchParams.get('id')), 'application/zip', { 'content-disposition': 'attachment; filename="x-draft.zip"', 'x-content-type-options':'nosniff' }); }
     catch { return send(res, 404, {error:'文图包不存在或素材不可用'}); }
@@ -242,15 +350,15 @@ export async function handle(req, res) {
       catch(e) { return send(res,400,{error:redactL1(e.message,[W.key,W.widgetToken])}); }
     }
     let body = '';
-    for await (const chunk of req) { body += chunk; if (Buffer.byteLength(body) > 131072) return send(res, 413, { error: '请求过大' }); }
+    for await (const chunk of req) { body += chunk; if (Buffer.byteLength(body) > prepRequestLimit) return send(res, 413, { error: '请求过大' }); }
     try {
       const a = JSON.parse(body);
-      if (!a || Object.keys(a).some(k => !['type', 'input', 'id'].includes(k))) throw new Error('操作字段不对');
+      if (!a || Object.keys(a).some(k => !['type', 'input', 'id','actor','approval'].includes(k)) || (a.actor!==undefined&&!['check','execute','publish'].includes(a.type)) || a.approval!==undefined&&a.type!=='publish') throw new Error('操作字段不对');
       if (actions.some(a => !a.done) || prep.busy()) return send(res, 409, { error: '另一个操作还在运行' });
       if (['window','window-check'].includes(a.type)) return send(res,200,{ok:true,window:await prep.window(a.id,a.type==='window')});
       if (a.type==='release-window') return send(res,200,{ok:true,record:prep.releaseWindow(a.id)});
-      const record = a.type === 'create' ? prep.create(a.input) : ['check', 'execute'].includes(a.type) ? prep.start(a.id, a.type) : null;
-      if (!record) throw new Error('不支持此操作；没有最终发布入口');
+      const record = a.type === 'create' ? prep.create(a.input) : ['check', 'execute','publish'].includes(a.type) ? prep.start(a.id, a.type,a.actor,a.approval) : null;
+      if (!record) throw new Error('不支持此操作');
       return send(res, 200, { ok: true, record });
     } catch (e) { return send(res, 400, { error: redactL1(e.message, [W.key, W.widgetToken]) }); }
   }
@@ -264,6 +372,48 @@ export async function handle(req, res) {
     if (!u.searchParams.get('full') && !/\.svg$/.test(f)) { const t = thumb(f, Math.min(1600, +u.searchParams.get('w') || 720)); if (t) return send(res, 200, fs.readFileSync(t), 'image/jpeg', { 'cache-control': 'max-age=3600' }); }
     return send(res, 200, fs.readFileSync(f), /\.png$/.test(f) ? 'image/png' : /\.svg$/.test(f) ? 'image/svg+xml' : 'image/jpeg', { 'cache-control': 'max-age=300' });
   }
+  if (u.pathname === '/api/platforms' && req.method === 'POST') {
+    if(!isLoopback(req.socket.remoteAddress))return send(res,403,{error:'只允许本机修改平台设置'});
+    if(req.headers.origin!==`http://${req.headers.host}`)return send(res,403,{error:'只允许同源平台设置请求'});
+    let body='';for await(const chunk of req){body+=chunk;if(Buffer.byteLength(body)>4096)return send(res,413,{error:'请求过大'});}
+    try {
+      if(actions.some(a=>!a.done)||prep.busy())return send(res,409,{error:'请等当前任务完成后再修改平台'});
+      const a=JSON.parse(body),p=platformById(a.platform);if(!p||Object.keys(a).some(k=>!['platform','selected','account'].includes(k)))throw new Error('平台设置参数不正确');
+      if(a.account!==undefined){
+        if(typeof a.account!=='string'||!a.account.trim()||a.account.length>100||/[\r\n]/.test(a.account)||/cookie:|bearer\s|https?:\/\/|[\w.+-]+@[\w.-]+\.[A-Za-z]{2,}/i.test(a.account))throw new Error('仅填写平台公开账号名，不填写密码、邮箱、Cookie或网址');
+        const fixed=config.l1?.[p.id]?.account||(p.id==='x'?config.xHandle:null);if(fixed&&fixed!==a.account.trim())throw new Error('此账号已有配置，请保持既有账号名称');
+        const file=process.env.MAITIAN_ACCOUNTS||path.join(home,'l1-accounts.local.json');let local={};if(fs.existsSync(file))local=JSON.parse(fs.readFileSync(file,'utf8').replace(/^\uFEFF/,''));local[p.id]=a.account.trim();fs.writeFileSync(file,JSON.stringify(local,null,2));
+      }
+      if(a.selected!==undefined)choosePlatform(db,p.id,a.selected);
+      return send(res,200,{ok:true,platforms:PLATFORM_CATALOG.map(p=>({...p,selected:selectedPlatforms(db).includes(p.id)}))});
+    }catch(error){return send(res,400,{error:redactL1(error.message)});}
+  }
+  if (u.pathname === '/api/native-work' && req.method === 'POST') {
+    if(!isLoopback(req.socket.remoteAddress))return send(res,403,{error:'只允许本机登记作品'});
+    if(req.headers.origin!==`http://${req.headers.host}`)return send(res,403,{error:'只允许同源作品登记请求'});
+    let body='';for await(const chunk of req){body+=chunk;if(Buffer.byteLength(body)>16384)return send(res,413,{error:'内容过长'});}
+    try {
+      if(actions.some(a=>!a.done)||prep.busy())return send(res,409,{error:'请等当前任务完成后再登记作品'});
+      const a=JSON.parse(body),p=platformById(a.platform);if(!p?.native||Object.keys(a).some(k=>!['platform','title','publishedAt','url'].includes(k)))throw new Error('请选择原生平台');
+      const account=l1Account(config,p.id);if(typeof a.title!=='string'||!a.title.trim()||a.title.length>8000)throw new Error('请填写作品标题或正文第一段');
+      if(typeof a.publishedAt!=='string'||!/T.*(?:Z|[+-]\d{2}:\d{2})$/.test(a.publishedAt)||!Number.isFinite(Date.parse(a.publishedAt))||Date.parse(a.publishedAt)>Date.now())throw new Error('请填写已发布作品的真实发布时间');
+      let id,url=a.url||null;
+      if(p.id==='channels'&&!url)id=crypto.createHash('sha256').update(`${a.title}:${a.publishedAt}`).digest('hex').slice(0,24);
+      else {
+        const u=new URL(url);if(u.protocol!=='https:'||u.username||u.password||u.hash)throw new Error('请填写官方公开作品链接');
+        const allowed={bilibili:['www.bilibili.com','bilibili.com'],douyin:['www.douyin.com','douyin.com'],youtube:['youtu.be','www.youtube.com'],instagram:['www.instagram.com','instagram.com'],channels:['channels.weixin.qq.com']};
+        if(!allowed[p.id].includes(u.hostname))throw new Error('作品链接不属于所选平台');
+        const match=p.id==='bilibili'?u.pathname.match(/^\/video\/(BV[A-Za-z0-9]{10})\/?$/):p.id==='douyin'?u.pathname.match(/^\/video\/(\d+)\/?$/):p.id==='instagram'?u.pathname.match(/^\/reel\/([\w-]+)\/?$/):null;
+        id=p.id==='youtube'?(u.hostname==='youtu.be'?u.pathname.slice(1):u.searchParams.get('v')):match?.[1];
+        if(p.id==='youtube'){if(!/^[\w-]{11}$/.test(id||''))throw new Error('YouTube视频ID不正确');url=`https://youtu.be/${id}`;}
+        else if(p.id==='channels'){if(u.search)throw new Error('视频号可不填写链接，请勿登记带认证参数的网址');id=crypto.createHash('sha256').update(url).digest('hex').slice(0,24);}
+        if(p.id!=='youtube')url=u.origin+u.pathname;
+        if(!id)throw new Error('未识别作品ID，请填写完整公开链接');
+      }
+      const store=await import('./l1-store.mjs');store.transaction(()=>store.saveObservation({platform:p.id,account,captured_at:new Date().toISOString(),source:'manual-registration',posts:[{id,text:a.title.trim(),created_at:a.publishedAt,url,precision:'publication date and title supplied by user; metrics not yet collected'}]}));
+      choosePlatform(db,p.id,true);return send(res,200,{ok:true,id:`external:${p.id}:${id}`});
+    }catch(error){return send(res,400,{error:redactL1(error.message)});}
+  }
   if (u.pathname === '/api/action' && req.method === 'POST') {
     if (!isLoopback(req.socket.remoteAddress)) return send(res, 403, { error: 'L1 操作只允许本机请求' });
     if (!localOnly && !W.key) return send(res, 503, { error: '请先由 Liu 配置网页口令' });
@@ -274,10 +424,27 @@ export async function handle(req, res) {
       let a; try { a = JSON.parse(body); } catch { return send(res, 400, { error: '请求格式不对' }); }
       try { planL1Action(a); } catch (error) { return send(res, 400, { error: error.message }); }
       if (a.type === 'status') return send(res, 200, l1Status()[a.platform]);
+      if (['show-login', 'cancel-login'].includes(a.type)) {
+        try { controlL1(actions.find(record => record.platform === a.platform && !record.done), a.type); }
+        catch (error) { return send(res, 409, { error: error.message }); }
+        return send(res, 200, { ok: true });
+      }
       if (['doctor', 'sync'].includes(a.type) && config.l1?.[a.platform]?.browserExecution === false) return send(res, 409, { error: BROWSER_BLOCK });
       if (actions.some(x => !x.done) || prep.busy()) return send(res, 409, { error: '上一个 L1 操作还在跑，等它结束' });
+      const previousIdentity = l1Status()[a.platform].identity;
+      if (previousIdentity) db.prepare('INSERT OR REPLACE INTO meta (key,value) VALUES (?,?)').run(`l1:web:identity:${a.platform}`, JSON.stringify(previousIdentity));
       const rec = launchL1(a, { root: ROOT, secrets: [W.key, W.widgetToken],
-        save: record => db.prepare('INSERT OR REPLACE INTO meta (key,value) VALUES (?,?)').run(`l1:web:${a.platform}`, JSON.stringify(record)) });
+        save: record => {
+          db.prepare('INSERT OR REPLACE INTO meta (key,value) VALUES (?,?)').run(`l1:web:${a.platform}`, JSON.stringify(record));
+          const confirmed = record.loginState==='logged_in' && record.progress?.stage==='identity_confirmed' || record.done && record.ok && ['login','doctor','collect'].includes(record.type);
+          if (confirmed || record.loginState==='logged_out') {
+            const { account, profile } = l1Status()[a.platform];
+            const current=l1Status()[a.platform].identity;
+            const checkedAt=record.progress?.at || record.endedAt || record.startedAt;
+            db.prepare('INSERT OR REPLACE INTO meta (key,value) VALUES (?,?)').run(`l1:web:identity:${a.platform}`, JSON.stringify({ ...(current || {}), account, profile, status:confirmed?'logged_in':'logged_out', checkedAt, ...(confirmed?{confirmedAt:record.endedAt || checkedAt}:{}) }));
+            if (record.done && record.ok && ['login','doctor'].includes(record.type)) choosePlatform(db,a.platform,true);
+          }
+        } });
       actions.push(rec);
       send(res, rec.done && !rec.ok ? 500 : 200, { ok: !rec.done || rec.ok, ...(rec.error ? { error: rec.error } : {}) });
     });
@@ -288,7 +455,22 @@ export async function handle(req, res) {
 export function startWeb() {
   const srv = http.createServer((req, res) => { handle(req, res).catch((e) => { try { send(res, 500, { error: redactL1(e.message, [W.key, W.widgetToken]) }); } catch {} }); });
   initLogin(ROOT);
-  srv.listen(W.port || 8787, '127.0.0.1', () => { const a = srv.address(); console.log(`麦田网页：http://127.0.0.1:${a.port}/`); });
+  srv.listen(W.port || 8787, '127.0.0.1', () => {
+    console.log(`麦田网页：http://127.0.0.1:${srv.address().port}/`);
+    const ageTimer=setInterval(()=>{
+      try{launchDueAgeSampling();}catch(error){console.error('同龄采样：'+redactL1(error.message,[W.key,W.widgetToken]));}
+    },5*60000).unref();
+    srv.once('close',()=>clearInterval(ageTimer));
+    if (W.requireLocalToken === false) {
+      const receive = () => {
+        try { drainProjectDrafts(home, prep); }
+        catch (error) { console.error('项目暂存稿导入失败：' + redactL1(error.message, [W.key, W.widgetToken])); }
+      };
+      receive();
+      const timer = setInterval(receive, 15000).unref();
+      srv.once('close', () => clearInterval(timer));
+    }
+  });
   srv.on('error', (e) => console.error('麦田网页没起来：' + e.message));
   return srv;
 }

@@ -1,9 +1,19 @@
 // 仅已渲染 DOM；不读取页面脚本、框架对象、网络响应或浏览器存储。
 export function visibleWechatIdentity() {
   const visible = el => { const r = el.getBoundingClientRect(), s = getComputedStyle(el); return r.width > 0 && r.height > 0 && s.visibility !== 'hidden' && s.display !== 'none'; };
-  const names = [...new Set([...document.querySelectorAll('.weui-desktop-account__nickname, .weui-desktop-account__name, .account_meta .nickname, #accountNickName')].filter(visible).map(el => el.innerText.trim()).filter(Boolean))];
-  const qr=[...document.querySelectorAll('img[class*="qrcode"],.login__type__container__scan__qrcode,img[alt*="二维码"],.qrcode')].some(visible);
-  return { names, trustedOrigin: location.origin === 'https://mp.weixin.qq.com', login: !names.length && (qr || /扫码登录|扫描二维码登录|重新登录|登录已过期/.test(document.body?.innerText || '')) };
+  const selector = [
+    '.weui-desktop-account__nickname', '.weui-desktop-account__name',
+    '.account_meta .nickname', '#accountNickName',
+    '.mp_account_box .account_box-body .acount_box-nickname',
+    '.weui-personal_info .weui-desktop-person_info .weui-desktop_name',
+  ].join(', ');
+  const names = [...new Set([...document.querySelectorAll(selector)].filter(visible).map(el => el.innerText.trim()).filter(Boolean))];
+  const trustedOrigin = location.origin === 'https://mp.weixin.qq.com';
+  const route = location.pathname;
+  const loginRoute = route === '/' || /^\/cgi-bin\/(?:biz)?login(?:\/|$)/.test(route || '');
+  const qr = loginRoute && [...document.querySelectorAll('img[class*="qrcode"],.login__type__container__scan__qrcode,img[alt*="二维码"],.qrcode')].some(visible);
+  const loginText = loginRoute && /扫码登录|扫描二维码登录|重新登录|登录已过期/.test(document.body?.innerText || '');
+  return { names, trustedOrigin, login: trustedOrigin && names.length === 0 && Boolean(qr || loginText) };
 }
 export function visibleWechatFollowers() {
   const visible = el => { const r = el.getBoundingClientRect(), s = getComputedStyle(el); return r.width > 0 && r.height > 0 && s.visibility !== 'hidden' && s.display !== 'none'; };
@@ -43,6 +53,11 @@ export function visibleWechatArticles() {
     const lines = card.innerText.split('\n').map(s => s.trim()).filter(Boolean);
     const dateLines = lines.filter(s => /^(?:(?:发表|发布|群发)(?:时间|于)?\s*[:：]?\s*)?20\d{2}[年/.-]\d{1,2}[月/.-]\d{1,2}日?(?:\s+\d{1,2}:\d{2}(?::\d{2})?)?$/.test(s));
     const dates = [...new Set(dateLines.map(s => { const m = s.match(/(20\d{2})[年/.-](\d{1,2})[月/.-](\d{1,2})/); return `${m[1]}-${m[2].padStart(2, '0')}-${m[3].padStart(2, '0')}`; }))];
+    const times=[...new Set(dateLines.flatMap(line=>{
+      const time=/\s([01]?\d|2[0-3]):([0-5]\d)(?::([0-5]\d))?$/.exec(line);
+      return time?[`${time[1].padStart(2,'0')}:${time[2]}:${time[3]||'00'}`]:[];
+    }))];
+    const publishedAt=dates.length===1&&times.length===1?`${dates[0]}T${times[0]}+08:00`:null;
     const stats = [];
     for (const label of [...card.querySelectorAll('span, div, p, dt')].filter(visible)) {
       const value = label.innerText.trim();
@@ -57,7 +72,7 @@ export function visibleWechatArticles() {
     const headers = table ? [...table.querySelectorAll('thead th')].filter(visible) : [];
     const cells = [...card.querySelectorAll('td')].filter(visible);
     if (headers.length === cells.length) headers.forEach((header, i) => stats.push([header.innerText.trim(), cells[i].innerText.trim()]));
-    return { id: id && /^[\w-]+$/.test(id) ? id : null, url, text, date: dates.length === 1 ? dates[0] : null, stats, state: /草稿|审核中|未发表|未发布|已删除|已撤回/.test(card.innerText) ? 'skipped' : 'published' };
+    return { id: id && /^[\w-]+$/.test(id) ? id : null, url, text, date: dates.length === 1 ? dates[0] : null, publishedAt, stats, state: /草稿|审核中|未发表|未发布|已删除|已撤回/.test(card.innerText) ? 'skipped' : 'published' };
   });
 }
 export function clickWechatSection(section) {

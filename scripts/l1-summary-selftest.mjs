@@ -16,10 +16,16 @@ function metric(id,day,views,options={}) {
 }
 try {
   assert.equal(accountSummary(db,'xhs',account,date).currentWorks.metrics.views,null);
+  assert.equal(accountSummary(db,'xhs',account,date).freshness.state,'missing');
   post('old','2026-11-15T00:00:00Z'); metric('old','2026-11-16',100); metric('old',date,125);
   let s=accountSummary(db,'xhs',account,date);
   assert.equal(s.currentWorks.metrics.views,125);assert.equal(s.publishedToday.count,0);
   assert.equal(s.crossDayDelta.metrics.views,25);assert.equal(s.crossDayDelta.metrics.favorites,0);
+  assert.equal(s.freshness.state,'current');assert.equal(s.freshness.observedTodayWorks,1);
+  const stale=accountSummary(db,'xhs',account,'2026-11-18');
+  assert.equal(stale.freshness.state,'stale');assert.equal(stale.freshness.latestDay,date);
+  assert.equal(stale.publishedToday.count,null);assert.equal(stale.publishedToday.metrics.views,null);
+  assert.equal(stale.currentWorks.metrics.views,125); // Keep genuine historical totals.
   // Same-day old observation never becomes a yesterday baseline.
   db.prepare("DELETE FROM metrics WHERE day='2026-11-16'").run();
   assert.equal(accountSummary(db,'xhs',account,date).crossDayDelta.metrics.views,null);
@@ -46,6 +52,9 @@ try {
   assert.equal(s.publishedToday.count,null);assert.equal(s.publishedToday.metrics.views,null);
   assert.equal(s.unknownPublicationDates,1);assert.equal(s.currentWorks.metrics.views,172);
   assert.equal(accountSummary(db,'xhs','other',date).publishedToday.count,null);
+  const partial=accountSummary(db,'xhs',account,'2026-11-18');
+  assert.equal(partial.freshness.state,'partial');assert.equal(partial.freshness.observedTodayWorks,1);
+  assert.equal(partial.publishedToday.count,null);assert.equal(partial.publishedToday.metrics.views,null);
   assert.throws(()=>accountSummary(db,'xhs',account,'bad'));
   console.log('L1 SUMMARY OFFLINE PASS: three scopes, Beijing boundary, account/state filtering, missing baseline/date/field, retained field, no inferred zero.');
 } finally {db.close();}

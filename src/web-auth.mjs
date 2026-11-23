@@ -11,7 +11,15 @@ export function localRequestAllowed(req) {
   const suffix = port === 80 ? '' : `:${port}`;
   if (localHost !== `localhost${suffix}` && localHost !== `127.0.0.1${suffix}`) return false;
   if (Object.keys(headers).some(name => /^(?:forwarded$|via$|x-forwarded-|x-real-ip$|true-client-ip$|cf-)/.test(name))) return false;
-  if (headers['sec-fetch-site'] && !['none', 'same-origin'].includes(headers['sec-fetch-site'])) return false;
+  if (headers['sec-fetch-site'] && !['none', 'same-origin'].includes(headers['sec-fetch-site'])) {
+    // A click from another loopback app/port is same-site but not same-origin.
+    // Admit only an activated top-level GET of a page shell; APIs, frames,
+    // cross-site navigation and every write retain the strict origin check.
+    return headers['sec-fetch-site'] === 'same-site' && method === 'GET' &&
+      headers.origin === undefined && headers['sec-fetch-mode'] === 'navigate' &&
+      headers['sec-fetch-dest'] === 'document' && headers['sec-fetch-user'] === '?1' &&
+      ['/', '/p', '/board'].includes(req.url.split('?')[0]);
+  }
   if (headers.origin !== undefined) return headers.origin === `http://${localHost}`;
   return method === 'GET' || method === 'HEAD';
 }

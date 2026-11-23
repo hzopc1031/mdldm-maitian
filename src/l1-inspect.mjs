@@ -49,7 +49,9 @@ export function writePreparationLink(db,id,result) {
     const record=JSON.parse(row.record);
     if(record.platform!==result.platform||record.state==='running')throw new Error('准备记录平台或运行状态已变化');
     if(record.episodeId)writeTask(db,record.episodeId,result.platform,result);
-    Object.assign(record,{url:result.url,state:'published',linkCheckedAt:result.checkedAt,note:'本人发布后，从可见已发布列表核对了公开链接；本系统未执行发布'});
+    const submittedHere=record.submission?.submitted===true&&record.operations?.some(op=>op.kind==='publish'&&op.state==='submitted');
+    Object.assign(record,{url:result.url,state:'published',linkCheckedAt:result.checkedAt,
+      note:submittedHere?'本系统已提交小红书，随后从可见已发布列表核对了公开链接。':'外部发布后，从可见已发布列表核对了公开链接；本系统未执行发布。'});
     db.prepare('UPDATE publish_preparations SET record=? WHERE id=?').run(JSON.stringify(record),id);
     db.prepare('INSERT INTO logs (ts,episode_id,platform,action,result) VALUES (?,?,?,?,?)').run(result.checkedAt,record.episodeId||null,result.platform,'links','准备稿的可见公开链接已核对回写');
     db.exec('COMMIT');

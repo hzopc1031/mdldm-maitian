@@ -49,6 +49,7 @@ let throwSpawn = false;
 globalThis.__l1WebSpawn = (binary, args, options) => {
   if (throwSpawn) throw new Error(`spawn failed key=${key}`);
   const child = new EventEmitter(); child.stdout = new EventEmitter(); child.stderr = new EventEmitter();
+  child.connected = true; child.sent = []; child.send = message => child.sent.push(message);
   children.push({ binary, args, options, child }); return child;
 };
 registerHooks({ resolve(specifier, context, next) {
@@ -63,6 +64,7 @@ registerHooks({ resolve(specifier, context, next) {
 await import('../src/l1-store.mjs'); // 与 L1 初始化一致，建立 followers 表。
 const { handle, overviewData } = await import('../src/web.mjs');
 const { db } = await import('../src/db.mjs');
+db.prepare('INSERT OR REPLACE INTO meta(key,value) VALUES (?,?)').run('l1:platform-selection',JSON.stringify(['x','xhs','wechat'])); // explicit fixture choices, never application defaults
 const { planL1Action, redactL1 } = await import('../src/l1-web.mjs');
 db.prepare('INSERT INTO meta (key,value) VALUES (?,?)').run('doctorDay', 'legacy-day');
 db.prepare('INSERT INTO meta (key,value) VALUES (?,?)').run('login:channels', 'ok');
@@ -81,6 +83,7 @@ function request(route, { action, auth = true, headers = {}, raw } = {}) {
 const post = action => request('/api/action', { action });
 try {
   assert.equal((await request('/api/overview', { auth: false })).code, 401);
+  assert.equal((await request('/api/prep/record?id=unknown', { auth: false })).code, 401);
   assert.equal((await post({ type: 'status', platform: 'x' })).code, 200);
   assert.equal(children.length, 0);
   const health = (await request('/api/overview')).json().health;
@@ -94,11 +97,25 @@ try {
       const action = { type, platform, ...(type === 'collect' ? { date: '2026-11-17' } : {}) };
       assert.equal((await post(action)).code, 200);
       const { args, options, child } = children.at(-1);
-      assert.deepEqual(args, [path.join(root, 'scripts', 'l1-run.mjs'), ...planL1Action(action)]);
+      assert.deepEqual(args.slice(0,1+planL1Action(action).length), [path.join(root, 'scripts', 'l1-run.mjs'), ...planL1Action(action)]);
+      if(type==='collect')assert.deepEqual(args.slice(-2),['--until',(await request('/api/l1/status')).json().platforms[platform].last.startedAt]);
       assert.equal(options.shell, false); assert.equal(options.stdio[0], 'ignore');
+      assert.equal(options.stdio[3], 'ipc');
       assert.equal((await post({ type: 'collect', platform })).code, 409);
       const running = (await request('/api/l1/status')).json();
       assert.equal(running.platforms[platform].state, 'running');
+      child.emit('message',{type:'l1:progress',stage:'waiting_login',timeoutMs:5000,raw:'secret-cookie'});
+      const progress=(await request('/api/l1/status')).json().platforms[platform].last.progress;
+      assert.match(progress.message,/完成登录/);assert.ok(Date.parse(progress.deadline)>Date.now());
+      child.emit('message',{type:'l1:progress',stage:'untrusted-secret-cookie'});
+      if(type==='collect') {
+        child.emit('message',{type:'l1:progress',stage:'reading_posts',completed:2,total:5,raw:'secret-cookie'});
+        assert.match((await request('/api/l1/status')).json().platforms[platform].last.progress.message,/2\/5 篇/);
+      }
+      if(type==='login') {
+        assert.equal((await post({type:'show-login',platform})).code,200);
+        assert.deepEqual(child.sent.at(-1),{type:'l1:show-window'});
+      }
       child.stdout.emit('data', 'some key=offline-'); child.stdout.emit('data', 'test-key\n');
       child.stderr.emit('data', 'https://mp.weixin.qq.com/cgi-bin/home?token=secret-query#fragment\nCookie: session=secret-cookie\n');
       assert.equal(JSON.stringify((await request('/api/l1/status')).json()).includes('secret-cookie'), false);
@@ -106,12 +123,37 @@ try {
       const last = (await request('/api/l1/status')).json().platforms[platform].last;
       assert.equal(last.done, true); assert.equal(last.ok, type === 'login');
       assert.equal(last.code, type === 'login' ? 0 : 7);
+      const identity = (await request('/api/l1/status')).json().platforms[platform].identity;
+      assert.equal(identity.account, health.platforms[platform].account);
+      assert.equal(identity.profile, health.platforms[platform].profile);
+      assert.ok(Date.parse(identity.confirmedAt));
       for (const secret of [key, widgetToken, 'secret-cookie', 'secret-query', 'fragment']) assert.equal(JSON.stringify(last).includes(secret), false);
       if (type === 'collect') assert.ok(last.error);
     }
   }
+  await post({type:'login',platform:'x'});
+  const cancelChild=children.at(-1).child;
+  assert.equal((await post({type:'cancel-login',platform:'x'})).code,200);
+  assert.deepEqual(cancelChild.sent.at(-1),{type:'l1:cancel-login'});
+  cancelChild.stderr.emit('data','已取消登录');cancelChild.emit('close',1);
+  assert.equal((await post({type:'show-login',platform:'x'})).code,409);
+  // The QR page is explicit logout evidence; a window/read failure alone is not.
+  await post({type:'login',platform:'wechat'});
+  const qrChild=children.at(-1).child;
+  qrChild.emit('message',{type:'l1:progress',stage:'login_required',timeoutMs:5000});
+  let qrStatus=(await request('/api/l1/status')).json().platforms.wechat;
+  assert.equal(qrStatus.loginStatus.state,'logged_out');
+  assert.equal(qrStatus.identity.status,'logged_out');
+  assert.ok(qrStatus.identity.confirmedAt,'Keep the prior confirmation as history');
+  qrChild.stderr.emit('data','专用窗口已关闭，未完成账号确认');qrChild.emit('close',1);
+  assert.equal((await request('/api/l1/status')).json().platforms.wechat.loginStatus.state,'logged_out');
+  await post({type:'login',platform:'wechat'});
+  const confirmedChild=children.at(-1).child;
+  confirmedChild.emit('message',{type:'l1:progress',stage:'identity_confirmed'});
+  assert.equal((await request('/api/l1/status')).json().platforms.wechat.loginStatus.state,'logged_in','Expose confirmation before closing the window');
+  confirmedChild.emit('close',0);
   for (const action of [null, [], { type: 'metrics' }, { type: 'doctor' }, { type: 'followers' }, { type: 'sync', id: 'a' },
-    { type: 'submit', platform: 'x' }, { type: 'login', platform: 'youtube' }, { type: 'collect', platform: 'x;whoami' },
+    { type: 'submit', platform: 'x' }, { type: 'login', platform: 'unsupported-platform' }, { type: 'collect', platform: 'x;whoami' },
     { type: 'collect', platform: 'x', date: '2026-02-30' }, { type: 'collect', platform: 'x', date: '--submit' },
     { type: 'login', platform: 'wechat', url: 'https://evil.test' }, { type: 'collect', platform: 'xhs', argv: ['--force'] }]) {
     assert.equal((await post(action)).code, 400);
@@ -132,6 +174,13 @@ try {
   assert.equal((await request('/api/l1/status')).json().platforms.x.last.ok, false);
   assert.match((await request('/api/l1/status')).json().platforms.x.last.error, /ENOENT/);
   assert.match(db.prepare('SELECT value FROM meta WHERE key=?').get('l1:web:x').value, /ENOENT/);
+  const savedIdentity = JSON.parse(db.prepare('SELECT value FROM meta WHERE key=?').get('l1:web:identity:x').value);
+  assert.deepEqual((await request('/api/l1/status')).json().platforms.x.identity, savedIdentity);
+  const {config:identityConfig}=await import('../src/feishu.mjs');
+  const originalHandle=identityConfig.xHandle;
+  identityConfig.xHandle='ChangedAccount';
+  assert.equal((await request('/api/l1/status')).json().platforms.x.identity, null);
+  identityConfig.xHandle=originalHandle;
   assert.equal(db.prepare('SELECT value FROM meta WHERE key=?').get('login:channels').value, 'ok');
   assert.equal(redactL1('token=secret key=secret Cookie: secret').includes('secret'), false);
 
@@ -165,44 +214,110 @@ try {
   // 执行真实页面模板，核验空数据、系统控制和持久化失败记录均可渲染。
   const elements = new Map();
   const element = key => { if (!elements.has(key)) elements.set(key, { innerHTML: '', style: {}, append() {} }); return elements.get(key); };
+  const listeners={};
   const context = vm.createContext({ console, URLSearchParams, location: { hash: '#/system', search: '' },
-    document: { hidden: true, body: element('body'), querySelector: element, createElement: () => element('new'), addEventListener() {} },
+    document: { hidden: true, body: element('body'), querySelector: element, createElement: () => element('new'), addEventListener(type,fn) {(listeners[type]||=[]).push(fn);} },
     fetch() { return new Promise(() => {}); }, setInterval() {}, clearInterval() {}, setTimeout() {}, addEventListener() {}, scrollTo() {} });
   vm.runInContext(fs.readFileSync(path.join(root, 'src/web/mt.js'), 'utf8'), context);
   vm.runInContext(fs.readFileSync(path.join(root, 'src/web/health.js'), 'utf8'), context);
   vm.runInContext(fs.readFileSync(path.join(root, 'src/web/pages.html'), 'utf8').match(/<script>([\s\S]*?)<\/script>/)[1], context);
+  const pageActionClick=listeners.click[0];
   vm.runInContext(fs.readFileSync(path.join(root, 'src/web/publish-prep.js'), 'utf8'), context);
   context.input = (await request('/api/overview')).json();
   vm.runInContext('O = input; F = {};', context);
   const html = vm.runInContext('vSystem()', context);
   assert.match(html, /PeanutPair/); assert.match(html, /TwoPeanuts/); assert.match(html, /ENOENT/);
-  assert.equal((html.match(/>登录 \/ 校验<\/button>/g) || []).length, 3);
-  assert.equal((html.match(/>采集数据<\/button>/g) || []).length, 3);
-  assert.match(html, /手动操作/); assert.match(html, /最近动态/); assert.match(html, /平台登录与校验/);
-  assert.ok(html.indexOf('手动操作') < html.indexOf('平台登录与校验'));
-  for (const capability of ['采流量', '采粉丝']) for (const name of ['X', '小红书', '公众号']) assert.ok(html.includes(`${capability} · ${name}`));
-  assert.ok(html.includes('<button class="btn" disabled>同步知识站数据（未适配）</button>'));
+  assert.equal((html.match(/>登录账号<\/button>/g) || []).length, 3);
+  assert.equal((html.match(/最近确认登录：/g) || []).length, 3);
+  assert.match(html, /刷新工作台不会退出平台账号/);
+  assert.equal((html.match(/>更新今日作品数据<\/button>/g) || []).length, 3);
+  assert.match(html, /最近动态/); assert.match(html, /账号与采集/);
+  assert.ok(html.indexOf('常用平台') < html.indexOf('其他工具'));
+  assert.doesNotMatch(html,/守护进程|登录 \/ 校验|附加功能/);
   assert.match(html, /准备发布/); assert.match(html, /小红书填好后由你核对发布/);
-  assert.match(html, /同时读取流量和粉丝/); assert.match(html, /自动保活、定时体检、定时采集和自动日报发送均未启用/);
+  assert.match(html, /同时采流量、采粉丝/); assert.match(html, /自动保活和自动发送日报未开启/);
+  assert.match(html,/当天00:00至点击时发布的作品/);
   // 每个真实可执行入口都通过 L1 白名单；未适配入口没有动作属性。
   const uiActions = [...html.matchAll(/data-act='([^']+)'/g)].map(m => JSON.parse(m[1].replaceAll('&quot;', '"')));
-  assert.equal(uiActions.length, 12);
+  assert.equal(uiActions.length, 6);
   for (const action of uiActions) assert.ok(planL1Action(action));
   context.input.actions = [{ done: false }];
   vm.runInContext('O = input;', context);
-  assert.equal((vm.runInContext('vSystem()', context).match(/disabled data-act=/g) || []).length, 12);
+  assert.equal((vm.runInContext('vSystem()', context).match(/disabled data-act=/g) || []).length, 6);
+  context.input.health.platforms.x.state='running';
+  context.input.health.platforms.x.last={type:'login',done:false,progress:{message:'等待本人完成登录',deadline:new Date(Date.now()+120000).toISOString()}};
+  assert.match(vm.runInContext('vSystem()',context),/显示登录窗口/);
+  assert.match(vm.runInContext('vSystem()',context),/取消登录/);
+  assert.doesNotMatch(vm.runInContext('vSystem()',context),/未确认结束/);
+  context.input.actions=[];context.input.health.platforms.x.state='idle';
   assert.doesNotMatch(html, /七个平台|开机自启|视频号登录保活/);
-  assert.match(vm.runInContext('vTraffic()', context), /登录与采集状态/);
+  assert.match(vm.runInContext('vTraffic()', context), /前往账号与采集/);
+  context.input.episodes=[
+    {id:'unknown-pub-date',name:'没有发布时间的作品',nick:'没有发布时间的作品',episode:null,observedAt:new Date().toISOString(),tasks:[],covers:[],views:0},
+    {id:'dated-calendar-post',name:'日历有日期的作品',nick:'日历有日期的作品',episode:null,publishedAt:new Date().toISOString(),tasks:[{state:'published'}],covers:[],views:10}
+  ];
+  const calendarHtml=vm.runInContext('vCalendar()',context);
+  assert.match(calendarHtml,/暂无入库记录/);assert.match(calendarHtml,/不代表当天没有发布/);
+  assert.match(calendarHtml,/1 篇作品缺少发布时间/);assert.doesNotMatch(calendarHtml,/unknown-pub-date/);
+  assert.match(calendarHtml,/dated-calendar-post/);
+  context.input.episodes[1].tasks[0].state='submitted';
+  assert.match(vm.runInContext('vCalendar()',context),/已提交，待核对/);
+  context.input.episodes[1].tasks[0].state='unknown';
+  assert.match(vm.runInContext('vCalendar()',context),/异常 \/ 需核对/);
+  context.input.episodes=[];
   context.prepData = (await request('/api/prep')).json();
   vm.runInContext('api = async () => prepData; location.hash = "#/prepare";',context);
   const prepHtml = await vm.runInContext('vPrepare()',context);
-  assert.match(prepHtml,/生成准备任务/); assert.match(prepHtml,/打开 X 文字草稿/); assert.match(prepHtml,/保存公众号草稿/);
+  assert.match(prepHtml,/保存本地草稿/); assert.match(prepHtml,/打开 X 文字草稿/); assert.match(prepHtml,/保存公众号草稿/);
   assert.match(prepHtml,/disabled/); assert.doesNotMatch(prepHtml,/data-prep="submit"/);
   assert.match(prepHtml,/实际发表日期/);assert.match(prepHtml,/data-prep="links"/);
+  assert.doesNotMatch(prepHtml,/尚未真实验收/);
+  context.targetPrep={...context.prepData.records[0],id:'11111111-1111-4111-8111-111111111111',title:'历史稿件精准定位',source:{project:'验收项目',column:'工具解读',category:'AI工具',runId:'older'}};
+  context.focusedRow={dataset:{prepRecord:context.targetPrep.id},focus(){this.focused=true;},scrollIntoView(){this.scrolled=true;}};
+  vm.runInContext(`api=async route=>route.startsWith('/api/prep/record?')?{record:targetPrep}:{...prepData,records:[...prepData.records]};location.hash='#/prepare?record='+targetPrep.id;`,context);
+  const targetedHtml=await vm.runInContext('vPrepare()',context);
+  assert.match(targetedHtml,/历史稿件精准定位/);assert.match(targetedHtml,/栏目：工具解读/);
+  assert.doesNotMatch(targetedHtml,/data-prep-filter="category"|data-category=/);
+  assert.match(targetedHtml,/交稿 AI：未记录/);
+  context.truthData={...context.prepData,records:[
+    {...context.targetPrep,id:'receipt-row',state:'published',publication:{},url:'https://x.com/PeanutPair/status/123',publishedAt:'2026-11-21T01:00:00Z',test:false},
+    {...context.targetPrep,id:'test-row',title:'【测试稿】旧标记遗漏',test:false},
+    {...context.targetPrep,id:'actor-row',title:'新稿',test:false,source:{project:'项目',column:'栏目',agent:{name:'Codex',sessionId:'session-1',basis:'environment'}},operations:[{kind:'execute',actor:{name:'DSH',sessionId:'session-2'},state:'draft_saved',startedAt:'2026-11-21T01:00:00Z'}]}
+  ]};
+  const truthHtml=vm.runInContext('preparationRecords(truthData)',context);
+  assert.match(truthHtml,/已登记外部发布回执/);assert.match(truthHtml,/发布 AI 未记录/);
+  assert.match(truthHtml,/<details class="prep-tests"><summary>测试与验收记录（1）/);
+  assert.match(truthHtml,/交稿 AI：Codex（客户端运行环境上报）/);
+  assert.match(truthHtml,/填写 \/ 存草稿：DSH/);
+  context.publishData={capabilities:{...context.prepData.capabilities,xhs:{...context.prepData.capabilities.xhs,publishEnabled:true}},records:[
+    {id:'approved-xhs',platform:'xhs',title:'本篇已批准',state:'checked',checkedDigest:'a'.repeat(64)},
+    {id:'test-xhs',platform:'xhs',title:'【测试稿】不能发布',state:'checked',checkedDigest:'a'.repeat(64),test:false},
+    {id:'submitted-xhs',platform:'xhs',title:'已提交',kind:'publish',state:'submitted',evidence:{submitted:true}}
+  ]};
+  const publishHtml=vm.runInContext('preparationRecords(publishData)',context);
+  assert.equal((publishHtml.match(/data-prep="publish"/g)||[]).length,2,'normal checked and terminal records expose the control, tests do not');
+  assert.match(publishHtml,/data-prep="publish" data-id="approved-xhs"[^>]*>发布小红书/);
+  assert.match(publishHtml,/data-prep="publish" data-id="submitted-xhs"[^>]*disabled/);
+  assert.match(publishHtml,/true（已提交平台，公开状态另行核对）/);
+  vm.runInContext('var originalComposer=initComposer;initComposer=()=>{};',context);
+  const originalQueryAll=context.document.querySelectorAll;
+  context.document.querySelectorAll=()=>[context.focusedRow];
+  vm.runInContext('after()',context);
+  assert.equal(context.focusedRow.focused,true);assert.equal(context.focusedRow.scrolled,true);
+  assert.equal(context.focusedRow.tabIndex,-1);
+  context.document.querySelectorAll=originalQueryAll;
+  vm.runInContext('initComposer=originalComposer;api=async()=>prepData;location.hash="#/prepare";',context);
+  context.prepData.records.push({id:'legacy-wechat',platform:'wechat',title:'旧任务',state:'unknown',evidence:{submitted:null,savedAsDraft:false}});
+  const unknownHtml=await vm.runInContext('vPrepare()',context);
+  assert.match(unknownHtml,/旧任务未保留底层回执/);
+  assert.doesNotMatch(unknownHtml,/填写回执 · legacy-wechat/);
+  context.prepData.records.at(-1).failureEvidence={saveConfirmed:true,receiptParsed:true,exitCode:6,skillCode:'BROWSER_FAILED'};
+  assert.match(await vm.runInContext('vPrepare()',context),/保存证明已收到/);
+  context.prepData.records.pop();
   context.input.health.platforms.x.last={type:'doctor',done:true,ok:true,endedAt:new Date().toISOString()};
-  assert.match(vm.runInContext('vSystem()',context),/最近体检：成功/);
+  assert.match(vm.runInContext('vSystem()',context),/检查账号已完成/);
   context.input.health.platforms.x.last.type='sync';
-  assert.match(vm.runInContext('vSystem()',context),/最近取链接：成功/);
+  assert.match(vm.runInContext('vSystem()',context),/取链接已完成/);
   const {config:mutableConfig}=await import('../src/feishu.mjs');
   mutableConfig.l1.x.browserExecution=true;
   const preparationId=context.prepData.records.find(r=>r.platform==='x').id;
@@ -212,6 +327,10 @@ try {
   assert.deepEqual(linkChild.args.slice(1),['--platform','x','--preparation',preparationId,'--date','2026-11-17']);
   linkChild.child.emit('close',0);
   assert.equal(overviewData().episodes.length, 0);
+  vm.runInContext('render=async()=>{};load=async()=>{};fetch=async()=>{throw new TypeError("offline")};pendingAction=null;',context);
+  await pageActionClick({target:{closest:()=>({disabled:false,dataset:{act:JSON.stringify({type:'login',platform:'x'})}})}});
+  assert.equal(vm.runInContext('pendingAction',context),null);
+  assert.match(vm.runInContext('actionError',context),/请求未得到确认/);
   console.log('L1 WEB PASS: 3 平台 CLI 参数、HTTP 鉴权/互斥/校验、非零退出/spawn error、持久化/脱敏、页面模板。');
   console.log('仅临时配置/数据库和 loopback HTTP；未启动/连接 Chrome，未读真实配置/凭据，未调用旧 hub。');
 } finally { await new Promise(resolve => server.close(resolve)); db.close(); }
