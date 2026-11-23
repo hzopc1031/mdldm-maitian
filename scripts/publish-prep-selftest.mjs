@@ -71,7 +71,7 @@ try {
   assert.throws(()=>enabled.start(other.id,'execute'),/已有待手动发布/);
   assert.equal(enabled.releaseWindow(r.id).windowReleased,true);
   assert.equal(enabled.get(r.id).state,'awaiting_user');
-  const w = enabled.create({platform:'wechat',title:'本地稿',content:'只模拟'});
+  const w = enabled.create({platform:'wechat',cover:image,images:[image],title:'本地稿',content:'只模拟'});
   enabled.start(w.id,'check'); child.stdout.emit('data','not JSON token=do-not-store'); child.emit('close',0);
   assert.equal(enabled.get(w.id).state,'check_failed'); assert.equal(JSON.stringify(enabled.get(w.id)).includes('do-not-store'),false);
   enabled.start(w.id,'check'); child.stdout.emit('data',JSON.stringify({ok:true,offline:true})); child.emit('close',0);
@@ -82,7 +82,7 @@ try {
     saveConfirmed:false,cleanupFailed:false,draftVerified:null,stage:'save_unconfirmed',
   });
   assert.equal(enabled.get(w.id).evidence,undefined);
-  const cleanup = enabled.create({platform:'wechat',title:'草稿浏览器清理失败',content:'只模拟'});
+  const cleanup = enabled.create({platform:'wechat',cover:image,images:[image],title:'草稿浏览器清理失败',content:'只模拟'});
   enabled.start(cleanup.id,'check'); child.stdout.emit('data',JSON.stringify({ok:true,offline:true})); child.emit('close',0);
   enabled.start(cleanup.id,'execute');
   child.stdout.emit('data',JSON.stringify({ok:false,savedAsDraft:false,code:'BROWSER_FAILED',operationCode:'PUBLISH_FAILED',message:'receipt-private-marker'}));
@@ -91,7 +91,7 @@ try {
   assert.equal(failure.state,'unknown');
   assert.deepEqual(failure.failureEvidence,{exitCode:6,receiptParsed:true,resultOk:false,submitted:null,savedAsDraft:false,skillCode:'BROWSER_FAILED',operationCode:'PUBLISH_FAILED',saveConfirmed:false,cleanupFailed:true,draftVerified:null,stage:'operation_and_cleanup_failed'});
   assert.doesNotMatch(JSON.stringify(failure),/private-marker/);
-  const saved = enabled.create({platform:'wechat',title:'保存已成功但收尾失败',content:'只模拟'});
+  const saved = enabled.create({platform:'wechat',cover:image,images:[image],title:'保存已成功但收尾失败',content:'只模拟'});
   enabled.start(saved.id,'check');child.stdout.emit('data',JSON.stringify({ok:true,offline:true}));child.emit('close',0);
   enabled.start(saved.id,'execute');
   child.stdout.emit('data',JSON.stringify({ok:false,submitted:false,savedAsDraft:true,draftVerified:true,code:'BROWSER_FAILED',message:'private-marker'}));child.emit('close',6);
@@ -101,7 +101,7 @@ try {
   assert.match(savedFailure.error,/显式草稿保存证明/);assert.doesNotMatch(JSON.stringify(savedFailure),/private-marker/);
   const savedSpawnCount=spawnCount;
   assert.throws(()=>enabled.start(saved.id,'execute'),/禁止直接重跑/);assert.equal(spawnCount,savedSpawnCount);
-  const malformed = enabled.create({platform:'wechat',title:'草稿回执无法解析',content:'只模拟'});
+  const malformed = enabled.create({platform:'wechat',cover:image,images:[image],title:'草稿回执无法解析',content:'只模拟'});
   enabled.start(malformed.id,'check'); child.stdout.emit('data',JSON.stringify({ok:true,offline:true})); child.emit('close',0);
   enabled.start(malformed.id,'execute'); child.stdout.emit('data','malformed private-marker'); child.emit('close',0);
   assert.equal(enabled.get(malformed.id).state,'unknown');
@@ -109,7 +109,7 @@ try {
   assert.doesNotMatch(JSON.stringify(enabled.get(malformed.id)),/private-marker/);
   assert.throws(()=>enabled.releaseWindow(w.id));
   const x = enabled.create({platform:'x',content:'文字草稿',test:true});
-  assert.match(JSON.parse(fs.readFileSync(enabled.jobFile(x.id))).content,/测试稿/);
+  assert.match(JSON.parse(fs.readFileSync(enabled.jobFile(x.id))).content,/测试稿|勿发布/);
   assert.throws(() => enabled.start(x.id,'execute'),/未启用/);
   const imageBytes=fs.readFileSync(image), xp=enabled.create({platform:'x',content:'完整正文\n第二段',images:[image]});
   fs.writeFileSync(image,'changed after creation');
@@ -211,7 +211,7 @@ try {
     if (guard.oldCompose) assert.ok(!newCalls.includes('Target.createTarget'));
   }
   assert.throws(()=>normalizePrep({platform:'x',content:'x',images:Array(5).fill(image)}));
-  assert.throws(()=>normalizePrep({platform:'wechat',title:'x',content:'x',caption:'x'.repeat(121)}));
+  assert.throws(()=>normalizePrep({platform:'wechat',cover:image,images:[image],title:'x',content:'x',caption:'x'.repeat(121)}));
   const url = 'https://www.xiaohongshu.com/explore/abc';
   assert.equal(selectPublishedLink('xhs',[{id:'abc',state:'published',url}],{postId:'abc'}),url);
   for (const cards of [[],[{id:'abc',state:'reviewing',url}],[{id:'abc',state:'published',url:null}],[{id:'abc',state:'published',url:url+'?token=not-allowed'}],[{id:'abc',state:'published',url},{id:'abc',state:'published',url}]]) assert.throws(() => selectPublishedLink('xhs',cards,{postId:'abc'}));
@@ -265,7 +265,7 @@ try {
   const found = await inspectPlatform(cfg,'xhs',{postId:'abc'},{withBrowser,wait:async()=>{}});
   assert.equal(found.url,url); assert.ok(nav.includes('https://creator.xiaohongshu.com/new/note-manager'));
   await assert.rejects(inspectPlatform(cfg,'xhs',null,{withBrowser:async(c,fn)=>fn({goto:async()=>{},evaluate:async()=>({nickname:'wrong'})})}));
-  const restart = enabled.create({platform:'wechat',title:'restart fixture',content:'mock only'});
+  const restart = enabled.create({platform:'wechat',cover:image,images:[image],title:'restart fixture',content:'mock only'});
   enabled.start(restart.id,'check');
   const restarted = createPrepService(opts);
   assert.equal(restarted.get(restart.id).state,'unknown');

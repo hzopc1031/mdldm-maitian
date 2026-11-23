@@ -186,6 +186,18 @@ try {
 
   // 新发布准备 API：执行真实 HTTP 路由，子进程全部替身；不运行第三方 skill。
   assert.equal((await request('/api/prep', {auth:false})).code,401);
+  assert.equal((await request('/api/prep/contract')).json().version,4);
+  assert.deepEqual((await request('/api/prep/contract')).json().finalPublishPlatforms,[]);
+  assert.match((await request('/api/prep/rules-module')).body,/xWeightedCount/);
+  assert.equal((await request('/api/prep/posts',{action:{type:'create',input:{title:'test',content:'test'}}})).code,403);
+  const postHeaders={origin:`http://127.0.0.1:${server.address().port}`};
+  const manuscript=await request('/api/prep/posts',{headers:postHeaders,action:{type:'create',input:{title:'test',content:'no platform operation'}}});
+  assert.equal(manuscript.code,200);const manuscriptId=manuscript.json().post.id;
+  assert.equal((await request('/api/prep/posts/record?id='+manuscriptId)).json().post.version,2);
+  assert.equal((await request('/api/prep/posts',{headers:postHeaders,action:{type:'publish',id:manuscriptId}})).code,403);
+  assert.equal((await request('/api/prep/posts',{headers:postHeaders,action:{type:'update',id:manuscriptId,platform:'x',input:{content:'test',submit:true}}})).code,400);
+  assert.equal((await request('/api/prep/posts',{headers:postHeaders,action:{type:'check',id:manuscriptId,platform:'x'}})).json().validation.ok,true);
+  assert.equal((await request('/api/prep/posts/bundle?id='+manuscriptId)).code,200);
   assert.equal((await request('/api/prep/image?name=test.png', {auth:false,action:{}})).code,401);
   assert.equal((await request('/api/prep/image?name=test.png', {action:{},headers:{origin:'https://evil.test'}})).code,403);
   assert.equal((await request('/api/prep/image?name=test.png', {action:{}})).code,400);
@@ -194,12 +206,13 @@ try {
   const job = (await request('/api/prep/job?id=' + prepId)).json(); assert.equal(job.submit,false);
   const intent = await request('/api/prep/x?id=' + prepId); assert.equal(intent.code,303);
   assert.match(intent.headers.location,/^https:\/\/twitter.com\/intent\/tweet\?text=/);
-  assert.equal((await request('/api/prep', {action:{type:'submit',id:prepId}})).code,400);
+  assert.equal((await request('/api/prep', {action:{type:'submit',id:prepId}})).code,403);
   assert.equal((await request('/api/prep', {action:{type:'execute',id:prepId}})).code,400);
   const beforeGate = children.length;
   for (const type of ['doctor','sync']) assert.equal((await post({type,platform:'x',...(type === 'sync' ? {id:'no-episode'} : {})})).code,409);
   assert.equal(children.length,beforeGate);
-  const draft = await request('/api/prep',{action:{type:'create',input:{platform:'wechat',title:'offline test',content:'mock only'}}});
+  const image=path.join(folder,'test-cover.png');fs.writeFileSync(image,Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Wl6WQAAAABJRU5ErkJggg==','base64'));
+  const draft = await request('/api/prep',{action:{type:'create',input:{platform:'wechat',cover:image,images:[image],title:'offline test',content:'mock only'}}});
   const draftId = draft.json().record.id;
   assert.equal((await request('/api/prep',{action:{type:'execute',id:draftId}})).code,400);
   assert.equal(children.length,beforeGate);
@@ -267,8 +280,11 @@ try {
   context.input.episodes=[];
   context.prepData = (await request('/api/prep')).json();
   vm.runInContext('api = async () => prepData; location.hash = "#/prepare";',context);
+  const pageSource=fs.readFileSync(path.join(root,'src/web/prepare-page.js'),'utf8').replace("'/api/prep/rules-module'",JSON.stringify(new URL('../src/platform-rules.mjs',import.meta.url).href));
+  const pageModule=await import('data:text/javascript;base64,'+Buffer.from(pageSource).toString('base64'));
+  context.prepPageModule=pageModule;vm.runInContext('loadPreparePage=async()=>prepPageModule;',context);
   const prepHtml = await vm.runInContext('vPrepare()',context);
-  assert.match(prepHtml,/保存本地草稿/); assert.match(prepHtml,/打开 X 文字草稿/); assert.match(prepHtml,/保存公众号草稿/);
+  assert.match(prepHtml,/生成各平台版本/); assert.match(prepHtml,/打开 X 文字草稿/); assert.match(prepHtml,/公众号/);
   assert.match(prepHtml,/disabled/); assert.doesNotMatch(prepHtml,/data-prep="submit"/);
   assert.match(prepHtml,/实际发表日期/);assert.match(prepHtml,/data-prep="links"/);
   assert.doesNotMatch(prepHtml,/尚未真实验收/);
@@ -295,18 +311,9 @@ try {
     {id:'submitted-xhs',platform:'xhs',title:'已提交',kind:'publish',state:'submitted',evidence:{submitted:true}}
   ]};
   const publishHtml=vm.runInContext('preparationRecords(publishData)',context);
-  assert.equal((publishHtml.match(/data-prep="publish"/g)||[]).length,2,'normal checked and terminal records expose the control, tests do not');
-  assert.match(publishHtml,/data-prep="publish" data-id="approved-xhs"[^>]*>发布小红书/);
-  assert.match(publishHtml,/data-prep="publish" data-id="submitted-xhs"[^>]*disabled/);
+  assert.doesNotMatch(publishHtml,/data-prep="publish"|发布小红书/);
   assert.match(publishHtml,/true（已提交平台，公开状态另行核对）/);
-  vm.runInContext('var originalComposer=initComposer;initComposer=()=>{};',context);
-  const originalQueryAll=context.document.querySelectorAll;
-  context.document.querySelectorAll=()=>[context.focusedRow];
-  vm.runInContext('after()',context);
-  assert.equal(context.focusedRow.focused,true);assert.equal(context.focusedRow.scrolled,true);
-  assert.equal(context.focusedRow.tabIndex,-1);
-  context.document.querySelectorAll=originalQueryAll;
-  vm.runInContext('initComposer=originalComposer;api=async()=>prepData;location.hash="#/prepare";',context);
+  vm.runInContext('api=async()=>prepData;location.hash="#/prepare";',context);
   context.prepData.records.push({id:'legacy-wechat',platform:'wechat',title:'旧任务',state:'unknown',evidence:{submitted:null,savedAsDraft:false}});
   const unknownHtml=await vm.runInContext('vPrepare()',context);
   assert.match(unknownHtml,/旧任务未保留底层回执/);

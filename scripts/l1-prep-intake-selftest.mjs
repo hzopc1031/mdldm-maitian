@@ -17,6 +17,10 @@ const base = `http://127.0.0.1:${port}`;
 const config = path.join(home, 'config.json');
 const skills = path.join(home,'mock-skills');
 const mockScript = path.join(skills,'wechat-publish','scripts','wechat.mjs');
+const mockLib=path.join(path.dirname(mockScript),'lib');fs.mkdirSync(mockLib,{recursive:true});
+fs.writeFileSync(path.join(mockLib,'util.mjs'),`import fs from 'node:fs';export const readJob=file=>({...JSON.parse(fs.readFileSync(file,'utf8')),jobFile:file});export const preflight=()=>({errors:[]});export const codeToExit=()=>5;`);
+fs.writeFileSync(path.join(mockLib,'wechat.mjs'),`import {execFileSync} from 'node:child_process';export const ensureBrowser=async()=>({eval:async()=>({trustedOrigin:true,names:['TwoPeanuts的AI'],login:false}),dispose:async()=>{}});export const publish=async job=>JSON.parse(execFileSync(process.execPath,[${JSON.stringify(mockScript)},'post','--job',job.jobFile]));`);
+fs.writeFileSync(path.join(mockLib,'browser-lifecycle.mjs'),`export const installCleanupHandlers=()=>{};export const keepBrowser=()=>{};export const cleanupBrowsers=async()=>({remaining:0});`);
 fs.mkdirSync(path.dirname(mockScript),{recursive:true});
 fs.writeFileSync(mockScript,`import fs from 'node:fs';
   const args=process.argv.slice(2);
@@ -43,6 +47,7 @@ assert.deepEqual(callerPrepAgent({CODEX_THREAD_ID:actor.sessionId}),actor);
 assert.throws(()=>callerPrepAgent({}),/未识别AI调用环境/);
 assert.throws(()=>callerPrepAgent({CODEX_THREAD_ID:'one',CODEX_SESSION_ID:'two'}),/冲突/);
 assert.deepEqual(callerPrepAgent({},reviewer),reviewer);
+const card=path.join(home,'card.png');fs.writeFileSync(card,Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Wl6WQAAAABJRU5ErkJggg==','base64'));
 const input = {platform:'x', title:'试点稿', content:'验证栏目和分类同一条记录', source};
 
 const inbox = path.join(home, 'data', 'publish-prep', 'inbox');
@@ -75,7 +80,7 @@ try {
   assert.deepEqual(accepted.source,source);
   assert.equal(accepted.reviewUrl,`${base}/p#/prepare?record=${record.id}`);
   assert.deepEqual(await readProjectDraft({id:record.id,base}),accepted);
-  const wechat = await submitProjectDraft({home, base, input:{...input, platform:'wechat'}});
+  const wechat = await submitProjectDraft({home, base, input:{...input, platform:'wechat',cover:card,images:[card]}});
   assert.notEqual(wechat.id, record.id, 'same run can prepare distinct platform editions');
   await assert.rejects(submitProjectDraft({home, base, input:{...input, content:'另一份稿'}}), /同一运行编号/);
   assert.equal((await submitProjectDraft({home,base,input:{...input,source:{...source,category:'兼容旧分类'}}})).id,record.id,'legacy category does not split a column or alter provenance');
@@ -146,20 +151,16 @@ try {
   assert.equal(cliRecord.source.category,undefined);
   assert.deepEqual(cliRecord.source.agent,{runtime:'grok',name:'Grok交稿助手',sessionId:'fixture-grok-session',basis:'declared'});
   assert.equal((await (await fetch(base+'/api/prep/contract')).json()).agentAttribution,'caller_reported');
-  assert.deepEqual((await (await fetch(base+'/api/prep/contract')).json()).finalPublishPlatforms,['xhs']);
-  const card=path.join(home,'card.png');fs.writeFileSync(card,Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Wl6WQAAAABJRU5ErkJggg==','base64'));
+  assert.deepEqual((await (await fetch(base+'/api/prep/contract')).json()).finalPublishPlatforms,[]);
+
   const xhs=await submitProjectDraft({home,base,input:{platform:'xhs',title:'隔离发布协议验证',content:'mock protocol only',images:[card],source:{...source,runId:'publish-cli'}}});
   await continueProjectDraft({id:xhs.id,action:'check',actor,base});
   await settled(xhs.id,'checked');
-  await assert.rejects(continueProjectDraft({id:xhs.id,action:'publish',actor,base}),/授权引用/);
+  await assert.rejects(continueProjectDraft({id:xhs.id,action:'publish',actor,base}),/PUBLISH_DISABLED/);
   const forbiddenPublish=await fetch(base+'/api/prep',{method:'POST',headers:{origin:base,'content-type':'application/json'},body:JSON.stringify({type:'publish',id:xhs.id,actor})});
-  assert.equal(forbiddenPublish.status,400);
-  const pubCli=await promisify(execFile)(process.execPath,['scripts/l1-submit-prep.mjs','--publish',xhs.id,'--authorization-ref','offline-explicit-reference','--agent','codex','--session','fixture-publisher'],
-    {cwd:new URL('../',import.meta.url),env:{...process.env,MAITIAN_PREP_BASE:base}});
-  assert.equal(JSON.parse(pubCli.stdout).id,xhs.id);
-  const sent=await settled(xhs.id,'submitted');assert.equal(sent.evidence.submitted,true);
-  assert.equal(sent.operations.at(-1).actor.sessionId,'fixture-publisher');
-  await assert.rejects(continueProjectDraft({id:xhs.id,action:'publish',actor,authorizationRef:'same',base}),/不重跑/);
+  assert.equal(forbiddenPublish.status,403);
+  await assert.rejects(promisify(execFile)(process.execPath,['scripts/l1-submit-prep.mjs','--publish',xhs.id,'--authorization-ref','offline-reference','--agent','codex','--session','fixture-publisher'],{env:process.env}),/PUBLISH_DISABLED|不能发布/);
+  assert.equal((await records()).find(r=>r.id===xhs.id).state,'checked');
   const oldReceipt=path.join(home,'legacy-receipt.json');
   fs.writeFileSync(oldReceipt,JSON.stringify({ok:true,submitted:true,status:'published',bodyMatch:true,text:'隔离回执',runKey:'fixture/run',postUrl:publication.url,publishedAt:publication.publishedAt,verifiedAt:publication.verifiedAt}));
   let legacyInput;

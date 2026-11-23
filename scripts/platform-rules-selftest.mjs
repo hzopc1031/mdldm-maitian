@@ -1,0 +1,38 @@
+import assert from 'node:assert/strict';
+import fs from 'node:fs';import path from 'node:path';import os from 'node:os';
+import {DatabaseSync} from 'node:sqlite';import {EventEmitter} from 'node:events';
+import {xWeightedCount,xhsTitleCount,validateEdition} from '../src/platform-rules.mjs';
+import {normalizePrep,createPrepService} from '../src/publish-prep.mjs';
+import {createPostService} from '../src/publish-posts.mjs';
+import {stopSkillRetry} from '../src/prep-wechat-run.mjs';
+assert.throws(()=>stopSkillRetry(()=>{})('第 1 次填写失败（PAGE_CHANGED）：mock；尚未点击保存，自动重试一次'),e=>e.code==='PAGE_CHANGED');
+assert.throws(()=>stopSkillRetry(()=>{})('第 1 次填写失败（UPLOAD_FAILED）：mock'),e=>e.code==='UPLOAD_FAILED');
+assert.equal(xWeightedCount('abc中文😀'),9);assert.equal(xWeightedCount('👨‍👩‍👧‍👦🇨🇳1️⃣'),6);assert.equal(xWeightedCount('https://example.com/a?q=1'),23);assert.equal(xWeightedCount('看 https://example.com。'),27);
+assert.equal(xhsTitleCount('ABC中文'),4);assert.equal(xhsTitleCount('😀'),2);
+const home=fs.mkdtempSync(path.join(os.tmpdir(),'prep-rules-')),image=path.join(home,'image.png');fs.writeFileSync(image,Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Wl6WQAAAABJRU5ErkJggg==','base64'));
+const input={title:'测试',content:'稿件',images:[image],cover:image};
+for(const p of ['x','xhs','wechat'])assert.equal(validateEdition(p,input).ok,true);
+assert.equal(validateEdition('x',{...input,content:'中'.repeat(141)}).ok,false);assert.equal(validateEdition('x',{...input,content:'中'.repeat(12500)},{publishPrep:{x:{premium:true}}}).ok,true);
+assert.equal(validateEdition('x',{...input,content:'a'.repeat(25001)},{publishPrep:{x:{premium:true}}}).ok,false);
+assert.equal(validateEdition('xhs',{...input,title:'中'.repeat(21)}).ok,false);assert.equal(validateEdition('xhs',{...input,title:'A'.repeat(40)}).ok,true);
+for(const [p,max] of [['x',4],['xhs',18],['wechat',20]]){assert.equal(validateEdition(p,{...input,images:Array(max).fill(image)}).ok,true);assert.equal(validateEdition(p,{...input,images:Array(max+1).fill(image)}).ok,false);}
+for(const extra of [{title:'中'.repeat(33)},{digest:'中'.repeat(121)},{author:'中'.repeat(17)},{cover:null},{video:'test.mp4'}])assert.equal(validateEdition('wechat',{...input,...extra}).ok,false);
+assert.equal(validateEdition('xhs',{...input,content:'中'.repeat(1001)}).ok,false);
+assert.throws(()=>normalizePrep({...input,platform:'wechat',submit:false}));assert.throws(()=>normalizePrep({...input,platform:'x',video:'x.mp4'}),/暂不支持/);
+assert.equal(normalizePrep({...input,platform:'xhs',images:Array(18).fill(image)}).job.submit,false);
+assert.equal(normalizePrep({...input,platform:'wechat',images:Array(20).fill(image)}).job.submit,false);
+const db=new DatabaseSync(':memory:');db.exec('CREATE TABLE tasks(episode_id TEXT,platform TEXT,state TEXT,detail TEXT,updated_at TEXT)');
+const skills=path.join(home,'skills');for(const file of ['README.md','write-and-publish-posts/SKILL.md','write-and-publish-posts/references/liu-voice.md','write-and-publish-posts/references/title-formulas.md','content-humanizer-zh/SKILL.md','xhs-publish/SKILL.md','xhs-publish/references/promotion-review.md']){const f=path.join(skills,file);fs.mkdirSync(path.dirname(f),{recursive:true});fs.writeFileSync(f,'offline fixture');}
+let child,resultPath,prompt;const prep=createPrepService({db,home,root:home,config:{}});
+const spawnChild=(bin,args,options)=>{assert.equal(options.shell,false);assert.equal(options.windowsHide,true);assert.equal(args.includes('--sandbox'),true);assert.equal(args.includes('danger-full-access'),true);resultPath=args[args.indexOf('-o')+1];child=new EventEmitter();child.stdin=new EventEmitter();child.stdin.end=value=>{prompt=value;};child.kill=()=>{};return child;};
+const posts=createPostService({db,home,config:{},prep,env:{MAITIAN_LOCAL_SKILLS:skills},spawnChild});
+try{
+ const first=posts.create(input);assert.equal(first.version,2);assert.equal(first.editions.x.validation.ok,true);
+ assert.throws(()=>posts.create({...input,submit:true}));assert.throws(()=>posts.fill(first.id,'x'),/仅下载/);
+ posts.generate(first.id);assert.match(prompt,/只生成文字，不发布，不碰浏览器/);assert.equal(posts.get(first.id).generation.state,'running');assert.throws(()=>posts.update(first.id,'x',input),/正在生成/);
+ const result=Object.fromEntries(['x','xhs','wechat'].map(p=>[p,{title:'mock标题',content:'mock'.repeat(300),topics:[],digest:'mock',author:''}]));fs.writeFileSync(resultPath,JSON.stringify(result));child.emit('close',0);assert.equal(posts.get(first.id).generation.state,'done');assert.equal(posts.get(first.id).editions.x.validation.ok,false,'over-limit result is retained');assert.equal(posts.get(first.id).editions.x.content,result.x.content);
+ const original=posts.get(first.id);posts.generate(first.id);fs.writeFileSync(resultPath,'invalid');child.emit('close',0);assert.equal(posts.get(first.id).generation.state,'failed');assert.deepEqual(posts.get(first.id).master,original.master);assert.equal(posts.get(first.id).editions.x.content,original.editions.x.content);
+ posts.update(first.id,'x',input);const checked=posts.check(first.id,'x');assert.equal(checked.validation.ok,true);assert.ok(posts.bundle(first.id).includes(fs.readFileSync(image)));
+ const id=posts.get(first.id).editions.x.preparationId,record=prep.get(id);db.prepare('UPDATE publish_preparations SET record=? WHERE id=?').run(JSON.stringify({...record,state:'unknown'}),id);assert.throws(()=>posts.update(first.id,'x',input),/禁止改稿或重跑/);assert.throws(()=>posts.generate(first.id),/禁止改稿或重跑/);
+ console.log('PLATFORM RULES PASS: CJK/emoji/URL, premium limit, all platform field/media boundaries; no submit; v2 editions, failed generation retention, invalid output visibility, ZIP bytes and unknown locks (mock generation only).');
+}finally{db.close();}
