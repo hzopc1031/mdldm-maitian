@@ -279,48 +279,20 @@ try {
   assert.match(vm.runInContext('vCalendar()',context),/异常 \/ 需核对/);
   context.input.episodes=[];
   context.prepData = (await request('/api/prep')).json();
-  vm.runInContext('api = async () => prepData; location.hash = "#/prepare";',context);
-  const pageSource=fs.readFileSync(path.join(root,'src/web/prepare-page.js'),'utf8').replace("'/api/prep/rules-module'",JSON.stringify(new URL('../src/platform-rules.mjs',import.meta.url).href));
-  const pageModule=await import('data:text/javascript;base64,'+Buffer.from(pageSource).toString('base64'));
-  context.prepPageModule=pageModule;vm.runInContext('loadPreparePage=async()=>prepPageModule;',context);
-  const prepHtml = await vm.runInContext('vPrepare()',context);
-  assert.match(prepHtml,/生成各平台版本/); assert.match(prepHtml,/打开 X 文字草稿/); assert.match(prepHtml,/公众号/);
-  assert.match(prepHtml,/disabled/); assert.doesNotMatch(prepHtml,/data-prep="submit"/);
-  assert.match(prepHtml,/实际发表日期/);assert.match(prepHtml,/data-prep="links"/);
-  assert.doesNotMatch(prepHtml,/尚未真实验收/);
-  context.targetPrep={...context.prepData.records[0],id:'11111111-1111-4111-8111-111111111111',title:'历史稿件精准定位',source:{project:'验收项目',column:'工具解读',category:'AI工具',runId:'older'}};
-  context.focusedRow={dataset:{prepRecord:context.targetPrep.id},focus(){this.focused=true;},scrollIntoView(){this.scrolled=true;}};
-  vm.runInContext(`api=async route=>route.startsWith('/api/prep/record?')?{record:targetPrep}:{...prepData,records:[...prepData.records]};location.hash='#/prepare?record='+targetPrep.id;`,context);
-  const targetedHtml=await vm.runInContext('vPrepare()',context);
-  assert.match(targetedHtml,/历史稿件精准定位/);assert.match(targetedHtml,/栏目：工具解读/);
-  assert.doesNotMatch(targetedHtml,/data-prep-filter="category"|data-category=/);
-  assert.match(targetedHtml,/交稿 AI：未记录/);
-  context.truthData={...context.prepData,records:[
-    {...context.targetPrep,id:'receipt-row',state:'published',publication:{},url:'https://x.com/PeanutPair/status/123',publishedAt:'2026-11-21T01:00:00Z',test:false},
-    {...context.targetPrep,id:'test-row',title:'【测试稿】旧标记遗漏',test:false},
-    {...context.targetPrep,id:'actor-row',title:'新稿',test:false,source:{project:'项目',column:'栏目',agent:{name:'Codex',sessionId:'session-1',basis:'environment'}},operations:[{kind:'execute',actor:{name:'DSH',sessionId:'session-2'},state:'draft_saved',startedAt:'2026-11-21T01:00:00Z'}]}
-  ]};
-  const truthHtml=vm.runInContext('preparationRecords(truthData)',context);
-  assert.match(truthHtml,/已登记外部发布回执/);assert.match(truthHtml,/发布 AI 未记录/);
-  assert.match(truthHtml,/<details class="prep-tests"><summary>测试与验收记录（1）/);
-  assert.match(truthHtml,/交稿 AI：Codex（客户端运行环境上报）/);
-  assert.match(truthHtml,/填写 \/ 存草稿：DSH/);
-  context.publishData={capabilities:{...context.prepData.capabilities,xhs:{...context.prepData.capabilities.xhs,publishEnabled:true}},records:[
-    {id:'approved-xhs',platform:'xhs',title:'本篇已批准',state:'checked',checkedDigest:'a'.repeat(64)},
-    {id:'test-xhs',platform:'xhs',title:'【测试稿】不能发布',state:'checked',checkedDigest:'a'.repeat(64),test:false},
-    {id:'submitted-xhs',platform:'xhs',title:'已提交',kind:'publish',state:'submitted',evidence:{submitted:true}}
-  ]};
-  const publishHtml=vm.runInContext('preparationRecords(publishData)',context);
-  assert.doesNotMatch(publishHtml,/data-prep="publish"|发布小红书/);
-  assert.match(publishHtml,/true（已提交平台，公开状态另行核对）/);
-  vm.runInContext('api=async()=>prepData;location.hash="#/prepare";',context);
-  context.prepData.records.push({id:'legacy-wechat',platform:'wechat',title:'旧任务',state:'unknown',evidence:{submitted:null,savedAsDraft:false}});
-  const unknownHtml=await vm.runInContext('vPrepare()',context);
-  assert.match(unknownHtml,/旧任务未保留底层回执/);
-  assert.doesNotMatch(unknownHtml,/填写回执 · legacy-wechat/);
-  context.prepData.records.at(-1).failureEvidence={saveConfirmed:true,receiptParsed:true,exitCode:6,skillCode:'BROWSER_FAILED'};
-  assert.match(await vm.runInContext('vPrepare()',context),/保存证明已收到/);
-  context.prepData.records.pop();
+  const statusResponse=await request('/api/prep/status');assert.equal(statusResponse.code,200);
+  const statusData=statusResponse.json();assert.equal(statusData.readOnly,true);assert.equal(statusData.submit,false);
+  assert.ok(statusData.rows.some(row=>row.id===manuscriptId));
+  assert.ok(statusData.rows.some(row=>row.id===draftId));
+  assert.equal((await request('/api/prep/status',{headers:{origin:'https://evil.test'}})).code,403);
+  assert.equal((await request('/api/prep/status',{headers:{'x-forwarded-for':'127.0.0.1'}})).code,403);
+  assert.equal((await request('/api/prep/status',{headers:{origin:`http://127.0.0.1:${server.address().port}`},action:{}})).code,405);
+  assert.equal((await request('/api/prep/status',{auth:false})).code,401);
+  const pageModule=await import('../src/web/prepare-page.js');
+  context.prepPageModule=pageModule;context.statusData=statusData;
+  vm.runInContext('loadPreparePage=async()=>prepPageModule;api=async()=>statusData;location.hash="#/prepare";',context);
+  const prepHtml=await vm.runInContext('vPrepare()',context);
+  assert.match(prepHtml,/发布记录/);assert.match(prepHtml,/待你处理/);assert.match(prepHtml,/失败详情/);
+  assert.doesNotMatch(prepHtml,/<textarea|<input|data-action=|data-prep=|生成各平台版本|新建原稿/);
   context.input.health.platforms.x.last={type:'doctor',done:true,ok:true,endedAt:new Date().toISOString()};
   assert.match(vm.runInContext('vSystem()',context),/检查账号已完成/);
   context.input.health.platforms.x.last.type='sync';

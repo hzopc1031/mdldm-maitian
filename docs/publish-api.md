@@ -9,8 +9,8 @@
 | 方法与路径 | 用途 |
 | --- | --- |
 | GET `/api/prep/contract` | 契约 v4，`finalPublishPlatforms:[]`、`submit:false` |
-| POST `/api/prep/posts`，`type:create,input:{...}` | 建一份原稿及三个可编辑版本 |
-| POST 同上，`type:generate,id,platforms:["x","xhs","wechat"]` | 异步调用本机 Codex 按本地 skill 改稿；省略 platforms 为三端 |
+| POST `/api/prep/posts`，`type:create,input:{...}` | 建一份原稿及平台版本 |
+| POST 同上，`type:generate,id,platforms:["x","xhs","wechat"]` | 异步调用本机 Codex 按本地 skill 改稿；省略 platforms 使用现有生成平台配置 |
 | GET `/api/prep/posts/record?id=ID` | 原稿、平台版本、规则结果、关联平台任务、生成状态 |
 | GET `/api/prep/posts` | 最近50份原稿及状态；不是全历史分页接口 |
 | POST `/api/prep/posts`，`type:update,id,platform,input:{...}` | 修改完整平台版本；platform 为 master 时只改原稿，不覆盖已编辑版本 |
@@ -46,7 +46,7 @@ $created = Call-Prep @{type='create';input=$input;actor=$actor}
 $id = $created.post.id
 Call-Prep @{type='generate';id=$id;actor=$actor}
 Invoke-RestMethod "$base/api/prep/posts/record?id=$id"
-# 等 generation.state 为 done，读取并通读三版。failed 时保留原稿，不自动重试。
+# 等 generation.state 为 done，读取并通读各平台版本。failed 时保留原稿，不自动重试。
 $record = Invoke-RestMethod "$base/api/prep/posts/record?id=$id"
 $edition = $record.post.editions.wechat
 $edit = @{title=$edition.title;content=$edition.content;images=$edition.images;cover=$edition.cover;topics=$edition.topics;digest=$edition.digest;author=$edition.author;imagePositions=$edition.imagePositions}
@@ -94,10 +94,20 @@ request.json 的建稿例子：
 | unknown | 结果未确认；**不得重跑、改稿解除锁或换ID重建**，先人工核对原窗口/草稿箱 |
 | submitted/published/already_exists | 历史回执，只读展示；新接口不能提交 |
 
-错误返回 `{code,error}`。常见：403 LOCAL_ONLY（来源不符）、403 PUBLISH_DISABLED（禁止发布）、400 INVALID_INPUT、400 VALIDATION_FAILED、400 CHECK_REQUIRED、400 EDITION_LOCKED、404 NOT_FOUND、409 BUSY、413 TOO_LARGE。skill错误保存在关联任务 `failureEvidence`：`skillCode,message,hint,screenshot,stderrTail`（尾部最多4KB）及保存/清理状态；无错误码保留为 `UNKNOWN`，包装器另保留errorName。消息、提示、截图路径和stderr在入库前去除认证参数值、任意token=片段及Cookie/Set-Cookie/Authorization头。记录页、平台版本页的“脱敏原始错误”和record接口均可查看；原始stdout/DOM不落库。LOGIN_REQUIRED停止请本人扫码；PAGE_CHANGED/UPLOAD_FAILED停在该平台，不盲目重试。结果未知锁保持，错误信息增加不解除锁。原记录c3b0b6af保持不变。Codex无法启动为CODEX_UNAVAILABLE，超时GENERATION_TIMEOUT，非零或非JSON为GENERATION_FAILED；生成进程不保存stdout/stderr。默认4分钟超时，重启中断标failed。
+错误返回 `{code,error}`。常见：403 LOCAL_ONLY（来源不符）、403 PUBLISH_DISABLED（禁止发布）、400 INVALID_INPUT、400 VALIDATION_FAILED、400 CHECK_REQUIRED、400 EDITION_LOCKED、404 NOT_FOUND、409 BUSY、413 TOO_LARGE。skill错误保存在关联任务 `failureEvidence`：`skillCode,message,hint,screenshot,stderrTail`（尾部最多4KB）及保存/清理状态；无错误码保留为 `UNKNOWN`，包装器另保留errorName。消息、提示、截图路径和stderr在入库前去除认证参数值、任意token=片段及Cookie/Set-Cookie/Authorization头。状态页的“失败详情”和record接口均可查看；原始stdout/DOM不落库。LOGIN_REQUIRED停止请本人扫码；PAGE_CHANGED/UPLOAD_FAILED停在该平台，不盲目重试。结果未知锁保持，错误信息增加不解除锁。原记录c3b0b6af保持不变。Codex无法启动为CODEX_UNAVAILABLE，超时GENERATION_TIMEOUT，非零或非JSON为GENERATION_FAILED；生成进程不保存stdout/stderr。默认4分钟超时，重启中断标failed。
 
 修复依据、回退及验证见[公众号草稿USAGE修复记录](wechat-draft-fix-20261123.md)。
 
 给 Codex 等 AI 的顺序：建原稿 → 生成 → 查状态 → 通读并修改各版 → 逐图审阅 → 检查 → 查至 checked → 按授权填写 → 查状态并核对本篇回执。全程不调用平台内部接口、不传凭据、不点发布。X下载 ZIP 后由本人使用。
 
-旧 `scripts/l1-submit-prep.mjs` 保留：仍能交单平台稿、读原记录、检查、填写/存草稿、登记已经核验的外部X回执；`--publish` 已拒绝。它不自动生成三版；推荐新任务用上述 posts API，已有记录沿原ID继续。旧 publish_preparations 表及 job.json 不迁移、不覆盖。新 publish_posts 表为独立 v2 模型。
+旧 `scripts/l1-submit-prep.mjs` 保留：仍能交单平台稿、读原记录、检查、填写/存草稿、登记已经核验的外部X回执；`--publish` 已拒绝。它不自动生成平台版本；推荐新任务用上述 posts API，已有记录沿原ID继续。旧 publish_preparations 表及 job.json 不迁移、不覆盖。新 publish_posts 表为独立 v2 模型。
+
+## 只读发布状态页（2026-11-23）
+
+工作台页面只读，内容由 AI 通过接口提交；Liu 不在页面写稿。`/p#/prepare`（含已有 post/record 定位参数）显示发布记录、待你处理、失败详情。仅“切到窗口”复用 POST `/api/prep` 的 `type:window`，核验原专用窗口后置前，不刷新、不填写、不点击发布。页面自动刷新只 GET 状态汇总，不自动核验浏览器。
+
+新增 GET `/api/prep/status` 读取全部 publish_posts 与 publish_preparations，按 preparationId 合并；无关联的旧记录保留独立行。它不沿用旧列表的50/30条截断，避免遗漏待办和旧未知单。汇总只返回标题、时间、ID、平台状态与脱敏诊断，不返回正文、任务文件、账号身份或凭据。平台元数据来源为 platform-registry.mjs 注册表、meta 常用选择、config 的平台配置、准备能力及已有版本/记录的并集；每行展示已有版本及常用平台。新增平台可显示状态，不代表自动获得发布执行能力。现有平台写作规则与执行适配器范围保持兼容。
+
+汇总采用同样的 loopback、Host、Origin、Fetch Metadata 和转发头校验，仅接受 GET，写请求405。`rows` 是原稿/旧记录行，`pending` 为全部 awaiting_user 项，`failures` 为失败与未知项，`platforms` 为动态平台元数据。所有状态映射唯一维护在 src/prep-status.mjs：prepared/generated→已生成，checked→检查通过，awaiting_user→已填好待你点，draft_saved→已存草稿，failed/check_failed→失败，unknown→未知，published→已发布；submitted/already_exists 仅证明提交/已有稿，显示未知，不能冒充公开发布。editing/idle→未生成，running→处理中，未识别状态→未知。
+
+失败详情保留原 code（兼容 skillCode）、message、hint、stderr 尾部和截图路径；缺字段显示未记录，不制造旧单证据。输出前复用 prep-skill-errors 的脱敏与4KB尾部限制，再经过 redactL1。截图仅展示路径，不自动读取原截图。现有建稿/生成/检查/填写/record/contract接口无删除和改名；契约仍 submit:false、finalPublishPlatforms:[]。

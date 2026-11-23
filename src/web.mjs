@@ -11,6 +11,7 @@ import { home } from './l1-config.mjs';
 import { authPage, cleanTarget, isLoopback, localRequestAllowed } from './web-auth.mjs';
 import { createPrepService, BROWSER_BLOCK } from './publish-prep.mjs';
 import {createPostService} from './publish-posts.mjs';
+import {readPrepStatus} from './prep-status.mjs';
 import {platformRules} from './platform-rules.mjs';
 import { createAgeReviewReader } from './l1-age-review.mjs';
 import { videoPrefillJobs } from './video-prefill-jobs.mjs';
@@ -320,6 +321,11 @@ export async function handle(req, res) {
     } catch(error) {return send(res,400,{error:redactL1(error.message,[W.key,W.widgetToken])});}
   }
   if (u.pathname === '/api/l1/status' && req.method === 'GET') return send(res, 200, { platforms: l1Status(), actions: actions.slice(-8).reverse() });
+  if (u.pathname === '/api/prep/status') {
+    if(!isLoopback(req.socket.remoteAddress)||!localRequestAllowed(req))return send(res,403,{code:'LOCAL_ONLY',error:'仅允许同源本机直连调用'});
+    if(req.method!=='GET')return send(res,405,{error:'状态汇总仅供读取'},undefined,{allow:'GET'});
+    return send(res,200,readPrepStatus(db,{config,selected:selectedPlatforms(db),capabilities:prep.publicCapabilities(),secrets:[W.key,W.widgetToken]}));
+  }
   if (u.pathname === '/api/prep/rules-module' && req.method==='GET') return send(res,200,fs.readFileSync(path.join(DIR,'platform-rules.mjs')),'text/javascript; charset=utf-8');
   if (u.pathname === '/api/prep' && req.method === 'GET') return send(res, 200, { capabilities: prep.publicCapabilities(), rules:platformRules(config), records: ageReview.forRecords(prep.list()) });
   if (u.pathname === '/api/prep/contract' && req.method === 'GET') return send(res,200,{version:4,columnOnly:true,agentAttribution:'caller_reported',operationActors:true,finalPublishPlatforms:[],submit:false,manuscriptVersion:2});
