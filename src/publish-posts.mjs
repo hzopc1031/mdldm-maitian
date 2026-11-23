@@ -112,8 +112,8 @@ export function createPostService({db,home,config,prep,spawnChild=spawn,env=proc
     if(p!=='x')prep.start(edition.preparationId,'check',caller);
     return {post:get(id),validation};
   }
-  function fill(id,p,caller,mode='draft') {
-    if(!['fill','draft','publish'].includes(mode))fail('INVALID_INPUT','填写方式只接受 fill、draft 或 publish');
+  function fill(id,p,caller,mode) {
+    if(!['draft','publish'].includes(mode))fail('INVALID_INPUT','mode 必填，只能是 draft（存草稿箱）或 publish（直接发布）');
     const r=raw(id),e=r.editions[p];if(!e)fail('NOT_FOUND','平台不存在');if(!e?.preparationId)fail('CHECK_REQUIRED','请先检查平台版本');const validation=validateEdition(p,e,config);if(!validation.ok)fail('VALIDATION_FAILED','平台版本校验未通过');
     prep.start(e.preparationId,mode, caller);return get(id);
   }

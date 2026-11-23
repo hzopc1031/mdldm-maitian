@@ -2,7 +2,7 @@
 
 2026-11-23，按 Liu 11:33 的批准方案及 11:37 补充实现。只使用本机 HTTP；不新建 skill，不改 skill 索引。监听 `127.0.0.1:8787`。沿用 Host、loopback、Origin、Fetch Metadata 和转发头校验；新接口即使在启用口令的模式也只允许本机直连。POST 必须带 `Origin: http://127.0.0.1:8787`。不要传网页口令、Cookie、token 或平台凭据。
 
-所有 JSON 是 UTF-8。POST 的顶层只接受 `type,id,platform,platforms,input,actor,column,scheduledAt,note,mode`。顶层 `publish`/`submit` 动作仍拒绝；平台动作由 `fill` 的 `mode` 决定：`fill` 填好留窗、`draft` 存草稿、`publish` 直接发布（仅 X、小红书）。公众号只能存草稿，不发表、不群发。
+所有 JSON 是 UTF-8。POST 的顶层只接受 `type,id,platform,platforms,input,actor,column,scheduledAt,note,mode`。顶层 `publish`/`submit` 动作仍拒绝；平台动作由 `fill` 的必填 `mode` 决定：`draft` 存草稿、`publish` 直接发布（仅 X、小红书）。公众号只能存草稿，不发表、不群发。
 
 建稿（`type:create`）必须同时带 `column`、`scheduledAt`、`actor` 三项：栏目是自由文字（1–80 字，不含控制字符）；定时时间是带时区的 ISO 时间且必须晚于当前时间；AI 来源上报 `runtime` 与会话编号。定时只记录计划发布时间，供状态页展示，**不会自动填写或发布**。`note`（备注）可选，最多 500 字、可换行，只本地保存并显示在状态页。建稿后可用 `type:meta` 单独改栏目、定时或备注。
 
@@ -36,7 +36,7 @@
 | 小红书 | 支持（待实测） | 调本地 `xhs-publish/scripts/save-draft.mjs`，固定 ai 号；草稿绑定当前浏览器 profile，反复运行会积多份同名稿，需在草稿箱核对 |
 | X | 支持（需启用专用编辑器） | 填完关闭编辑框并在弹窗点「保存」，读到保存确认才记 `draft_saved`；未确认按 `unknown` 处理。专用 Chrome 需在 9336 运行且登录正确账号 |
 
-`mode` 省略等同 `"draft"`（直接进平台草稿箱，不需要任何人再点发布）。`fill` 仅用于想先在窗口里人工核对再自己点发布的情况；公众号传 fill 也只是存草稿。draft、fill 与 publish 都要先检查通过；结果未确认时按 `unknown` 处理，不重跑。实际可用性看 `/api/prep` 返回的 `draft.supported` 与 `publishEnabled`。
+`mode` 必填，只有两个值：`"draft"`（直接进平台草稿箱）或 `"publish"`（直接发布，仅 X、小红书）。没有默认值，不传会报 `mode 必填`；也没有第三种「填好留窗」的写法。draft 与 publish 都要先检查通过；结果未确认时按 `unknown` 处理，不重跑。实际可用性看 `/api/prep` 返回的 `draft.supported` 与 `publishEnabled`。
 
 ## 直接发布（mode:publish）
 

@@ -43,8 +43,8 @@ try{
  assert.equal(posts.meta(first.id,{scheduledAt:new Date(Date.now()+2*86400000).toISOString()},actor).column,'AI日报');
  assert.equal(posts.meta(first.id,{note:null},actor).note,null);
  assert.throws(()=>posts.meta(first.id,{},actor),/栏目/);
- assert.throws(()=>posts.create({...input,submit:true},actor,meta));assert.throws(()=>posts.fill(first.id,'x',null,'fill'),/先检查/);
- assert.throws(()=>posts.fill(first.id,'xhs',null,'publish'),/先检查/);
+ assert.throws(()=>posts.create({...input,submit:true},actor,meta));assert.throws(()=>posts.fill(first.id,'x',null,'fill'),/mode 必填/);
+ assert.throws(()=>posts.fill(first.id,'xhs'),/mode 必填/);assert.throws(()=>posts.fill(first.id,'xhs',null,'publish'),/先检查/);
  posts.generate(first.id);assert.match(prompt,/只生成文字，不发布，不碰浏览器/);assert.equal(posts.get(first.id).generation.state,'running');assert.throws(()=>posts.update(first.id,'x',input),/正在生成/);
  const result=Object.fromEntries(['x','xhs','wechat'].map(p=>[p,{title:'mock标题',content:'mock'.repeat(300),topics:[],digest:'mock',author:''}]));fs.writeFileSync(resultPath,JSON.stringify(result));child.emit('close',0);assert.equal(posts.get(first.id).generation.state,'done');assert.equal(posts.get(first.id).editions.x.validation.ok,false,'over-limit result is retained');assert.equal(posts.get(first.id).editions.x.content,result.x.content);
  const original=posts.get(first.id);posts.generate(first.id);fs.writeFileSync(resultPath,'invalid');child.emit('close',0);assert.equal(posts.get(first.id).generation.state,'failed');assert.deepEqual(posts.get(first.id).master,original.master);assert.equal(posts.get(first.id).editions.x.content,original.editions.x.content);

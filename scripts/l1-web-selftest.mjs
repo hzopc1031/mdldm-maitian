@@ -204,6 +204,7 @@ try {
   assert.equal((await request('/api/prep/posts',{headers:postHeaders,action:{type:'publish',id:manuscriptId}})).code,403);
   assert.equal((await request('/api/prep/posts',{headers:postHeaders,action:{type:'update',id:manuscriptId,platform:'x',input:{content:'test',submit:true}}})).code,400);
   assert.equal((await request('/api/prep/posts',{headers:postHeaders,action:{type:'fill',id:manuscriptId,platform:'xhs',mode:'publish'}})).code,400);
+  assert.equal((await request('/api/prep/posts',{headers:postHeaders,action:{type:'fill',id:manuscriptId,platform:'xhs'}})).code,400);
   assert.equal((await request('/api/prep/posts',{headers:postHeaders,action:{type:'check',id:manuscriptId,platform:'x'}})).json().validation.ok,true);
   assert.equal((await request('/api/prep/posts/bundle?id='+manuscriptId)).code,200);
   assert.equal((await request('/api/prep/image?name=test.png', {auth:false,action:{}})).code,401);
