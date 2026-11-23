@@ -36,7 +36,7 @@
 | 小红书 | 支持（待实测） | 调本地 `xhs-publish/scripts/save-draft.mjs`，固定 ai 号；草稿绑定当前浏览器 profile，反复运行会积多份同名稿，需在草稿箱核对 |
 | X | 支持（需启用专用编辑器） | 填完关闭编辑框并在弹窗点「保存」，读到保存确认才记 `draft_saved`；未确认按 `unknown` 处理。专用 Chrome 需在 9336 运行且登录正确账号 |
 
-`mode` 省略等同 `"fill"`（小红书/X 填好留窗、公众号存草稿）。draft 与 fill 都要先检查通过；结果未确认时同样按 `unknown` 处理，不重跑。实际可用性看 `/api/prep` 返回的每平台 `draft.supported`。
+`mode` 省略等同 `"draft"`（直接进平台草稿箱，不需要任何人再点发布）。`fill` 仅用于想先在窗口里人工核对再自己点发布的情况；公众号传 fill 也只是存草稿。draft、fill 与 publish 都要先检查通过；结果未确认时按 `unknown` 处理，不重跑。实际可用性看 `/api/prep` 返回的 `draft.supported` 与 `publishEnabled`。
 
 ## 直接发布（mode:publish）
 

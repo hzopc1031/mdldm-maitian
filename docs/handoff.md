@@ -40,7 +40,7 @@
 - `type:update`：改完整平台版本（`platform` 可为 master）。
 - `type:generate`：本机 Codex 按平台 skill 分平台改稿，202 仅表示启动。
 - `type:check`：共用规则 + 本地 skill 离线检查；返回 `validation.ok`。
-- `type:fill`：`mode` 省略=`fill`（小红书/X 填好留窗、公众号存草稿）；`draft` 只存草稿；`publish` 直接发布（仅 X、小红书；公众号会明确报错）。
+- `type:fill`：`mode` 省略=`draft`（直接进平台草稿箱，不需要人再点任何按钮）；`publish` 直接发布（仅 X、小红书；公众号会明确报错）；`fill` 仅用于人工先在窗口核对再自己点发布。
 - `input` 字段：`title,content,images,cover,topics,video,digest,caption,author,imagePositions,promotionReview`。
 
 读接口：`record?id=`、`posts`、`bundle?id=`（X ZIP）、`asset?id=&platform=&index=`、`status`、`ai-prompt`。
