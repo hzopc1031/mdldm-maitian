@@ -1,4 +1,4 @@
-﻿// L1 发布层：独立的准备与显式小红书发布，公众号始终仅草稿。
+// L1 发布层：独立的准备与显式小红书发布，公众号始终仅草稿。
 import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
@@ -11,6 +11,7 @@ import { xhsWindow } from './prep-window.mjs';
 import { l1Account } from './l1-account.mjs';
 import { fillXEditor, isDedicatedXProfile } from './x-draft-editor.mjs';
 import { normalizePrepAgent } from './prep-agent.mjs';
+import { finishXhsDraft } from './prep-xhs-draft.mjs';
 import {validateEdition,xEditionText} from './platform-rules.mjs';
 import {wechatRichJob} from './prep-wechat.mjs';
 import {skillText,skillError,stderrTail} from './prep-skill-errors.mjs';
@@ -115,15 +116,18 @@ export function prepCommand(platform, kind, { script, jobFile }) {
   if(platform==='wechat'&&kind==='execute')return [fileURLToPath(new URL('./prep-wechat-run.mjs',import.meta.url)),script,jobFile];
   if(platform==='xhs'&&kind==='publish')return [script,'post','--job',jobFile,'--account','ai','--submit'];
   // 小红书草稿：填完后由 skill 关闭浏览器，页面关闭即自动存草稿（官方页面没有存草稿按钮）。
-  if(platform==='xhs'&&kind==='draft')return [script,'post','--job',jobFile,'--account','ai'];
+  if(platform==='xhs'&&kind==='draft')return [script,'post','--job',jobFile,'--account','ai','--keep-browser'];
   return [script, kind === 'check' ? platform === 'xhs' ? 'preflight' : 'check' : 'post', '--job', jobFile,
     ...(platform === 'xhs' ? kind === 'check' ? ['--kind', 'post', '--account', 'ai'] : ['--account', 'ai', '--keep-browser'] : [])];
 }
 export function acceptPrepResult(platform, kind, code, result) {
   if(!['check','execute','draft','publish'].includes(kind))throw Error('只支持检查、填写、存草稿和显式发布');
   if(platform==='xhs'&&kind==='publish'){
-    if(code!==0||result?.ok!==true||result?.submitted!==true)throw new Error('小红书发布回执不符合提交成功约束；结果未知，先核对原笔记，勿重跑');
-    return 'published';
+    if(code!==0||result?.ok!==true)throw new Error('小红书发布回执不可用；结果未知，先核对原笔记，勿重跑');
+    if(result.submitted===true)return 'published';
+    // skill 发布前查到同标题笔记会跳过提交，这是已有稿，不是未知。
+    if(result.alreadyPublished===true)return 'already_exists';
+    throw new Error('小红书发布回执不符合提交成功约束；结果未知，先核对原笔记，勿重跑');
   }
   if (code !== 0 || result?.ok !== true || result?.submitted === true) throw new Error('本地 skill 失败或回执不符合只准备约束；先人工核对页面，勿直接重跑');
   if (kind === 'check') {
@@ -326,22 +330,33 @@ export function createPrepService({ db, home, root, config, secrets = [], spawnC
     if (job.submit !== false || (r.platform === 'xhs' && job.account !== 'ai')) throw new Error('任务安全约束已改变，拒绝执行');
     const digest = jobDigest(file);
     if (kind !== 'check' && r.checkedDigest !== digest) throw new Error('任务已变化，必须重新检查');
-    const executionFile=file;
+    let executionFile=file;
+    if(kind==='publish'){
+      // skill 把 job.submit:false 视为禁止提交，发布要用一份 submit:true 的执行副本；原任务快照保持 submit:false。
+      executionFile=path.join(path.dirname(file),'job.publish.json');
+      fs.writeFileSync(executionFile, JSON.stringify({...job,submit:true},null,2));
+    }
     let output = '', stderr = Buffer.alloc(0), stderrTruncated=false, done = false;
     const operation={kind,actor,startedAt:new Date().toISOString()};
     r.operations=[...(r.operations??[]),operation];
     r.state = 'running'; r.kind = kind; r.error = ''; save(r);
-    const finish = (code, error) => {
+    const finish = async (code, error) => {
       if (done) return; done = true;
       let result;
       try {
         if (error) throw error;
 
+        try { fs.writeFileSync(path.join(path.dirname(executionFile), 'receipt.json'), output || ''); } catch {}
         try { result = JSON.parse(output); } catch { throw new Error('本地 skill 回执不是有效 JSON；结果未确认'); }
         if (kind === 'check' && result?.ok !== true) throw new Error('本地 skill 离线检查未通过；请检查素材、逐图审阅记录和图片哈希，不代表可上传');
         r.state = acceptPrepResult(r.platform, kind, code, result);
+        if (kind === 'draft' && r.platform === 'xhs') {
+          const draft = await finishXhsDraft({ title: r.title });
+          if (!draft.verified) throw new Error('小红书草稿列表没有读到本篇，结果未确认；先核对草稿箱，勿重跑');
+          r.draftVerified = true;
+        }
         if (kind === 'check') r.checkedDigest = digest;
-        r.note = kind === 'check' ? '本地 skill 离线检查通过；不代表平台验收' : kind === 'publish' ? '已提交发布并读到成功回执；公开状态待核对' : kind === 'draft' ? '已填写并关闭页面，小红书自动存草稿；请到草稿箱核对' : r.platform === 'wechat' ? '已读到本次显式草稿保存成功回执；未发表' : '已填好，专用窗口留给你核对并亲自发布';
+        r.note = kind === 'check' ? '本地 skill 离线检查通过；不代表平台验收' : kind === 'publish' ? (r.state === 'already_exists' ? '平台已有同标题笔记，未重复提交；请到笔记管理核对' : '已提交发布并读到成功回执；公开状态待核对') : kind === 'draft' ? '已填写并关闭页面，小红书自动存草稿；请到草稿箱核对' : r.platform === 'wechat' ? '已读到本次显式草稿保存成功回执；未发表' : '已填好，专用窗口留给你核对并亲自发布';
         if(kind==='publish'&&typeof result.url==='string')r.url=result.url;
         if (kind !== 'check' && r.episodeId) {
           db.prepare('UPDATE tasks SET state=?,detail=?,updated_at=? WHERE episode_id=? AND platform=?').run(r.state, r.note, new Date().toISOString(), r.episodeId, r.platform);

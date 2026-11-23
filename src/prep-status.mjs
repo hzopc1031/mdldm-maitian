@@ -1,4 +1,4 @@
-// 只读投影：不调用稿件服务、平台检查或浏览器；所有状态文案集中在此。
+﻿// 只读投影：不调用稿件服务、平台检查或浏览器；所有状态文案集中在此。
 import {PLATFORM_CATALOG} from './platform-registry.mjs';
 import {redactSkillValue,skillText,stderrTail} from './prep-skill-errors.mjs';
 import {redactL1} from './l1-web.mjs';
@@ -6,7 +6,7 @@ import {redactL1} from './l1-web.mjs';
 export const STATUS_LABELS=Object.freeze({
   prepared:'已生成',generated:'已生成',checked:'检查通过',awaiting_user:'已填好待你点',
   draft_saved:'已存草稿',failed:'失败',check_failed:'失败',unknown:'未知',published:'已发布',
-  submitted:'未知',already_exists:'未知',editing:'未生成',idle:'未生成',running:'处理中',
+  submitted:'未知',already_exists:'平台已有同稿',editing:'未生成',idle:'未生成',running:'处理中',
 });
 export const statusLabel=state=>STATUS_LABELS[state]??STATUS_LABELS.unknown;
 const problem=state=>['failed','check_failed','unknown','submitted','already_exists'].includes(state)||!Object.hasOwn(STATUS_LABELS,state);

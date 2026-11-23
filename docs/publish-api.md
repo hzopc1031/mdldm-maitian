@@ -45,7 +45,7 @@
 | 平台 | 直接发布 | 说明 |
 | --- | --- | --- |
 | X | 支持（未实测） | 在已验证的专用编辑器里点 Post，读回 `https://x.com/<账号>/status/<id>` 才记 `published`，否则 `unknown` |
-| 小红书 | 支持（未实测） | 调 `xhs-publish post --account ai --submit`，回执 `submitted:true` 才记 `published` |
+| 小红书 | 支持（2026-11-24 实测） | 执行时写一份 `job.publish.json`（`submit:true`），调 `xhs-publish post --submit`；回执 `submitted:true` 记 `published`。skill 把 `job.submit:false` 视为禁止提交，直接传原任务只填不发 |
 | 公众号 | 不支持 | 本地 skill 明确禁止发表；请求会报「只能存草稿」，请保存草稿后在后台发表或群发 |
 
 发布前必须先 `check` 通过；发布成功后 `r.url` 与证据里保留公开链接。结果未确认时按 `unknown` 停手，不重发、不换 ID。实际可用性看 `/api/prep` 的每平台 `publishEnabled`。
