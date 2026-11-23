@@ -22,3 +22,13 @@ prep-status、l1-web、prep-wechat-fix、publish-prep、platform-rules、l1-prep
 ## 回退
 
 用 git revert 本文所属功能提交并推送 origin/l1-real，不 force。或独立回退工作副本检出 a263a94，保留现有 data/config/profile 及他人未提交文件；Update-Maitian.ps1 CheckOnly 后备份当前 hub.db，仅重启8787。不要自动恢复旧数据库，不解除任何旧未知锁，不动 remote-view/ssh，不改公共规范和 skill。
+## 正式验收补记（2026-11-23 16:49 后补）
+
+功能提交 1ac69fc 已推送并部署；以下为正式环境验收结果，完整回报见 evidence/publish-redesign-20261123/status-page-回报.md 与 progress.log（S0–S7）。
+
+- 部署：Update-Maitian.ps1 CheckOnly 通过；备份 hub-before-20261123-161444-718.db 后仅重启 8787，PID 16604→22168，仅监听 127.0.0.1:8787。首页、/p、GET /api/prep、/api/prep/posts、/api/prep/contract、/api/prep/status 均 200；契约 v4、submit:false、finalPublishPlatforms:[] 不变。remote-view、ssh 与 18790 未受影响。
+- 真实渲染：独立无登录临时 Chrome 在 1440 与 390 宽打开发布状态页，无横向溢出；页面写请求 0、页面异常 0。
+- 已有记录显示：a901973a（公众号）= 已存草稿；01d27475（小红书）= 已填好待你点，并列入“待你处理”带“切到窗口”按钮（验收未点击）；c3b0b6af（公众号）= 未知，失败详情可展开，code=USAGE，旧单 hint/stderr/截图未记录。
+- 模拟 20 个平台仅在浏览器 DOM 中注入，标签换行无溢出，未写正式库。流量、账号与采集、作品库、发布日历页面只读渲染正常。
+- 正式 publish_posts 2 条、publish_preparations 19 条与部署前备份逐字一致。未连接 9333/9335/9336，未调用真实 check/fill/activate。
+- 收尾：两个临时 Chrome profile 目录（maitian-status-ui-YyZx9u、maitian-status-ui-U1OCee）于 16:49 后确认无进程引用并删除，读回已不存在。
