@@ -1,4 +1,4 @@
-# 交接文件（HANDOFF）
+﻿# 交接文件（HANDOFF）
 
 最后更新：2026-11-23 22:20（北京时间）。任何 AI 接手前先读本文件，再按文末「必读顺序」展开。
 
@@ -50,7 +50,7 @@
 | 平台 | 标题/正文/图 | 填写 | 仅存草稿 | 直接发布 |
 | --- | --- | --- | --- | --- |
 | X | 加权 280（premium 配置 25000）/ 无标题 / ≤4 图 | 填好留窗，`awaiting_user` | 支持，读到确认记 `draft_saved` | 支持 `publish`：点 Post 并读回 `/status/` 链接才算 `published`（**未实测真实发布**） |
-| 小红书 | 20 / 1000 / 1–18 图 | 填好留窗，`awaiting_user` | 支持，`draft_saved`（未实测） | 支持 `publish`：调 `xhs-publish post --submit`，`submitted:true` 才记 `published`（**未实测真实发布**） |
+| 小红书 | 20 / 1000 / 1–18 图 | 填好留窗，`awaiting_user` | 支持：填完关闭页面自动存草稿，`draft_saved`（2026-11-23 23:00 实测） | 支持 `publish`：调 `xhs-publish post --submit`，`submitted:true` 才记 `published`（**未实测真实发布**） |
 | 公众号 | 32 / 50000 / 摘要120 / 作者16 / ≤20 图 | 仅存草稿 | 支持 | 不支持（skill 明确禁止发表），请求会报错说明 |
 
 X 草稿验证：关闭编辑框 → 弹窗点「保存」→ 先读页面提示（saved to drafts / 已保存 / 草稿箱），没有再重开编辑框点右上角「Drafts」核对首行文字。两处都没有就记 `unknown`，不谎报。

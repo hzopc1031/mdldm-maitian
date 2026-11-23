@@ -1,8 +1,10 @@
-# 麦田 AI 发布入口：方案、步骤、进展与后续
+﻿# 麦田 AI 发布入口：方案、步骤、进展与后续
 
 2026-11-23 11:33 后的新要求已取代下文历史显式发布方案：工作台只填写，最终发布由Liu本人操作；契约v4 finalPublishPlatforms为空。原稿与三端版本、共用规则、本机HTTP API已实现；五项离线自测和真实Codex改稿/两端离线检查已通过，桌面与390px截图及排序/超限交互已核对。小红书旧稿占用当初保留（后于 21:47 按指示清理），真实填写跳过；公众号本轮平台草稿结果以项目 evidence/publish-redesign-20261123/最终回报.md 为准。详见[当前发布准备说明](publish-preparation.md)及[本机API](publish-api.md)。下文保留此前历史，不代表新版还提供最终提交。
 
 2026-11-23 21:47：按 Liu 指示清理历史不规则数据：删除 10 条缺栏目的测试准备记录（含占用中的《【测试稿】填写后停下》）和 2 条测试原稿，并清掉对应任务目录；保留 10 条带栏目的真实已发布 X 记录。清理前一致性备份 `evidence/publish-redesign-20261123/hub-before-cleanup-2026-11-23T13-47-18-560Z.db`。状态页现为 10 行、无空栏目、无待办、无失败。
+
+2026-11-23 23:00：小红书草稿实测通过。旧任务 b330b8b2 的小红书记录停在 unknown 且占用「ai 专用窗口」，Liu 核对 9333 无待发内容后，已备份并手动置 windowReleased（记录保持 unknown）。修掉两个实现问题：①新建草稿走 `post --account ai`（不带 keep-browser），填完由 skill 关闭浏览器，页面关闭即自动存草稿（官方页面没有存草稿按钮，旧 save-draft 脚本会报「找不到存草稿按钮」）；②acceptPrepResult 接受 draft 类型。测试稿 07da1edf 小红书已 draft_saved。备份 `hub-before-release-xhs-2026-11-23T14-57-57-347Z.db`、`hub-before-20261123-230010-424.db`。
 
 2026-11-23 22:19：按 Liu「发草稿还是直接发布由 AI 控制」的要求，`fill` 的 `mode` 扩展为 `fill / draft / publish`。X 直接发布＝在已核验的专用编辑器点 Post 并读回 `/status/` 链接；小红书直接发布＝`post --account ai --submit` 且回执 `submitted:true`；公众号为唯一例外，只能存草稿，publish 请求会明确报错。契约改为 `submit:true`、`publishPlatforms:["x","xhs"]`，`Update-Maitian.ps1` 的启动校验同步改为核对 `publishPlatforms`。三组离线自测通过，已重启（PID 24200，备份 `hub-before-20261123-221914-721.db`）。两种真实发布都**尚未实测**。
 

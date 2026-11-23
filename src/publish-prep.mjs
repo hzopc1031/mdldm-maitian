@@ -1,4 +1,4 @@
-// L1 发布层：独立的准备与显式小红书发布，公众号始终仅草稿。
+﻿// L1 发布层：独立的准备与显式小红书发布，公众号始终仅草稿。
 import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
@@ -30,11 +30,10 @@ export function prepCapabilities(config = {}, env = process.env) {
       ? settings?.browserExecution === true && isDedicatedXProfile(settings.browserProfile)
       : settings?.browserExecution !== false && installed && keepWindow);
     const inspectEnabled = config.l1?.[platform]?.browserExecution !== false;
-    const draftScript = platform === 'xhs' ? path.join(root, 'xhs-publish', 'scripts', 'save-draft.mjs') : null;
     const draft = platform === 'wechat' ? { supported: true, label: '保存公众号草稿（不发表）' }
-      : platform === 'xhs' ? (draftScript && fs.existsSync(draftScript) ? { supported: true, label: '保存小红书草稿箱（不发布）' } : { supported: false, label: '本地未安装小红书存草稿脚本' })
+      : platform === 'xhs' ? { supported: installed, label: '保存小红书草稿箱（填完关闭页面自动保存，不发布）' }
       : { supported: enabled, label: enabled ? '保存 X 草稿箱（不发布）' : 'X 专用编辑器未启用；启用后才可填写或存草稿' };
-    return [platform, { script, installed, browserEnabled: enabled, inspectEnabled, publishEnabled: platform==='xhs' ? true : platform==='x' ? enabled : false, draft, ...(draftScript ? { draftScript } : {}),
+    return [platform, { script, installed, browserEnabled: enabled, inspectEnabled, publishEnabled: platform==='xhs' ? true : platform==='x' ? enabled : false, draft,
       mode: platform === 'x' ? '正文和最多4张图可下载为文图包；编辑器填写须显式启用专用 Chrome，仅填写不发布' : platform === 'xhs' ? '本地 xhs-publish，固定 --account ai；只填写留窗，由本人点击发布' : '本地 wechat-publish，只保存草稿并核对成功提示',
       reason: platform === 'x' ? enabled ? '已启用专用 Chrome 填写；执行时重新核验账号、空白编辑页和完整文图，填好后由本人处理。' : 'X 编辑器填写未启用；需在本地配置启用并指定专用 Chrome，仍可下载文图包。' : !installed ? '本地 DSH skill 未安装；不回退旧 hub' : !keepWindow ? '本地 skill 不支持保留窗口，未适配' : enabled ? '使用本地技能专用窗口；执行时核验可见账号。登录、素材检查和本次保存回执决定结果。' : BROWSER_BLOCK }];
   }));
@@ -112,14 +111,16 @@ export function normalizePrep(input, config = {}) {
   return { platform, job, ...(wechatCover?{wechatCover}:{}), episodeId: input.episodeId || null, test: input.test === true, ...(source ? {source} : {}), ...(publication ? {publication} : {}) };
 }
 export function prepCommand(platform, kind, { script, jobFile }) {
-  if (!['xhs', 'wechat'].includes(platform) || !['check', 'execute', 'publish'].includes(kind)) throw new Error('只支持检查、填写和显式发布');
+  if (!['xhs', 'wechat'].includes(platform) || !['check', 'execute', 'draft', 'publish'].includes(kind)) throw new Error('只支持检查、填写、存草稿和显式发布');
   if(platform==='wechat'&&kind==='execute')return [fileURLToPath(new URL('./prep-wechat-run.mjs',import.meta.url)),script,jobFile];
   if(platform==='xhs'&&kind==='publish')return [script,'post','--job',jobFile,'--account','ai','--submit'];
+  // 小红书草稿：填完后由 skill 关闭浏览器，页面关闭即自动存草稿（官方页面没有存草稿按钮）。
+  if(platform==='xhs'&&kind==='draft')return [script,'post','--job',jobFile,'--account','ai'];
   return [script, kind === 'check' ? platform === 'xhs' ? 'preflight' : 'check' : 'post', '--job', jobFile,
     ...(platform === 'xhs' ? kind === 'check' ? ['--kind', 'post', '--account', 'ai'] : ['--account', 'ai', '--keep-browser'] : [])];
 }
 export function acceptPrepResult(platform, kind, code, result) {
-  if(!['check','execute','publish'].includes(kind))throw Error('只支持检查、填写和显式发布');
+  if(!['check','execute','draft','publish'].includes(kind))throw Error('只支持检查、填写、存草稿和显式发布');
   if(platform==='xhs'&&kind==='publish'){
     if(code!==0||result?.ok!==true||result?.submitted!==true)throw new Error('小红书发布回执不符合提交成功约束；结果未知，先核对原笔记，勿重跑');
     return 'published';
@@ -128,6 +129,10 @@ export function acceptPrepResult(platform, kind, code, result) {
   if (kind === 'check') {
     if (!(platform === 'xhs' ? result.offlineOnly === true : result.offline === true)) throw new Error('缺少离线检查证明');
     return 'checked';
+  }
+  if (platform === 'xhs' && kind === 'draft') {
+    if (result.submitted !== false || result.dryRun !== true) throw new Error('小红书草稿回执不符合未提交约束；先核对草稿箱');
+    return 'draft_saved';
   }
   if (platform === 'wechat' && result.savedAsDraft === true && result.submitted === false) return 'draft_saved';
   if (platform === 'xhs' && result.dryRun === true && result.submitted === false) return 'awaiting_user';
@@ -322,7 +327,6 @@ export function createPrepService({ db, home, root, config, secrets = [], spawnC
     const digest = jobDigest(file);
     if (kind !== 'check' && r.checkedDigest !== digest) throw new Error('任务已变化，必须重新检查');
     const executionFile=file;
-    const draftOut=kind==='draft'?path.join(path.dirname(file),'draft.json'):null;
     let output = '', stderr = Buffer.alloc(0), stderrTruncated=false, done = false;
     const operation={kind,actor,startedAt:new Date().toISOString()};
     r.operations=[...(r.operations??[]),operation];
@@ -332,18 +336,12 @@ export function createPrepService({ db, home, root, config, secrets = [], spawnC
       let result;
       try {
         if (error) throw error;
-        if(kind==='draft'){
-          try { result=JSON.parse(fs.readFileSync(draftOut,'utf8')); } catch { throw new Error('小红书存草稿回执无法读取；结果未确认'); }
-          if(result?.ok!==true)throw new Error(redactL1(skillText(result?.error||'小红书存草稿未确认；先核对草稿箱'),secrets));
-          r.state='draft_saved';
-          r.note='已存小红书草稿箱（未发布）；请到发布页草稿箱核对，不要重复填写';
-          r.evidence={submitted:false,savedAsDraft:true,account:'ai',url:typeof result.url==='string'?result.url:null,steps:Array.isArray(result.steps)?result.steps.slice(0,10):[]};
-        }else{
+
         try { result = JSON.parse(output); } catch { throw new Error('本地 skill 回执不是有效 JSON；结果未确认'); }
         if (kind === 'check' && result?.ok !== true) throw new Error('本地 skill 离线检查未通过；请检查素材、逐图审阅记录和图片哈希，不代表可上传');
         r.state = acceptPrepResult(r.platform, kind, code, result);
         if (kind === 'check') r.checkedDigest = digest;
-        r.note = kind === 'check' ? '本地 skill 离线检查通过；不代表平台验收' : kind === 'publish' ? '已提交发布并读到成功回执；公开状态待核对' : r.platform === 'wechat' ? '已读到本次显式草稿保存成功回执；未发表' : '已填好，专用窗口留给你核对并亲自发布';
+        r.note = kind === 'check' ? '本地 skill 离线检查通过；不代表平台验收' : kind === 'publish' ? '已提交发布并读到成功回执；公开状态待核对' : kind === 'draft' ? '已填写并关闭页面，小红书自动存草稿；请到草稿箱核对' : r.platform === 'wechat' ? '已读到本次显式草稿保存成功回执；未发表' : '已填好，专用窗口留给你核对并亲自发布';
         if(kind==='publish'&&typeof result.url==='string')r.url=result.url;
         if (kind !== 'check' && r.episodeId) {
           db.prepare('UPDATE tasks SET state=?,detail=?,updated_at=? WHERE episode_id=? AND platform=?').run(r.state, r.note, new Date().toISOString(), r.episodeId, r.platform);
@@ -357,7 +355,6 @@ export function createPrepService({ db, home, root, config, secrets = [], spawnC
             confirmation:skillText(result.confirmation),bodyImageCount:result.bodyImageCount??null,coverBodyImageIndex:result.coverBodyImageIndex??null,
             skill:{code:skillText(result.code,80),message:redactL1(skillText(result.message),secrets),hint:redactL1(skillText(result.hint),secrets),stderrTail:redactL1(stderrTail(stderr.toString('utf8'),stderrTruncated),secrets)},
             draftListCheck:result.draftListCheck?{verified:result.draftListCheck.verified===true,matches:result.draftListCheck.matches??null,screenshot:skillText(result.draftListCheck.screenshot),error:skillText(result.draftListCheck.error)}:null } : {}) };
-        }
       } catch (e) {
         r.state = kind !== 'check' ? 'unknown' : 'check_failed';
         r.error = redactL1(skillText(e.message), secrets);
@@ -382,7 +379,7 @@ export function createPrepService({ db, home, root, config, secrets = [], spawnC
       save(r);
     };
     try {
-      const args = kind==='draft' ? [cap.draftScript, executionFile, draftOut] : prepCommand(r.platform, kind, { script: cap.script, jobFile: executionFile });
+      const args = prepCommand(r.platform, kind, { script: cap.script, jobFile: executionFile });
       const child = spawnChild(process.execPath, args,
         { cwd: root, env: { ...env, HUB_NO_WEB: '1', ...(r.platform==='wechat'?{PUBLISH_SKILL_DATA:'D:/AIInfra/agent-publish'}:{}) }, shell: false, windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'] });
       child.stdout?.on('data', d => { output += d; if (output.length > 2e6) { output = ''; finish(null, new Error('回执过大，结果未确认')); } });
@@ -416,5 +413,5 @@ export function createPrepService({ db, home, root, config, secrets = [], spawnC
       r.windowEvidence={...result,checkedAt:new Date().toISOString()}; save(r); return result;
     }, busy: () => !!db.prepare("SELECT 1 FROM publish_preparations WHERE json_extract(record,'$.state')='running'").get(),
     bundle: id => { if (get(id).platform !== 'x') throw new Error('仅 X 提供文图包'); return xDraftBundle(JSON.parse(fs.readFileSync(jobFile(id),'utf8'))); },
-    publicCapabilities: () => Object.fromEntries(Object.entries(prepCapabilities(config, env)).map(([p, { script, draftScript, ...cap }]) => [p, cap])) };
+    publicCapabilities: () => Object.fromEntries(Object.entries(prepCapabilities(config, env)).map(([p, { script, ...cap }]) => [p, cap])) };
 }
