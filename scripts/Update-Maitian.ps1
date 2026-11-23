@@ -13,7 +13,7 @@ foreach($file in @($node,$launcher,$entry,$database)){if(!(Test-Path -LiteralPat
 $tokens=$null;$parseErrors=$null
 [void][System.Management.Automation.Language.Parser]::ParseFile($launcher,[ref]$tokens,[ref]$parseErrors)
 if($parseErrors.Count){throw 'Existing launcher failed PowerShell syntax validation.'}
-foreach($rel in @('src/db.mjs','src/publish-prep.mjs','src/prep-publication.mjs','src/prep-intake.mjs','src/prep-agent.mjs','src/l1-inspect.mjs','src/web.mjs','src/web/publish-prep.js','scripts/l1-submit-prep.mjs')) {
+foreach($rel in @('src/db.mjs','src/publish-prep.mjs','src/publish-posts.mjs','src/prep-wechat.mjs','src/prep-wechat-run.mjs','src/platform-rules.mjs','src/prep-publication.mjs','src/prep-intake.mjs','src/prep-agent.mjs','src/l1-inspect.mjs','src/web.mjs','src/web/publish-prep.js','src/web/prepare-page.js','scripts/l1-submit-prep.mjs')) {
   & $node --check (Join-Path $repo $rel)
   if($LASTEXITCODE -ne 0){throw ('Node syntax validation failed: '+$rel)}
 }
@@ -27,6 +27,7 @@ function Get-WorkbenchOwner {
 function Assert-WorkbenchIdle {
   $status=Invoke-RestMethod 'http://127.0.0.1:8787/api/l1/status' -TimeoutSec 5
   $preparations=Invoke-RestMethod 'http://127.0.0.1:8787/api/prep' -TimeoutSec 5
+  try {$postState=Invoke-RestMethod 'http://127.0.0.1:8787/api/prep/posts' -TimeoutSec 5;if(@($postState.posts|Where-Object{$_.generation.state -eq 'running'}).Count){throw 'A manuscript generation is running; no restart performed.'}}catch {if($_.Exception.Response.StatusCode.value__ -ne 404){throw}}
   if(@($status.actions|Where-Object{!$_.done}).Count -or @($status.platforms.PSObject.Properties|Where-Object{$_.Value.state -eq 'running'}).Count){throw 'An account or collection action is running; no restart performed.'}
   $query=@'
 import {DatabaseSync} from 'node:sqlite';
@@ -47,7 +48,7 @@ Assert-WorkbenchIdle
 $facts=[ordered]@{state='checked';restartPerformed=$false;oldPid=$old.ProcessId;oldCreatedAt=$old.CreationDate.ToString('o');entry=$entry;databaseMatched=$true;syntaxChecked=$true;idle=$true}
 if(!$Restart){[pscustomobject]$facts|ConvertTo-Json;return}
 if(!$PSCmdlet.ShouldProcess('Maitian loopback web service on 8787','Back up database and restart the verified workbench entry')){return}
-$out=Join-Path $project 'evidence\publication-entry-20261123'
+$out=Join-Path $project 'evidence\publish-redesign-20261123'
 [void](New-Item -ItemType Directory -Path $out -Force)
 $stamp=Get-Date -Format 'yyyyMMdd-HHmmss-fff'
 $receipt=Join-Path $out ('maintenance-'+$stamp+'.json')
@@ -76,7 +77,7 @@ try {db.prepare('VACUUM INTO ?').run(process.argv[3]);} finally {db.close();}
   for($n=0;$n -lt 40 -and !$contract;$n++) {
     try {$contract=Invoke-RestMethod 'http://127.0.0.1:8787/api/prep/contract' -TimeoutSec 2}catch {Start-Sleep -Milliseconds 250}
   }
-  if(!$contract -or $contract.version -ne 3 -or $contract.finalPublishPlatforms -notcontains 'xhs'){throw 'New publication contract was not confirmed. Do not repeat publication actions.'}
+  if(!$contract -or $contract.version -ne 4 -or @($contract.finalPublishPlatforms).Count -ne 0 -or $contract.submit -ne $false){throw 'Preparation-only contract was not confirmed. Do not repeat platform actions.'}
   $current=Get-WorkbenchOwner
   $facts.newPid=$current.ProcessId
   $facts.contractVersion=$contract.version

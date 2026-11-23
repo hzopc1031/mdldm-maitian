@@ -10,6 +10,8 @@ import { L1_PLATFORMS, L1_PORTS, planL1Action, launchL1, controlL1, redactL1 } f
 import { home } from './l1-config.mjs';
 import { authPage, cleanTarget, isLoopback, localRequestAllowed } from './web-auth.mjs';
 import { createPrepService, BROWSER_BLOCK } from './publish-prep.mjs';
+import {createPostService} from './publish-posts.mjs';
+import {platformRules} from './platform-rules.mjs';
 import { createAgeReviewReader } from './l1-age-review.mjs';
 import { videoPrefillJobs } from './video-prefill-jobs.mjs';
 import { videoPrefillPublications } from './video-prefill-publications.mjs';
@@ -33,6 +35,7 @@ function collectionSchedule() {
   try { const s=JSON.parse(fs.readFileSync(path.join(home,'data','l1-schedule.json'),'utf8'));return s.status==='ACTIVE' && s.automationId ? {enabled:true,time:'00:00',timezone:'Asia/Shanghai'} : {enabled:false}; } catch { return {enabled:false}; }
 }
 const prep = createPrepService({ db, config, home, root: ROOT, secrets: [W.key, W.widgetToken] });
+const posts=createPostService({db,home,config,prep});
 const videoJobs=videoPrefillJobs(db,{redact:value=>redactL1(value,[W.key,W.widgetToken])});
 const videoPublications=videoPrefillPublications(db,videoJobs);
 db.exec(ageSamplingSchema);
@@ -317,8 +320,33 @@ export async function handle(req, res) {
     } catch(error) {return send(res,400,{error:redactL1(error.message,[W.key,W.widgetToken])});}
   }
   if (u.pathname === '/api/l1/status' && req.method === 'GET') return send(res, 200, { platforms: l1Status(), actions: actions.slice(-8).reverse() });
-  if (u.pathname === '/api/prep' && req.method === 'GET') return send(res, 200, { capabilities: prep.publicCapabilities(), records: ageReview.forRecords(prep.list()) });
-  if (u.pathname === '/api/prep/contract' && req.method === 'GET') return send(res,200,{version:3,columnOnly:true,agentAttribution:'caller_reported',operationActors:true,finalPublishPlatforms:['xhs'],publicationApproval:'checked_digest_and_user_reference'});
+  if (u.pathname === '/api/prep/rules-module' && req.method==='GET') return send(res,200,fs.readFileSync(path.join(DIR,'platform-rules.mjs')),'text/javascript; charset=utf-8');
+  if (u.pathname === '/api/prep' && req.method === 'GET') return send(res, 200, { capabilities: prep.publicCapabilities(), rules:platformRules(config), records: ageReview.forRecords(prep.list()) });
+  if (u.pathname === '/api/prep/contract' && req.method === 'GET') return send(res,200,{version:4,columnOnly:true,agentAttribution:'caller_reported',operationActors:true,finalPublishPlatforms:[],submit:false,manuscriptVersion:2});
+  if(u.pathname.startsWith('/api/prep/posts')) {
+    if(!isLoopback(req.socket.remoteAddress)||!localRequestAllowed(req))return send(res,403,{code:'LOCAL_ONLY',error:'仅允许带同源 Origin 的本机直连调用'});
+    try {
+      const id=u.searchParams.get('id'),platform=u.searchParams.get('platform');
+      if(req.method==='GET') {
+        if(u.pathname==='/api/prep/posts')return send(res,200,{ok:true,posts:posts.list()});
+        if(u.pathname==='/api/prep/posts/record')return send(res,200,{ok:true,post:posts.get(id)});
+        if(u.pathname==='/api/prep/posts/bundle')return send(res,200,posts.bundle(id),'application/zip',{'content-disposition':'attachment; filename="x-draft.zip"'});
+        if(u.pathname==='/api/prep/posts/asset'){const file=posts.asset(id,platform,u.searchParams.get('index'));return send(res,200,fs.readFileSync(file),/\.png$/i.test(file)?'image/png':/\.webp$/i.test(file)?'image/webp':'image/jpeg',{'x-content-type-options':'nosniff'});}
+      }
+      if(req.method==='POST'&&u.pathname==='/api/prep/posts') {
+        let body='';for await(const chunk of req){body+=chunk;if(Buffer.byteLength(body)>prepRequestLimit)return send(res,413,{code:'TOO_LARGE',error:'请求过大'});}
+        const a=JSON.parse(body);if(!a||Object.keys(a).some(k=>!['type','id','platform','platforms','input','actor'].includes(k)))throw Object.assign(Error('操作字段不对；不接受 submit 或发布授权'),{code:'INVALID_INPUT'});
+        if(['publish','submit'].includes(a.type))return send(res,403,{code:'PUBLISH_DISABLED',error:'Liu要求最后一步由本人操作；接口只填写，不发布'});
+        if(actions.some(a=>!a.done)||prep.busy()||posts.busy())return send(res,409,{code:'BUSY',error:'另一个操作正在运行，请先查状态'});
+        if(a.type==='create')return send(res,200,{ok:true,post:posts.create(a.input,a.actor)});
+        if(a.type==='update')return send(res,200,{ok:true,post:posts.update(a.id,a.platform,a.input,a.actor)});
+        if(a.type==='generate')return send(res,202,{ok:true,post:posts.generate(a.id,a.platforms,a.actor)});
+        if(a.type==='check')return send(res,200,{ok:true,...posts.check(a.id,a.platform,a.actor)});
+        if(a.type==='fill')return send(res,202,{ok:true,post:posts.fill(a.id,a.platform,a.actor)});
+      }
+      return send(res,404,{code:'NOT_FOUND',error:'接口或动作不存在'});
+    }catch(e){return send(res,e.code==='NOT_FOUND'?404:e.code==='BUSY'?409:400,{code:e.code??'PREP_FAILED',error:redactL1(e.message,[W.key,W.widgetToken])});}
+  }
   if (u.pathname === '/api/prep/record' && req.method === 'GET') {
     try { return send(res,200,{ok:true,record:ageReview.forRecords([prep.get(u.searchParams.get('id'))])[0]}); }
     catch { return send(res,404,{error:'准备任务不存在'}); }
@@ -353,11 +381,12 @@ export async function handle(req, res) {
     for await (const chunk of req) { body += chunk; if (Buffer.byteLength(body) > prepRequestLimit) return send(res, 413, { error: '请求过大' }); }
     try {
       const a = JSON.parse(body);
+      if(['publish','submit'].includes(a?.type))return send(res,403,{code:'PUBLISH_DISABLED',error:'Liu 2026-11-23 11:33 要求：此入口只填写，最后发布由本人操作'});
       if (!a || Object.keys(a).some(k => !['type', 'input', 'id','actor','approval'].includes(k)) || (a.actor!==undefined&&!['check','execute','publish'].includes(a.type)) || a.approval!==undefined&&a.type!=='publish') throw new Error('操作字段不对');
       if (actions.some(a => !a.done) || prep.busy()) return send(res, 409, { error: '另一个操作还在运行' });
       if (['window','window-check'].includes(a.type)) return send(res,200,{ok:true,window:await prep.window(a.id,a.type==='window')});
       if (a.type==='release-window') return send(res,200,{ok:true,record:prep.releaseWindow(a.id)});
-      const record = a.type === 'create' ? prep.create(a.input) : ['check', 'execute','publish'].includes(a.type) ? prep.start(a.id, a.type,a.actor,a.approval) : null;
+      const record = a.type === 'create' ? prep.create(a.input) : ['check', 'execute'].includes(a.type) ? prep.start(a.id, a.type,a.actor) : null;
       if (!record) throw new Error('不支持此操作');
       return send(res, 200, { ok: true, record });
     } catch (e) { return send(res, 400, { error: redactL1(e.message, [W.key, W.widgetToken]) }); }

@@ -17,7 +17,7 @@ export async function projectDraftContract({base='http://127.0.0.1:8787',request
   const response=await request(base+'/api/prep/contract',{redirect:'error',signal:AbortSignal.timeout(4000)});
   if(response.status===404)return {version:1};
   const result=await response.json();
-  if(!response.ok||![2,3].includes(result.version))throw Error('麦田接入版本未确认，未提交');
+  if(!response.ok||![2,3,4].includes(result.version))throw Error('麦田接入版本未确认，未提交');
   return result;
 }
 
@@ -42,7 +42,7 @@ export async function readProjectDraft({id, base='http://127.0.0.1:8787', reques
 }
 
 export async function continueProjectDraft({id, action, actor, authorizationRef, base='http://127.0.0.1:8787', request=fetch}) {
-  if (!['check','prepare','publish'].includes(action)) throw new Error('仅支持检查稿件、填写/保存草稿或显式小红书发布');
+  if (!['check','prepare'].includes(action)) throw new Error('仅支持检查稿件和填写/保存草稿；PUBLISH_DISABLED，不能发布');
   const current = await readProjectDraft({id, base, request});
   if (!current.source) throw new Error('此入口只继续带来源项目的交稿记录');
   if (!['xhs','wechat'].includes(current.platform)) throw new Error('X 在此仅交稿、下载文图包或登记已核验回执；不由此命令操作平台');
@@ -50,19 +50,10 @@ export async function continueProjectDraft({id, action, actor, authorizationRef,
     throw new Error(`稿件当前状态为 ${current.draftState}；填写前须检查通过，结果未确认或已完成的稿件不重跑`);
   }
   const attributed=actor?normalizePrepAgent(actor):null;
-  let approval;
-  if(action==='publish') {
-    if(current.platform!=='xhs')throw Error('此动作仅支持小红书；公众号只存草稿');
-    if(!attributed)throw Error('AI发布必须记录实际执行AI和会话');
-    const contract=await projectDraftContract({base,request});
-    if(contract.version!==3||!contract.finalPublishPlatforms?.includes('xhs'))throw Error('运行版尚不支持显式发布，未提交');
-    const {publicationApproval}=await import('./prep-publication.mjs');
-    approval=publicationApproval({reference:authorizationRef,checkedDigest:current.checkedDigest},current.checkedDigest);
-  }
   let response;
   try {
     response = await request(`${base}/api/prep`, {method:'POST',headers:{'content-type':'application/json',origin:base},
-      body:JSON.stringify({type:action==='prepare'?'execute':action,id,...(attributed?{actor:attributed}:{}),...(approval?{approval}:{})}),redirect:'error',signal:AbortSignal.timeout(4000)});
+      body:JSON.stringify({type:action==='prepare'?'execute':action,id,...(attributed?{actor:attributed}:{})}),redirect:'error',signal:AbortSignal.timeout(4000)});
   } catch (error) { throw new Error('操作响应未确认；先用 --status 查询原记录，不重复执行', {cause:error}); }
   const result = await response.json();
   if (!response.ok || result.ok!==true || result.record?.id!==id) throw new Error(result.error || `麦田未确认操作（${response.status}）；先查原记录，不重发操作`);
@@ -70,7 +61,8 @@ export async function continueProjectDraft({id, action, actor, authorizationRef,
 }
 
 function draftRequest(input) {
-  const {source} = normalizePrep(input);
+  // Local CLI only checks the broad supported envelope; server applies its actual tier.
+  const {source} = normalizePrep(input,{publishPrep:{x:{premium:true}}});
   if (!source) throw new Error('项目交稿需要来源项目、栏目和运行编号');
   const body = JSON.stringify({type:'create', input});
   if (Buffer.byteLength(body) > prepRequestLimit) throw new Error('稿件请求过大');

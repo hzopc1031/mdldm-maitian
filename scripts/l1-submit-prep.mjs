@@ -12,6 +12,7 @@ async function main() {
   const args = [], explicit = {};
   const options={'--agent':'runtime','--agent-name':'name','--session':'sessionId','--authorization-ref':'authorizationRef'};
   const raw=process.argv.slice(2);
+  if(raw.includes('--publish')||raw.includes('--submit'))throw Error('PUBLISH_DISABLED：只支持检查和填写，不能发布');
   for(let i=0;i<raw.length;i++) {
     const key=options[raw[i]];
     if(!key) { args.push(raw[i]); continue; }
