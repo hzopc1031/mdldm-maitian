@@ -9,13 +9,12 @@ export function prepareSections(esc,data) {
   if(activeColumn!=='全部'&&!columns.includes(activeColumn))activeColumn='全部';
   const shown=activeColumn==='全部'?data.rows:data.rows.filter(row=>row.column===activeColumn);
   const filters=columns.length>1?`<div class="status-filters" role="group" aria-label="按栏目筛选">${['全部',...columns].map(column=>`<button class="btn" type="button" data-column-filter="${esc(column)}" aria-pressed="${column===activeColumn}">${esc(column)}</button>`).join('')}</div>`:'';
-  const prompt = `<details class="panel status-section ai-prompt"><summary id="ai-prompt-heading">给 AI 的接入指令</summary><p class="note">整段复制给要交稿的 AI。它必须在本机执行命令或 HTTP；定时时间只是计划，到点不会自动发布。</p><pre data-ai-prompt>展开后加载…</pre><div class="btns"><button class="btn" type="button" data-copy-prompt>复制指令</button></div></details>`;
   return `<section class="panel status-section" aria-labelledby="status-records-heading"><h2 class="h2" id="status-records-heading">发布记录</h2><p class="note">每份原稿保留一行；未关联原稿的旧准备记录单独列出。定时时间只是计划，不会自动发布。</p>${filters}<div class="status-records">${shown.map(row=>`<article class="status-row" tabindex="-1" data-status-row="${esc(row.id)}"><div class="status-title"><h3>${esc(row.title)}</h3><p class="note"><time>${esc(time(row.at))}</time> · ${row.kind==='post'?'原稿':'旧记录'} ${esc(short(row.id))}${row.column?` · ${esc(row.column)}`:''}${row.scheduledAt?` · 计划 <time>${esc(time(row.scheduledAt))}</time>`:''}</p>${row.note?`<p class="note" title="${esc(row.note)}">备注：${esc(row.note.replace(/\s+/g,' ').slice(0,80))}${row.note.replace(/\s+/g,' ').length>80?'…':''}</p>`:''}</div><div class="status-tags" aria-label="平台状态">${row.items.map(item=>tag(esc,item)).join('')||'<span class="note">暂无平台版本</span>'}</div></article>`).join('')||'<p class="note">暂无发布记录。</p>'}</div></section>
   <section class="panel status-section" aria-labelledby="status-pending-heading"><h2 class="h2" id="status-pending-heading">待你处理</h2><p class="note">已填好的稿件等待你核对并点最终发布。切到窗口仅置前，不填写、不刷新。</p>${data.pending.map(item=>`<article class="status-pending" data-pending-record="${esc(item.recordId??'')}"><div><h3>${esc(item.title)}</h3>${tag(esc,item)} ${reference(esc,item)}</div>${item.canActivate?`<button class="btn" data-status-window="${esc(item.recordId)}">切到窗口</button>`:'<span class="note">请手动核对原窗口</span>'}</article>`).join('')||'<p class="note">暂无待你处理的稿件。</p>'}</section>
-  <section class="panel status-section" aria-labelledby="status-failures-heading"><h2 class="h2" id="status-failures-heading">失败详情</h2><p class="note">未知结果请先核对原平台，避免重复执行。旧记录缺少的报错字段不补造。</p>${data.failures.map(item=>`<details class="status-failure" data-failure-record="${esc(item.recordId??'')}"><summary>${esc(item.title)} · ${esc(item.name)} · ${esc(item.label)} ${reference(esc,item)}</summary><dl>${Object.entries(item.detail).map(([key,value])=>`<dt>${esc(key)}</dt><dd><pre>${esc(value||'未记录')}</pre></dd>`).join('')}</dl></details>`).join('')||'<p class="note">暂无失败或未知记录。</p>'}</section>${prompt}`;
+  <section class="panel status-section" aria-labelledby="status-failures-heading"><h2 class="h2" id="status-failures-heading">失败详情</h2><p class="note">未知结果请先核对原平台，避免重复执行。旧记录缺少的报错字段不补造。</p>${data.failures.map(item=>`<details class="status-failure" data-failure-record="${esc(item.recordId??'')}"><summary>${esc(item.title)} · ${esc(item.name)} · ${esc(item.label)} ${reference(esc,item)}</summary><dl>${Object.entries(item.detail).map(([key,value])=>`<dt>${esc(key)}</dt><dd><pre>${esc(value||'未记录')}</pre></dd>`).join('')}</dl></details>`).join('')||'<p class="note">暂无失败或未知记录。</p>'}</section>`;
 }
 export function preparePage(esc,data) {
- return `<main class="publish-page status-page"><header class="publish-heading"><div><h1 class="h1">发布状态</h1><p class="lead">内容由 AI 提交，这里查看进度和待办。</p></div><div class="btns"><button class="btn" type="button" data-open-ai-prompt>复制 AI 接入指令</button><span class="status-readonly">只读</span></div></header><p id="status-message" class="note" role="status" aria-live="polite">公众号仅存草稿；X 和小红书可按稿件设置直接发布，发布后核对公开链接。</p><div id="status-sections">${prepareSections(esc,data)}</div></main>`;
+ return `<main class="publish-page status-page"><header class="publish-heading"><div><h1 class="h1">发布状态</h1><p class="lead">内容由 AI 提交，这里查看进度和待办。</p></div><div class="btns"><button class="btn" type="button" data-copy-prompt>复制 AI 接入指令</button><span class="status-readonly">只读</span></div></header><p id="status-message" class="note" role="status" aria-live="polite">公众号仅存草稿；X 和小红书可按稿件设置直接发布，发布后核对公开链接。</p><div id="status-sections">${prepareSections(esc,data)}</div></main>`;
 }
 export function initPreparePage({esc,api,toast}) {
  const root=document.querySelector('.status-page');if(!root)return;
@@ -32,24 +31,14 @@ export function initPreparePage({esc,api,toast}) {
    const sections=root.querySelector('#status-sections');
    if(lastData&&sections)sections.innerHTML=prepareSections(esc,lastData);
  });
- const openPrompt=()=>{const panel=root.querySelector('.ai-prompt');if(!panel)return;panel.open=true;panel.scrollIntoView({block:'start',behavior:'smooth'});};
- root.addEventListener('click',event=>{
-   if(!event.target.closest('[data-open-ai-prompt]'))return;
-   event.preventDefault();openPrompt();
- });
- if(new URLSearchParams(location.hash.split('?')[1]||'').get('ai')==='1')setTimeout(openPrompt,0);
- root.addEventListener('toggle',async event=>{
-   const panel=event.target;if(!panel.matches?.('.ai-prompt')||!panel.open)return;
-   const pre=panel.querySelector('[data-ai-prompt]');if(!pre||pre.dataset.loaded)return;
-   try{const response=await fetch('/api/prep/ai-prompt');if(!response.ok)throw Error('暂未取得接入指令');pre.textContent=await response.text();pre.dataset.loaded='1';}
-   catch(error){pre.textContent='暂未取得接入指令：'+error.message;}
- },true);
  root.addEventListener('click',async event=>{
    const button=event.target.closest('[data-copy-prompt]');if(!button)return;
-   const pre=root.querySelector('.ai-prompt [data-ai-prompt]');
-   if(!pre||!pre.dataset.loaded){toast('先展开接入指令再复制');return;}
-   try{await navigator.clipboard.writeText(pre.textContent);button.textContent='已复制';setTimeout(()=>button.textContent='复制指令',1500);}
-   catch{const range=document.createRange();range.selectNodeContents(pre);const selection=getSelection();selection.removeAllRanges();selection.addRange(range);toast('已选中，按 Ctrl+C 复制');}
+   button.disabled=true;
+   try{const response=await fetch('/api/prep/ai-prompt');if(!response.ok)throw Error('暂未取得接入指令');
+     await navigator.clipboard.writeText(await response.text());
+     toast('已复制 AI 接入指令，可直接粘贴');}
+   catch(error){toast('复制失败：'+error.message);}
+   finally{button.disabled=false;}
  });
  let refreshing=false;
  const timer=setInterval(async()=>{

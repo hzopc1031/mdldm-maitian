@@ -189,7 +189,7 @@ try {
   assert.equal((await request('/api/prep/contract')).json().version,4);
   assert.deepEqual((await request('/api/prep/contract')).json().publishPlatforms,['x','xhs']);
   assert.match((await request('/api/prep/rules-module')).body,/xWeightedCount/);
-  const aiPrompt=await request('/api/prep/ai-prompt');assert.equal(aiPrompt.code,200);assert.match(aiPrompt.body,/Origin: http:\/\/127\.0\.0\.1:8787/);assert.match(aiPrompt.body,/scheduledAt/);assert.match(aiPrompt.body,/不能发布|不发布/);
+  const aiPrompt=await request('/api/prep/ai-prompt');assert.equal(aiPrompt.code,200);assert.match(aiPrompt.body,/Origin: http:\/\/127\.0\.0\.1:8787/);assert.match(aiPrompt.body,/scheduledAt/);assert.match(aiPrompt.body,/mode:"publish"/);
   assert.equal((await request('/api/prep/posts',{action:{type:'create',input:{title:'test',content:'test'}}})).code,403);
   const postHeaders={origin:`http://127.0.0.1:${server.address().port}`};
   const postActor={runtime:'codex',sessionId:'selftest-web'},postAt=new Date(Date.now()+86400000).toISOString();
@@ -301,7 +301,7 @@ try {
   vm.runInContext('loadPreparePage=async()=>prepPageModule;api=async()=>statusData;location.hash="#/prepare";',context);
   const prepHtml=await vm.runInContext('vPrepare()',context);
   assert.match(prepHtml,/发布记录/);assert.match(prepHtml,/待你处理/);assert.match(prepHtml,/失败详情/);
-  assert.match(prepHtml,/给 AI 的接入指令/);assert.match(prepHtml,/data-copy-prompt/);assert.match(prepHtml,/data-open-ai-prompt/);
+  assert.match(prepHtml,/复制 AI 接入指令/);assert.match(prepHtml,/data-copy-prompt/);assert.doesNotMatch(prepHtml,/data-ai-prompt|data-open-ai-prompt/);
   assert.doesNotMatch(prepHtml,/<textarea|<input|data-action=|data-prep=|生成各平台版本|新建原稿/);
   context.input.health.platforms.x.last={type:'doctor',done:true,ok:true,endedAt:new Date().toISOString()};
   assert.match(vm.runInContext('vSystem()',context),/检查账号已完成/);
