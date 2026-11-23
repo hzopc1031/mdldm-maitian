@@ -30,7 +30,11 @@ export function prepCapabilities(config = {}, env = process.env) {
       ? settings?.browserExecution === true && isDedicatedXProfile(settings.browserProfile)
       : settings?.browserExecution !== false && installed && keepWindow);
     const inspectEnabled = config.l1?.[platform]?.browserExecution !== false;
-    return [platform, { script, installed, browserEnabled: enabled, inspectEnabled, publishEnabled:false,
+    const draftScript = platform === 'xhs' ? path.join(root, 'xhs-publish', 'scripts', 'save-draft.mjs') : null;
+    const draft = platform === 'wechat' ? { supported: true, label: '保存公众号草稿（不发表）' }
+      : platform === 'xhs' ? (draftScript && fs.existsSync(draftScript) ? { supported: true, label: '保存小红书草稿箱（不发布）' } : { supported: false, label: '本地未安装小红书存草稿脚本' })
+      : { supported: false, label: 'X 只提供文图包下载，不写草稿' };
+    return [platform, { script, installed, browserEnabled: enabled, inspectEnabled, publishEnabled:false, draft, ...(draftScript ? { draftScript } : {}),
       mode: platform === 'x' ? '正文和最多4张图可下载为文图包；编辑器填写须显式启用专用 Chrome，仅填写不发布' : platform === 'xhs' ? '本地 xhs-publish，固定 --account ai；只填写留窗，由本人点击发布' : '本地 wechat-publish，只保存草稿并核对成功提示',
       reason: platform === 'x' ? enabled ? '已启用专用 Chrome 填写；执行时重新核验账号、空白编辑页和完整文图，填好后由本人处理。' : 'X 编辑器填写未启用；需在本地配置启用并指定专用 Chrome，仍可下载文图包。' : !installed ? '本地 DSH skill 未安装；不回退旧 hub' : !keepWindow ? '本地 skill 不支持保留窗口，未适配' : enabled ? '使用本地技能专用窗口；执行时核验可见账号。登录、素材检查和本次保存回执决定结果。' : BROWSER_BLOCK }];
   }));
@@ -270,9 +274,14 @@ export function createPrepService({ db, home, root, config, secrets = [], spawnC
   }
   function start(id, kind, caller, approval) {
     const actor=caller===undefined?null:normalizePrepAgent(caller);
-    if (db.prepare("SELECT 1 FROM publish_preparations WHERE json_extract(record,'$.state')='running'").get()) throw new Error('已有准备操作在运行');
-    if (!['check', 'execute'].includes(kind)) throw new Error('PUBLISH_DISABLED：此入口只填写，不发布');
+    if(db.prepare("SELECT 1 FROM publish_preparations WHERE json_extract(record,'$.state')='running'").get()) throw new Error('已有准备操作在运行');
+    if (!['check', 'execute','draft'].includes(kind)) throw new Error('PUBLISH_DISABLED：此入口只填写，不发布');
     const r = get(id), cap = prepCapabilities(config, env)[r.platform];
+    if(kind==='draft'){
+      if(r.platform==='wechat')kind='execute';
+      else if(r.platform!=='xhs')throw new Error('此平台不支持仅存草稿：X 只下载文图包');
+      else if(!cap.draft?.supported)throw new Error(cap.draft?.label||'小红书存草稿未安装');
+    }
     if (r.readOnlyReceipt) throw new Error('历史回执只读；不能重新检查或上传');
     if (r.platform === 'x') return startX(r, kind, cap, actor);
     if (kind === 'execute' && ['awaiting_user','draft_saved'].includes(r.state)) {
@@ -290,6 +299,7 @@ export function createPrepService({ db, home, root, config, secrets = [], spawnC
     const digest = jobDigest(file);
     if (kind !== 'check' && r.checkedDigest !== digest) throw new Error('任务已变化，必须重新检查');
     const executionFile=file;
+    const draftOut=kind==='draft'?path.join(path.dirname(file),'draft.json'):null;
     let output = '', stderr = Buffer.alloc(0), stderrTruncated=false, done = false;
     const operation={kind,actor,startedAt:new Date().toISOString()};
     r.operations=[...(r.operations??[]),operation];
@@ -299,6 +309,13 @@ export function createPrepService({ db, home, root, config, secrets = [], spawnC
       let result;
       try {
         if (error) throw error;
+        if(kind==='draft'){
+          try { result=JSON.parse(fs.readFileSync(draftOut,'utf8')); } catch { throw new Error('小红书存草稿回执无法读取；结果未确认'); }
+          if(result?.ok!==true)throw new Error(redactL1(skillText(result?.error||'小红书存草稿未确认；先核对草稿箱'),secrets));
+          r.state='draft_saved';
+          r.note='已存小红书草稿箱（未发布）；请到发布页草稿箱核对，不要重复填写';
+          r.evidence={submitted:false,savedAsDraft:true,account:'ai',url:typeof result.url==='string'?result.url:null,steps:Array.isArray(result.steps)?result.steps.slice(0,10):[]};
+        }else{
         try { result = JSON.parse(output); } catch { throw new Error('本地 skill 回执不是有效 JSON；结果未确认'); }
         if (kind === 'check' && result?.ok !== true) throw new Error('本地 skill 离线检查未通过；请检查素材、逐图审阅记录和图片哈希，不代表可上传');
         r.state = acceptPrepResult(r.platform, kind, code, result);
@@ -316,6 +333,7 @@ export function createPrepService({ db, home, root, config, secrets = [], spawnC
             confirmation:skillText(result.confirmation),bodyImageCount:result.bodyImageCount??null,coverBodyImageIndex:result.coverBodyImageIndex??null,
             skill:{code:skillText(result.code,80),message:redactL1(skillText(result.message),secrets),hint:redactL1(skillText(result.hint),secrets),stderrTail:redactL1(stderrTail(stderr.toString('utf8'),stderrTruncated),secrets)},
             draftListCheck:result.draftListCheck?{verified:result.draftListCheck.verified===true,matches:result.draftListCheck.matches??null,screenshot:skillText(result.draftListCheck.screenshot),error:skillText(result.draftListCheck.error)}:null } : {}) };
+        }
       } catch (e) {
         r.state = kind !== 'check' ? 'unknown' : 'check_failed';
         r.error = redactL1(skillText(e.message), secrets);
@@ -340,7 +358,8 @@ export function createPrepService({ db, home, root, config, secrets = [], spawnC
       save(r);
     };
     try {
-      const child = spawnChild(process.execPath, prepCommand(r.platform, kind, { script: cap.script, jobFile: executionFile }),
+      const args = kind==='draft' ? [cap.draftScript, executionFile, draftOut] : prepCommand(r.platform, kind, { script: cap.script, jobFile: executionFile });
+      const child = spawnChild(process.execPath, args,
         { cwd: root, env: { ...env, HUB_NO_WEB: '1', ...(r.platform==='wechat'?{PUBLISH_SKILL_DATA:'D:/AIInfra/agent-publish'}:{}) }, shell: false, windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'] });
       child.stdout?.on('data', d => { output += d; if (output.length > 2e6) { output = ''; finish(null, new Error('回执过大，结果未确认')); } });
       child.stderr?.on('data', d => {stderr=Buffer.concat([stderr,Buffer.from(d)]);if(stderr.length>65536){stderr=stderr.subarray(-65536);stderrTruncated=true;}});
@@ -373,5 +392,5 @@ export function createPrepService({ db, home, root, config, secrets = [], spawnC
       r.windowEvidence={...result,checkedAt:new Date().toISOString()}; save(r); return result;
     }, busy: () => !!db.prepare("SELECT 1 FROM publish_preparations WHERE json_extract(record,'$.state')='running'").get(),
     bundle: id => { if (get(id).platform !== 'x') throw new Error('仅 X 提供文图包'); return xDraftBundle(JSON.parse(fs.readFileSync(jobFile(id),'utf8'))); },
-    publicCapabilities: () => Object.fromEntries(Object.entries(prepCapabilities(config, env)).map(([p, { script, ...cap }]) => [p, cap])) };
+    publicCapabilities: () => Object.fromEntries(Object.entries(prepCapabilities(config, env)).map(([p, { script, draftScript, ...cap }]) => [p, cap])) };
 }

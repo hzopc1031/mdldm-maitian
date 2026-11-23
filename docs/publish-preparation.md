@@ -2,6 +2,8 @@
 
 按 Liu 11:33 要求，原稿在上、X/小红书/公众号三张独立卡片在下；11:37 明确 AI 只用本机 HTTP，不新建或修改 skill。以下新规则覆盖本文旧版关于9张图、2000字符、64字标题及显式小红书发布的历史说明。
 
+2026-11-23 晚补充：`/api/prep/posts` 建稿必填栏目、定时时间、AI 来源三项，定时只记录计划不自动发布；见[本机 HTTP 接口](publish-api.md)。下文旧 CLI 与 `source.column` 写法只适用于历史记录。
+
 ## 修复
 
 - 移除「发布小红书」按钮及后端提交路径。旧 POST type:publish 一律403；命令构建不接受 publish，不生成 --submit；契约 v4 的 finalPublishPlatforms 为空。旧已提交/已发布回执保留只读。

@@ -30,6 +30,7 @@ export function prepStatus({posts=[],records=[],catalog=PLATFORM_CATALOG,config=
       canActivate:platform==='xhs'&&state==='awaiting_user'&&!record?.windowReleased&&!!record?.id,detail};
   }
   const rows=posts.map(post=>({id:post.id,kind:'post',title:clean(post.master?.title||'未命名原稿'),at:post.createdAt??null,
+    column:post.column?clean(post.column):null,scheduledAt:post.scheduledAt??null,note:post.note?clean(post.note):null,
     items:[...new Set([...Object.keys(post.editions??{}),...selected])].map(platform=>{
       const edition=post.editions?.[platform],record=byRecord.get(edition?.preparationId);
       if(record)linked.add(record.id);
@@ -37,7 +38,7 @@ export function prepStatus({posts=[],records=[],catalog=PLATFORM_CATALOG,config=
       const state=record?.state??edition?.state??(generated&&post.generation?.state==='done'?'generated':generated&&post.generation?.state==='failed'?'failed':generated&&post.generation?.state==='running'?'running':'editing');
       return item(platform,state,record,{error:post.generation?.error});
     })}));
-  for(const record of records)if(!linked.has(record.id))rows.push({id:record.id,kind:'legacy',title:clean(record.title||'未命名准备记录'),at:record.createdAt??null,items:[item(record.platform,record.state,record)]});
+  for(const record of records)if(!linked.has(record.id))rows.push({id:record.id,kind:'legacy',title:clean(record.title||'未命名准备记录'),at:record.createdAt??null,column:record.source?.column?clean(record.source.column):null,scheduledAt:record.scheduledAt??null,note:record.note?clean(record.note):null,items:[item(record.platform,record.state,record)]});
   rows.sort((a,b)=>String(b.at??'').localeCompare(String(a.at??'')));
   const entries=rows.flatMap(row=>row.items.map(item=>({...item,rowId:row.id,title:row.title})));
   return {ok:true,readOnly:true,submit:false,finalPublishPlatforms:[],platforms,rows,

@@ -328,7 +328,15 @@ export async function handle(req, res) {
   }
   if (u.pathname === '/api/prep/rules-module' && req.method==='GET') return send(res,200,fs.readFileSync(path.join(DIR,'platform-rules.mjs')),'text/javascript; charset=utf-8');
   if (u.pathname === '/api/prep' && req.method === 'GET') return send(res, 200, { capabilities: prep.publicCapabilities(), rules:platformRules(config), records: ageReview.forRecords(prep.list()) });
-  if (u.pathname === '/api/prep/contract' && req.method === 'GET') return send(res,200,{version:4,columnOnly:true,agentAttribution:'caller_reported',operationActors:true,finalPublishPlatforms:[],submit:false,manuscriptVersion:2});
+  if (u.pathname === '/api/prep/contract' && req.method === 'GET') return send(res,200,{version:4,columnOnly:true,agentAttribution:'caller_reported',operationActors:true,finalPublishPlatforms:[],submit:false,manuscriptVersion:2,requiredCreate:['column','scheduledAt','actor'],scheduledPublish:'recorded_only',noteLimit:500,fillModes:['fill','draft']});
+  if (u.pathname === '/api/prep/ai-prompt' && req.method === 'GET') {
+    try {
+      const markdown=fs.readFileSync(path.join(ROOT,'docs','ai-publish-prompt.md'),'utf8');
+      const block=/```text\r?\n([\s\S]*?)```/.exec(markdown);
+      if(!block)throw new Error('prompt block missing');
+      return send(res,200,block[1],'text/plain; charset=utf-8');
+    } catch { return send(res,404,{code:'NOT_FOUND',error:'接入指令尚未生成'}); }
+  }
   if(u.pathname.startsWith('/api/prep/posts')) {
     if(!isLoopback(req.socket.remoteAddress)||!localRequestAllowed(req))return send(res,403,{code:'LOCAL_ONLY',error:'仅允许带同源 Origin 的本机直连调用'});
     try {
@@ -341,14 +349,15 @@ export async function handle(req, res) {
       }
       if(req.method==='POST'&&u.pathname==='/api/prep/posts') {
         let body='';for await(const chunk of req){body+=chunk;if(Buffer.byteLength(body)>prepRequestLimit)return send(res,413,{code:'TOO_LARGE',error:'请求过大'});}
-        const a=JSON.parse(body);if(!a||Object.keys(a).some(k=>!['type','id','platform','platforms','input','actor'].includes(k)))throw Object.assign(Error('操作字段不对；不接受 submit 或发布授权'),{code:'INVALID_INPUT'});
+        const a=JSON.parse(body);if(!a||Object.keys(a).some(k=>!['type','id','platform','platforms','input','actor','column','scheduledAt','note','mode'].includes(k)))throw Object.assign(Error('操作字段不对；不接受 submit 或发布授权'),{code:'INVALID_INPUT'});
         if(['publish','submit'].includes(a.type))return send(res,403,{code:'PUBLISH_DISABLED',error:'Liu要求最后一步由本人操作；接口只填写，不发布'});
         if(actions.some(a=>!a.done)||prep.busy()||posts.busy())return send(res,409,{code:'BUSY',error:'另一个操作正在运行，请先查状态'});
-        if(a.type==='create')return send(res,200,{ok:true,post:posts.create(a.input,a.actor)});
+        if(a.type==='create')return send(res,200,{ok:true,post:posts.create(a.input,a.actor,{column:a.column,scheduledAt:a.scheduledAt,note:a.note})});
+        if(a.type==='meta')return send(res,200,{ok:true,post:posts.meta(a.id,{column:a.column,scheduledAt:a.scheduledAt,note:a.note},a.actor)});
         if(a.type==='update')return send(res,200,{ok:true,post:posts.update(a.id,a.platform,a.input,a.actor)});
         if(a.type==='generate')return send(res,202,{ok:true,post:posts.generate(a.id,a.platforms,a.actor)});
         if(a.type==='check')return send(res,200,{ok:true,...posts.check(a.id,a.platform,a.actor)});
-        if(a.type==='fill')return send(res,202,{ok:true,post:posts.fill(a.id,a.platform,a.actor)});
+        if(a.type==='fill')return send(res,202,{ok:true,post:posts.fill(a.id,a.platform,a.actor,a.mode)});
       }
       return send(res,404,{code:'NOT_FOUND',error:'接口或动作不存在'});
     }catch(e){return send(res,e.code==='NOT_FOUND'?404:e.code==='BUSY'?409:400,{code:e.code??'PREP_FAILED',error:redactL1(e.message,[W.key,W.widgetToken])});}

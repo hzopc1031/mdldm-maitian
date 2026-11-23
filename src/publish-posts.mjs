@@ -11,6 +11,22 @@ import {platforms,validateEdition,platformRules} from './platform-rules.mjs';
 const fields=['title','content','images','cover','topics','video','digest','caption','author','imagePositions','promotionReview'];
 const locked=['running','unknown','awaiting_user','draft_saved','published','submitted','already_exists','failed'];
 const fail=(code,message)=>{throw Object.assign(Error(message),{code});};
+const isoTime=/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(?::\d{2}(?:\.\d{1,9})?)?(?:Z|[+-]\d{2}:\d{2})$/;
+export function postColumn(value) {
+  if(typeof value!=='string'||!value.trim()||value.trim().length>80||/[\x00-\x1f\x7f]/.test(value))fail('INVALID_INPUT','建稿需要栏目：非空文字，最多80字，不含控制字符');
+  return value.trim();
+}
+export function postSchedule(value) {
+  if(typeof value!=='string'||!isoTime.test(value))fail('INVALID_INPUT','定时时间须为带时区的 ISO 时间，如 2026-11-24T09:00:00+08:00');
+  const at=Date.parse(value);if(!Number.isFinite(at))fail('INVALID_INPUT','定时时间无法解析');
+  if(at<=Date.now())fail('INVALID_INPUT','定时时间必须晚于当前时间');
+  return new Date(at).toISOString();
+}
+export function postNote(value) {
+  if(value===null||value===undefined)return null;
+  if(typeof value!=='string'||value.trim().length>500||/[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]/.test(value))fail('INVALID_INPUT','备注最多500字，可换行，不含控制字符');
+  return value.trim()||null;
+}
 export function manuscript(input) {
   if(!input||typeof input!=='object'||Array.isArray(input)||Object.keys(input).some(k=>!fields.includes(k)))fail('INVALID_INPUT','原稿只接受文字、图片、封面、话题等稿件字段，不接受 submit 或凭据');
   for(const key of ['title','content','digest','caption','author','video'])if(input[key]!=null&&(typeof input[key]!=='string'||input[key].length>100000))fail('INVALID_INPUT',key+' 须为文字');
@@ -34,13 +50,25 @@ export function createPostService({db,home,config,prep,spawnChild=spawn,env=proc
   const all=()=>db.prepare('SELECT record FROM publish_posts ORDER BY rowid DESC LIMIT 50').all().map(row=>JSON.parse(row.record));
   for(const {record} of db.prepare("SELECT record FROM publish_posts WHERE json_extract(record,'$.generation.state')='running'").all()){const r=JSON.parse(record);r.generation={...r.generation,state:'failed',code:'INTERRUPTED',error:'服务重启，改稿未完成，原稿保留'};save(r);}
   const actor=value=>value===undefined?null:normalizePrepAgent(value);
-  const view=r=>({...r,editions:Object.fromEntries(platforms.map(p=>{const e=r.editions[p],record=e.preparationId?prep.get(e.preparationId):null;return[p,{...e,validation:validateEdition(p,e,config),state:record?.state??'editing',record}]}))});
+  const view=r=>({...r,column:r.column??null,scheduledAt:r.scheduledAt??null,note:r.note??null,editions:Object.fromEntries(platforms.map(p=>{const e=r.editions[p],record=e.preparationId?prep.get(e.preparationId):null;return[p,{...e,validation:validateEdition(p,e,config),state:record?.state??'editing',record}]}))});
   const get=id=>view(raw(id));
   const busy=()=>!!db.prepare("SELECT 1 FROM publish_posts WHERE json_extract(record,'$.generation.state')='running'").get();
   function unlocked(r,p){if(r.generation?.state==='running')fail('BUSY','正在生成版本，请稍候');const id=r.editions[p]?.preparationId;if(id&&locked.includes(prep.get(id).state))fail('EDITION_LOCKED','此版已填写或结果未确认，禁止改稿或重跑；先人工核对原平台');}
-  function create(input,caller) {
+  function create(input,caller,meta={}) {
     const master=manuscript(input);if(!master.content.trim())fail('INVALID_INPUT','请填写原稿正文');
-    const id=crypto.randomUUID(),r={version:2,id,master,editions:Object.fromEntries(platforms.map(p=>[p,{...master,cover:master.cover??master.images[0]??null}])),generation:{state:'idle'},createdAt:new Date().toISOString(),actor:actor(caller),actorAttribution:'caller_reported',revision:1,operations:[]};save(r);return get(id);
+    if(caller===undefined)fail('INVALID_INPUT','建稿需要 AI 来源：runtime、sessionId');
+    let source;
+    try{source=actor(caller);}catch(error){fail('INVALID_INPUT',error.message);}
+    const record={version:2,id:crypto.randomUUID(),column:postColumn(meta.column),scheduledAt:postSchedule(meta.scheduledAt),note:postNote(meta.note),master,editions:Object.fromEntries(platforms.map(p=>[p,{...master,cover:master.cover??master.images[0]??null}])),generation:{state:'idle'},createdAt:new Date().toISOString(),actor:source,actorAttribution:'caller_reported',revision:1,operations:[]};
+    save(record);return get(record.id);
+  }
+  function meta(id,patch={},caller) {
+    const r=raw(id),fields=[];
+    if(patch.column!==undefined){r.column=postColumn(patch.column);fields.push('column');}
+    if(patch.scheduledAt!==undefined){r.scheduledAt=postSchedule(patch.scheduledAt);fields.push('scheduledAt');}
+    if(patch.note!==undefined){r.note=postNote(patch.note);fields.push('note');}
+    if(!fields.length)fail('INVALID_INPUT','改元信息需要栏目、定时时间或备注');
+    r.operations.push({kind:'meta',fields,actor:actor(caller),at:new Date().toISOString()});r.revision++;save(r);return get(id);
   }
   function update(id,platform,input,caller) {
     const r=raw(id);if(platform==='master'){for(const p of platforms)unlocked(r,p);r.master=manuscript(input);}else{if(!platforms.includes(platform))fail('INVALID_INPUT','不支持的平台');unlocked(r,platform);const edition=manuscript(input);r.editions[platform]=edition;}
@@ -84,8 +112,14 @@ export function createPostService({db,home,config,prep,spawnChild=spawn,env=proc
     if(p!=='x')prep.start(edition.preparationId,'check',caller);
     return {post:get(id),validation};
   }
-  function fill(id,p,caller) {if(!['xhs','wechat'].includes(p))fail('UNSUPPORTED','X仅下载文图包，不使用编辑器填写');const r=raw(id),e=r.editions[p];if(!e?.preparationId)fail('CHECK_REQUIRED','请先检查平台版本');const validation=validateEdition(p,e,config);if(!validation.ok)fail('VALIDATION_FAILED','平台版本校验未通过');prep.start(e.preparationId,'execute',caller);return get(id);}
-  return {create,get,list:()=>all().map(view),update,generate,check,fill,busy,
+  function fill(id,p,caller,mode='fill') {
+    if(!['fill','draft'].includes(mode))fail('INVALID_INPUT','填写方式只接受 fill 或 draft');
+    if(!['xhs','wechat'].includes(p))fail('UNSUPPORTED','X仅下载文图包，不使用编辑器填写');
+    if(mode==='draft'&&p==='x')fail('UNSUPPORTED','X 不支持仅存草稿');
+    const r=raw(id),e=r.editions[p];if(!e?.preparationId)fail('CHECK_REQUIRED','请先检查平台版本');const validation=validateEdition(p,e,config);if(!validation.ok)fail('VALIDATION_FAILED','平台版本校验未通过');
+    prep.start(e.preparationId,mode==='draft'?'draft':'execute',caller);return get(id);
+  }
+  return {create,meta,get,list:()=>all().map(view),update,generate,check,fill,busy,
     asset(id,p,index){const r=raw(id),e=p==='master'?r.master:r.editions[p];if(!e)fail('NOT_FOUND','平台不存在');const file=index==='cover'?e.cover:e.images[Number(index)];if(!file)fail('NOT_FOUND','图片不存在');return file;},
     bundle(id){const r=raw(id),e=r.editions.x;if(!e.preparationId){check(id,'x');}const current=raw(id).editions.x;if(!current.preparationId)fail('VALIDATION_FAILED','X版本未通过检查');return prep.bundle(current.preparationId);}};
 }

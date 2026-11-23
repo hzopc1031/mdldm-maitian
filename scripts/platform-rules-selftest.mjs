@@ -4,7 +4,10 @@ import {DatabaseSync} from 'node:sqlite';import {EventEmitter} from 'node:events
 import {xWeightedCount,xhsTitleCount,validateEdition} from '../src/platform-rules.mjs';
 import {normalizePrep,createPrepService} from '../src/publish-prep.mjs';
 import {createPostService} from '../src/publish-posts.mjs';
+import {normalizePrepAgent} from '../src/prep-agent.mjs';
 import {stopSkillRetry} from '../src/prep-wechat-run.mjs';
+assert.equal(normalizePrepAgent({runtime:'grokbot',sessionId:'selftest-grok'}).runtime,'grok');
+assert.equal(normalizePrepAgent({runtime:'dsh',sessionId:'selftest-dsh'}).name,'DSH');
 assert.throws(()=>stopSkillRetry(()=>{})('第 1 次填写失败（PAGE_CHANGED）：mock；尚未点击保存，自动重试一次'),e=>e.code==='PAGE_CHANGED');
 assert.throws(()=>stopSkillRetry(()=>{})('第 1 次填写失败（UPLOAD_FAILED）：mock'),e=>e.code==='UPLOAD_FAILED');
 assert.equal(xWeightedCount('abc中文😀'),9);assert.equal(xWeightedCount('👨‍👩‍👧‍👦🇨🇳1️⃣'),6);assert.equal(xWeightedCount('https://example.com/a?q=1'),23);assert.equal(xWeightedCount('看 https://example.com。'),27);
@@ -27,8 +30,21 @@ let child,resultPath,prompt;const prep=createPrepService({db,home,root:home,conf
 const spawnChild=(bin,args,options)=>{assert.equal(options.shell,false);assert.equal(options.windowsHide,true);assert.equal(args.includes('--sandbox'),true);assert.equal(args.includes('danger-full-access'),true);resultPath=args[args.indexOf('-o')+1];child=new EventEmitter();child.stdin=new EventEmitter();child.stdin.end=value=>{prompt=value;};child.kill=()=>{};return child;};
 const posts=createPostService({db,home,config:{},prep,env:{MAITIAN_LOCAL_SKILLS:skills},spawnChild});
 try{
- const first=posts.create(input);assert.equal(first.version,2);assert.equal(first.editions.x.validation.ok,true);
- assert.throws(()=>posts.create({...input,submit:true}));assert.throws(()=>posts.fill(first.id,'x'),/仅下载/);
+ const actor={runtime:'codex',sessionId:'selftest-codex'},scheduledAt=new Date(Date.now()+86400000).toISOString(),meta={column:'AI新闻',scheduledAt};
+ assert.throws(()=>posts.create(input,actor),/栏目/);
+ assert.throws(()=>posts.create(input,actor,{column:'AI新闻'}),/定时时间/);
+ assert.throws(()=>posts.create(input,{column:'AI新闻'},meta),/AI来源/);
+ assert.throws(()=>posts.create(input,actor,{column:'  ',scheduledAt}),/栏目/);
+ assert.throws(()=>posts.create(input,actor,{column:'AI新闻',scheduledAt:'2099-01-01T00:00:00'}),/带时区/);
+ assert.throws(()=>posts.create(input,actor,{column:'AI新闻',scheduledAt:'2020-01-01T00:00:00+08:00'}),/晚于当前时间/);
+ const first=posts.create(input,actor,{...meta,note:'  备注A\n第二行  '});assert.equal(first.version,2);assert.equal(first.column,'AI新闻');assert.equal(first.scheduledAt,scheduledAt);assert.equal(first.note,'备注A\n第二行');assert.equal(first.editions.x.validation.ok,true);
+ assert.throws(()=>posts.create(input,actor,{...meta,note:'x'.repeat(501)}),/备注/);
+ const moved=posts.meta(first.id,{column:'AI日报',note:'改后备注'},actor);assert.equal(moved.column,'AI日报');assert.equal(moved.note,'改后备注');assert.equal(moved.scheduledAt,scheduledAt);
+ assert.equal(posts.meta(first.id,{scheduledAt:new Date(Date.now()+2*86400000).toISOString()},actor).column,'AI日报');
+ assert.equal(posts.meta(first.id,{note:null},actor).note,null);
+ assert.throws(()=>posts.meta(first.id,{},actor),/栏目/);
+ assert.throws(()=>posts.create({...input,submit:true},actor,meta));assert.throws(()=>posts.fill(first.id,'x',null,'fill'),/仅下载/);
+ assert.throws(()=>posts.fill(first.id,'xhs',null,'publish'),/fill 或 draft/);assert.throws(()=>posts.fill(first.id,'x',null,'draft'),/仅下载|不支持/);
  posts.generate(first.id);assert.match(prompt,/只生成文字，不发布，不碰浏览器/);assert.equal(posts.get(first.id).generation.state,'running');assert.throws(()=>posts.update(first.id,'x',input),/正在生成/);
  const result=Object.fromEntries(['x','xhs','wechat'].map(p=>[p,{title:'mock标题',content:'mock'.repeat(300),topics:[],digest:'mock',author:''}]));fs.writeFileSync(resultPath,JSON.stringify(result));child.emit('close',0);assert.equal(posts.get(first.id).generation.state,'done');assert.equal(posts.get(first.id).editions.x.validation.ok,false,'over-limit result is retained');assert.equal(posts.get(first.id).editions.x.content,result.x.content);
  const original=posts.get(first.id);posts.generate(first.id);fs.writeFileSync(resultPath,'invalid');child.emit('close',0);assert.equal(posts.get(first.id).generation.state,'failed');assert.deepEqual(posts.get(first.id).master,original.master);assert.equal(posts.get(first.id).editions.x.content,original.editions.x.content);

@@ -2,25 +2,41 @@
 
 2026-11-23，按 Liu 11:33 的批准方案及 11:37 补充实现。只使用本机 HTTP；不新建 skill，不改 skill 索引。监听 `127.0.0.1:8787`。沿用 Host、loopback、Origin、Fetch Metadata 和转发头校验；新接口即使在启用口令的模式也只允许本机直连。POST 必须带 `Origin: http://127.0.0.1:8787`。不要传网页口令、Cookie、token 或平台凭据。
 
-所有 JSON 是 UTF-8。POST 的顶层只接受 `type,id,platform,platforms,input,actor`。`submit` 和发布授权不在白名单；`publish`、`submit` 动作明确拒绝。公众号只存草稿，不发表、不群发；小红书固定 `--account ai --keep-browser`，任务永远 `submit:false`。X 只下载文图包，此接口不填写 X 编辑器。
+所有 JSON 是 UTF-8。POST 的顶层只接受 `type,id,platform,platforms,input,actor,column,scheduledAt,note`。`submit` 和发布授权不在白名单；`publish`、`submit` 动作明确拒绝。公众号只存草稿，不发表、不群发；小红书固定 `--account ai --keep-browser`，任务永远 `submit:false`。X 只下载文图包，此接口不填写 X 编辑器。
+
+建稿（`type:create`）必须同时带 `column`、`scheduledAt`、`actor` 三项：栏目是自由文字（1–80 字，不含控制字符）；定时时间是带时区的 ISO 时间且必须晚于当前时间；AI 来源上报 `runtime` 与会话编号。定时只记录计划发布时间，供状态页展示，**不会自动填写或发布**。`note`（备注）可选，最多 500 字、可换行，只本地保存并显示在状态页。建稿后可用 `type:meta` 单独改栏目、定时或备注。
 
 ## 接口
 
 | 方法与路径 | 用途 |
 | --- | --- |
-| GET `/api/prep/contract` | 契约 v4，`finalPublishPlatforms:[]`、`submit:false` |
-| POST `/api/prep/posts`，`type:create,input:{...}` | 建一份原稿及平台版本 |
+| GET `/api/prep/contract` | 契约 v4，`finalPublishPlatforms:[]`、`submit:false`、`requiredCreate:["column","scheduledAt","actor"]`、`scheduledPublish:"recorded_only"`、`noteLimit:500` |
+| GET `/api/prep/ai-prompt` | 返回可直接粘贴给外部 AI 的接入指令纯文本；内容来自 docs/ai-publish-prompt.md，发布状态页同源展示 |
+| POST `/api/prep/posts`，`type:create,input:{...},column,scheduledAt,actor[,note]` | 建一份原稿及平台版本；前三项必填，备注可选 |
+| POST 同上，`type:meta,id,column?,scheduledAt?,note?` | 只改栏目、计划时间或备注，至少带一项；不动稿件正文 |
 | POST 同上，`type:generate,id,platforms:["x","xhs","wechat"]` | 异步调用本机 Codex 按本地 skill 改稿；省略 platforms 使用现有生成平台配置 |
 | GET `/api/prep/posts/record?id=ID` | 原稿、平台版本、规则结果、关联平台任务、生成状态 |
 | GET `/api/prep/posts` | 最近50份原稿及状态；不是全历史分页接口 |
 | POST `/api/prep/posts`，`type:update,id,platform,input:{...}` | 修改完整平台版本；platform 为 master 时只改原稿，不覆盖已编辑版本 |
 | POST 同上，`type:check,id,platform` | 共用规则检查；合格后建关联准备任务，并调用本地 skill 离线检查（X仅规则检查） |
-| POST 同上，`type:fill,id,platform` | 小红书只填留窗；公众号仅存草稿；必须先检查成功 |
+| POST 同上，`type:fill,id,platform[,mode:"fill"\|"draft"]` | 小红书填写留窗或只存草稿；公众号仅存草稿；必须先检查成功。X 不支持填写 |
 | GET `/api/prep/posts/bundle?id=ID` | X ZIP：全文、按顺序编号的全部配图、manifest；不含本机绝对路径 |
 | GET `/api/prep/posts/asset?id=ID&platform=x&index=0` | 本篇有序图片；index=cover 为封面，platform 可为 master |
 | POST `/api/prep/image?name=test.png` | 原始图片二进制入本地素材库，返回 path、sha256；不上传平台 |
 
 `input` 字段：`title,content,images,cover,topics,video,digest,caption,author,imagePositions,promotionReview`。images 是有序本机绝对路径数组，cover 是其中一张图或另一张本机图片。视频只预留，校验明确报暂不支持。imagePositions 是公众号 `{image:"本稿图片路径",afterParagraph:1}` 数组，空行分段，0表示正文前。未指定的普通图片在正文末尾。**公众号封面固定移到最终HTML正文的第一个 `WECHAT_INLINE_IMAGE` 占位**，其段落位置设置不生效；封面已在正文时移位并去重，独立封面只加入一次。服务生成安全 section HTML 和 htmlFile/inlineImages，任务只用 `coverFromBody:true`，不传 `coverImage`。本地skill按最接近2.35:1挑正文图，同分取正文靠前者；建议封面1280×545、普通配图采用其他比例，并核对check回执的cover.file与实际封面。首图位置本身不能改变skill的比例评分规则。不直接传入网页 HTML。
+
+## 只存草稿（mode:draft）
+
+`fill` 可带 `mode:"draft"`，表示只把稿件存进平台草稿箱、不发布：
+
+| 平台 | 草稿 | 说明 |
+| --- | --- | --- |
+| 公众号 | 支持 | 一直是只存草稿；执行后状态 `draft_saved`，附保存成功回执 |
+| 小红书 | 支持（待实测） | 调本地 `xhs-publish/scripts/save-draft.mjs`，固定 ai 号；草稿绑定当前浏览器 profile，反复运行会积多份同名稿，需在草稿箱核对 |
+| X | 不支持 | 入口只出文图包；要存 X 草稿需另用 x-publish 的 save-draft，工作台不代为操作 |
+
+`mode` 省略等同 `"fill"`（小红书填好留窗、公众号存草稿）。draft 与 fill 都要先检查通过；结果未确认时同样按 `unknown` 处理，不重跑。实际可用性看 `/api/prep` 返回的每平台 `draft.supported`。
 
 公众号摘要用 digest（兼容 caption），最多120字；作者最多16字。现有 wechat.mjs 没有作者填写实现，作者保存在版本中，需在草稿里手填。图片上限：X 4、小红书18、公众号20。标题上限：小红书20（与本地 util.mjs 半字算法一致）、公众号32。X默认加权280；本地 `config.publishPrep.x.premium:true` 时25000。X话题计入实际下载正文及加权计数；小红书正文计数含skill为话题预留的字数。修改配置须先备份 config.json；本次没有改配置。前端和后端共用 `src/platform-rules.mjs`。
 
@@ -38,11 +54,13 @@
 $base = 'http://127.0.0.1:8787'
 $headers = @{Origin=$base}
 $actor = @{runtime='codex'; name='Codex'; sessionId='实际会话ID'; basis='declared'}
+$column = 'AI新闻'
+$scheduledAt = '2026-11-24T09:00:00+08:00'  # 必须晚于当前时间
 $input = @{title='【测试】工作台2张图'; content="工作台改版测试稿，请勿发布。`n`n核对标题、正文与2张测试图片。"; images=@('D:\测试\01.png','D:\测试\02.png'); cover='D:\测试\01.png'; topics=@('AI')}
 function Call-Prep($payload) {
   Invoke-RestMethod "$base/api/prep/posts" -Method Post -Headers $headers -ContentType 'application/json; charset=utf-8' -Body ([Text.Encoding]::UTF8.GetBytes(($payload|ConvertTo-Json -Depth 20)))
 }
-$created = Call-Prep @{type='create';input=$input;actor=$actor}
+$created = Call-Prep @{type='create';column=$column;scheduledAt=$scheduledAt;input=$input;actor=$actor}
 $id = $created.post.id
 Call-Prep @{type='generate';id=$id;actor=$actor}
 Invoke-RestMethod "$base/api/prep/posts/record?id=$id"
@@ -65,15 +83,16 @@ curl.exe -sS 'http://127.0.0.1:8787/api/prep/posts'
 curl.exe -sS "http://127.0.0.1:8787/api/prep/posts/bundle?id=$id" -o 'x-draft.zip'
 ```
 
-request.json 的建稿例子：
+request.json 的建稿例子（`column`、`scheduledAt`、`actor` 三项必填，定时须晚于当前时间）：
 
 ```json
-{"type":"create","input":{"title":"【测试】工作台2张图","content":"工作台改版测试稿，请勿发布。","images":["D:/测试/01.png","D:/测试/02.png"],"cover":"D:/测试/01.png","topics":["AI"]},"actor":{"runtime":"codex","sessionId":"实际会话ID","basis":"declared"}}
+{"type":"create","column":"AI新闻","scheduledAt":"2026-11-24T09:00:00+08:00","note":"可选备注","input":{"title":"【测试】工作台2张图","content":"工作台改版测试稿，请勿发布。","images":["D:/测试/01.png","D:/测试/02.png"],"cover":"D:/测试/01.png","topics":["AI"]},"actor":{"runtime":"codex","sessionId":"实际会话ID","basis":"declared"}}
 ```
 
 其余 POST 示例（将 ID 换成返回值）：
 
 ```json
+{"type":"meta","id":"ID","scheduledAt":"2026-11-25T09:00:00+08:00","note":"改期并补备注","actor":{"runtime":"dsh","sessionId":"实际会话ID"}}
 {"type":"generate","id":"ID","platforms":["x","xhs","wechat"]}
 {"type":"check","id":"ID","platform":"xhs"}
 {"type":"fill","id":"ID","platform":"wechat"}
@@ -98,7 +117,7 @@ request.json 的建稿例子：
 
 修复依据、回退及验证见[公众号草稿USAGE修复记录](wechat-draft-fix-20261123.md)。
 
-给 Codex 等 AI 的顺序：建原稿 → 生成 → 查状态 → 通读并修改各版 → 逐图审阅 → 检查 → 查至 checked → 按授权填写 → 查状态并核对本篇回执。全程不调用平台内部接口、不传凭据、不点发布。X下载 ZIP 后由本人使用。
+给 Codex 等 AI 的顺序：建原稿 → 生成 → 查状态 → 通读并修改各版 → 逐图审阅 → 检查 → 查至 checked → 按授权填写 → 查状态并核对本篇回执。全程不调用平台内部接口、不传凭据、不点发布。X下载 ZIP 后由本人使用。可直接粘贴给外部 AI 的完整指令见[给外部 AI 的接入指令](ai-publish-prompt.md)。
 
 旧 `scripts/l1-submit-prep.mjs` 保留：仍能交单平台稿、读原记录、检查、填写/存草稿、登记已经核验的外部X回执；`--publish` 已拒绝。它不自动生成平台版本；推荐新任务用上述 posts API，已有记录沿原ID继续。旧 publish_preparations 表及 job.json 不迁移、不覆盖。新 publish_posts 表为独立 v2 模型。
 
@@ -108,6 +127,6 @@ request.json 的建稿例子：
 
 新增 GET `/api/prep/status` 读取全部 publish_posts 与 publish_preparations，按 preparationId 合并；无关联的旧记录保留独立行。它不沿用旧列表的50/30条截断，避免遗漏待办和旧未知单。汇总只返回标题、时间、ID、平台状态与脱敏诊断，不返回正文、任务文件、账号身份或凭据。平台元数据来源为 platform-registry.mjs 注册表、meta 常用选择、config 的平台配置、准备能力及已有版本/记录的并集；每行展示已有版本及常用平台。新增平台可显示状态，不代表自动获得发布执行能力。现有平台写作规则与执行适配器范围保持兼容。
 
-汇总采用同样的 loopback、Host、Origin、Fetch Metadata 和转发头校验，仅接受 GET，写请求405。`rows` 是原稿/旧记录行，`pending` 为全部 awaiting_user 项，`failures` 为失败与未知项，`platforms` 为动态平台元数据。所有状态映射唯一维护在 src/prep-status.mjs：prepared/generated→已生成，checked→检查通过，awaiting_user→已填好待你点，draft_saved→已存草稿，failed/check_failed→失败，unknown→未知，published→已发布；submitted/already_exists 仅证明提交/已有稿，显示未知，不能冒充公开发布。editing/idle→未生成，running→处理中，未识别状态→未知。
+汇总采用同样的 loopback、Host、Origin、Fetch Metadata 和转发头校验，仅接受 GET，写请求405。`rows` 是原稿/旧记录行，`pending` 为全部 awaiting_user 项，`failures` 为失败与未知项，`platforms` 为动态平台元数据。状态页可按栏目筛选（`rows[].column`），只在出现两个及以上栏目时显示筛选按钮。所有状态映射唯一维护在 src/prep-status.mjs：prepared/generated→已生成，checked→检查通过，awaiting_user→已填好待你点，draft_saved→已存草稿，failed/check_failed→失败，unknown→未知，published→已发布；submitted/already_exists 仅证明提交/已有稿，显示未知，不能冒充公开发布。editing/idle→未生成，running→处理中，未识别状态→未知。
 
 失败详情保留原 code（兼容 skillCode）、message、hint、stderr 尾部和截图路径；缺字段显示未记录，不制造旧单证据。输出前复用 prep-skill-errors 的脱敏与4KB尾部限制，再经过 redactL1。截图仅展示路径，不自动读取原截图。现有建稿/生成/检查/填写/record/contract接口无删除和改名；契约仍 submit:false、finalPublishPlatforms:[]。
