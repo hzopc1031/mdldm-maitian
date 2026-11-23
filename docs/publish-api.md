@@ -2,7 +2,7 @@
 
 2026-11-23，按 Liu 11:33 的批准方案及 11:37 补充实现。只使用本机 HTTP；不新建 skill，不改 skill 索引。监听 `127.0.0.1:8787`。沿用 Host、loopback、Origin、Fetch Metadata 和转发头校验；新接口即使在启用口令的模式也只允许本机直连。POST 必须带 `Origin: http://127.0.0.1:8787`。不要传网页口令、Cookie、token 或平台凭据。
 
-所有 JSON 是 UTF-8。POST 的顶层只接受 `type,id,platform,platforms,input,actor,column,scheduledAt,note`。`submit` 和发布授权不在白名单；`publish`、`submit` 动作明确拒绝。公众号只存草稿，不发表、不群发；小红书固定 `--account ai --keep-browser`，任务永远 `submit:false`。X 只下载文图包，此接口不填写 X 编辑器。
+所有 JSON 是 UTF-8。POST 的顶层只接受 `type,id,platform,platforms,input,actor,column,scheduledAt,note,mode`。顶层 `publish`/`submit` 动作仍拒绝；平台动作由 `fill` 的 `mode` 决定：`fill` 填好留窗、`draft` 存草稿、`publish` 直接发布（仅 X、小红书）。公众号只能存草稿，不发表、不群发。
 
 建稿（`type:create`）必须同时带 `column`、`scheduledAt`、`actor` 三项：栏目是自由文字（1–80 字，不含控制字符）；定时时间是带时区的 ISO 时间且必须晚于当前时间；AI 来源上报 `runtime` 与会话编号。定时只记录计划发布时间，供状态页展示，**不会自动填写或发布**。`note`（备注）可选，最多 500 字、可换行，只本地保存并显示在状态页。建稿后可用 `type:meta` 单独改栏目、定时或备注。
 
@@ -10,7 +10,7 @@
 
 | 方法与路径 | 用途 |
 | --- | --- |
-| GET `/api/prep/contract` | 契约 v4，`finalPublishPlatforms:[]`、`submit:false`、`requiredCreate:["column","scheduledAt","actor"]`、`scheduledPublish:"recorded_only"`、`noteLimit:500` |
+| GET `/api/prep/contract` | 契约 v4，`submit:true`、`publishPlatforms:["x","xhs"]`、`fillModes:["fill","draft","publish"]`、`requiredCreate:["column","scheduledAt","actor"]`、`noteLimit:500` |
 | GET `/api/prep/ai-prompt` | 返回可直接粘贴给外部 AI 的接入指令纯文本；内容来自 docs/ai-publish-prompt.md，发布状态页同源展示 |
 | POST `/api/prep/posts`，`type:create,input:{...},column,scheduledAt,actor[,note]` | 建一份原稿及平台版本；前三项必填，备注可选 |
 | POST 同上，`type:meta,id,column?,scheduledAt?,note?` | 只改栏目、计划时间或备注，至少带一项；不动稿件正文 |
@@ -36,7 +36,19 @@
 | 小红书 | 支持（待实测） | 调本地 `xhs-publish/scripts/save-draft.mjs`，固定 ai 号；草稿绑定当前浏览器 profile，反复运行会积多份同名稿，需在草稿箱核对 |
 | X | 支持（需启用专用编辑器） | 填完关闭编辑框并在弹窗点「保存」，读到保存确认才记 `draft_saved`；未确认按 `unknown` 处理。专用 Chrome 需在 9336 运行且登录正确账号 |
 
-`mode` 省略等同 `"fill"`（小红书填好留窗、公众号存草稿）。draft 与 fill 都要先检查通过；结果未确认时同样按 `unknown` 处理，不重跑。实际可用性看 `/api/prep` 返回的每平台 `draft.supported`。
+`mode` 省略等同 `"fill"`（小红书/X 填好留窗、公众号存草稿）。draft 与 fill 都要先检查通过；结果未确认时同样按 `unknown` 处理，不重跑。实际可用性看 `/api/prep` 返回的每平台 `draft.supported`。
+
+## 直接发布（mode:publish）
+
+`fill` 带 `mode:"publish"` 表示由工作台直接发布出去（2026-11-23 22:19 起）：
+
+| 平台 | 直接发布 | 说明 |
+| --- | --- | --- |
+| X | 支持（未实测） | 在已验证的专用编辑器里点 Post，读回 `https://x.com/<账号>/status/<id>` 才记 `published`，否则 `unknown` |
+| 小红书 | 支持（未实测） | 调 `xhs-publish post --account ai --submit`，回执 `submitted:true` 才记 `published` |
+| 公众号 | 不支持 | 本地 skill 明确禁止发表；请求会报「只能存草稿」，请保存草稿后在后台发表或群发 |
+
+发布前必须先 `check` 通过；发布成功后 `r.url` 与证据里保留公开链接。结果未确认时按 `unknown` 停手，不重发、不换 ID。实际可用性看 `/api/prep` 的每平台 `publishEnabled`。
 
 公众号摘要用 digest（兼容 caption），最多120字；作者最多16字。现有 wechat.mjs 没有作者填写实现，作者保存在版本中，需在草稿里手填。图片上限：X 4、小红书18、公众号20。标题上限：小红书20（与本地 util.mjs 半字算法一致）、公众号32。X默认加权280；本地 `config.publishPrep.x.premium:true` 时25000。X话题计入实际下载正文及加权计数；小红书正文计数含skill为话题预留的字数。修改配置须先备份 config.json；本次没有改配置。前端和后端共用 `src/platform-rules.mjs`。
 

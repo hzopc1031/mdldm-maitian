@@ -328,7 +328,7 @@ export async function handle(req, res) {
   }
   if (u.pathname === '/api/prep/rules-module' && req.method==='GET') return send(res,200,fs.readFileSync(path.join(DIR,'platform-rules.mjs')),'text/javascript; charset=utf-8');
   if (u.pathname === '/api/prep' && req.method === 'GET') return send(res, 200, { capabilities: prep.publicCapabilities(), rules:platformRules(config), records: ageReview.forRecords(prep.list()) });
-  if (u.pathname === '/api/prep/contract' && req.method === 'GET') return send(res,200,{version:4,columnOnly:true,agentAttribution:'caller_reported',operationActors:true,finalPublishPlatforms:[],submit:false,manuscriptVersion:2,requiredCreate:['column','scheduledAt','actor'],scheduledPublish:'recorded_only',noteLimit:500,fillModes:['fill','draft']});
+  if (u.pathname === '/api/prep/contract' && req.method === 'GET') return send(res,200,{version:4,columnOnly:true,agentAttribution:'caller_reported',operationActors:true,finalPublishPlatforms:['x','xhs'],submit:true,manuscriptVersion:2,requiredCreate:['column','scheduledAt','actor'],scheduledPublish:'recorded_only',noteLimit:500,fillModes:['fill','draft','publish'],publishPlatforms:['x','xhs']});
   if (u.pathname === '/api/prep/ai-prompt' && req.method === 'GET') {
     try {
       const markdown=fs.readFileSync(path.join(ROOT,'docs','ai-publish-prompt.md'),'utf8');

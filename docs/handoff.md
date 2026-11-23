@@ -1,12 +1,12 @@
 # 交接文件（HANDOFF）
 
-最后更新：2026-11-23 22:05（北京时间）。任何 AI 接手前先读本文件，再按文末「必读顺序」展开。
+最后更新：2026-11-23 22:20（北京时间）。任何 AI 接手前先读本文件，再按文末「必读顺序」展开。
 
 ## 一句话现状
 
-2026-11-23 本地复核补记：本会话于北京时间22:01只读检查正式接口，契约version4、finalPublishPlatforms为空；status的rows/pending/failures均0。这是当时快照，接手时重新查，不用旧PID推断运行状态。下文“今天做过”及平台验收条目来自已落盘的对应阶段证据。
+2026-11-23 22:19 契约已改为可发布：`finalPublishPlatforms:["x","xhs"]`、`submit:true`、`fillModes:["fill","draft","publish"]`。接手时重新查接口，不用旧快照。
 
-麦田工作台跑在 `http://127.0.0.1:8787`，只做「填写 / 存草稿」，不做最终发布；`/api/prep/posts` 是唯一写入口，建稿必填栏目、计划时间、AI 来源；库里现有发布记录 0 条（历史测试与旧回执已于 2026-11-23 清理并留档）。
+麦田工作台跑在 `http://127.0.0.1:8787`，`/api/prep/posts` 是唯一写入口；建稿必填栏目、计划时间、AI 来源。AI 用 `fill` 的 `mode` 决定：只填好留窗（fill）、存草稿（draft）或直接发布（publish，仅 X / 小红书）。公众号只能存草稿。库里现有发布记录 0 条（历史数据已于 2026-11-23 清理并留档）。
 
 ## 目录与关键文件
 
@@ -29,29 +29,29 @@
 
 ## 当前契约（v4）
 
-`GET /api/prep/contract` 返回：`version:4`、`submit:false`、`finalPublishPlatforms:[]`、`requiredCreate:["column","scheduledAt","actor"]`、`scheduledPublish:"recorded_only"`、`noteLimit:500`、`fillModes:["fill","draft"]`。
+`GET /api/prep/contract` 返回：`version:4`、`submit:true`、`finalPublishPlatforms:["x","xhs"]`、`publishPlatforms:["x","xhs"]`、`requiredCreate:["column","scheduledAt","actor"]`、`scheduledPublish:"recorded_only"`、`noteLimit:500`、`fillModes:["fill","draft","publish"]`。
 
 写入口 `POST /api/prep/posts`，必须带 `Origin: http://127.0.0.1:8787`，仅本机 loopback，请求体 ≤128KB。
 
-顶层字段白名单：`type,id,platform,platforms,input,actor,column,scheduledAt,note,mode`。`publish`/`submit` 一律 403。
+顶层字段白名单：`type,id,platform,platforms,input,actor,column,scheduledAt,note,mode`。顶层 `type:publish/submit` 仍拒绝；发布只能走 `fill` 的 `mode:"publish"`。
 
 - `type:create`：必填 `column`（1–80 字）、`scheduledAt`（带时区 ISO、晚于当前时间、只记录不执行）、`actor`（`runtime` codex/dsh/grok，`grokbot` 为别名；`sessionId` 必须真实）。
 - `type:meta`：只改 `column`/`scheduledAt`/`note`，至少一项。
 - `type:update`：改完整平台版本（`platform` 可为 master）。
 - `type:generate`：本机 Codex 按平台 skill 分平台改稿，202 仅表示启动。
 - `type:check`：共用规则 + 本地 skill 离线检查；返回 `validation.ok`。
-- `type:fill`：`mode` 省略=填写留窗（小红书）/存草稿（公众号）；`mode:"draft"` 只存草稿。
+- `type:fill`：`mode` 省略=`fill`（小红书/X 填好留窗、公众号存草稿）；`draft` 只存草稿；`publish` 直接发布（仅 X、小红书；公众号会明确报错）。
 - `input` 字段：`title,content,images,cover,topics,video,digest,caption,author,imagePositions,promotionReview`。
 
 读接口：`record?id=`、`posts`、`bundle?id=`（X ZIP）、`asset?id=&platform=&index=`、`status`、`ai-prompt`。
 
 ## 平台边界（2026-11-23 实测状态）
 
-| 平台 | 标题/正文/图 | 填写 | 仅存草稿 | 备注 |
+| 平台 | 标题/正文/图 | 填写 | 仅存草稿 | 直接发布 |
 | --- | --- | --- | --- | --- |
-| X | 加权 280（premium 配置 25000）/ 无标题 / ≤4 图 | 填好留窗，状态 `awaiting_user` | 支持，关闭编辑框→保存，读到确认才记 `draft_saved`（需专用编辑器） | 专用 Chrome 在 9336 且登录正确账号；`publishPrep.x.browserExecution` 已开启，profile `D:\AIInfra\agent-publish\x\chrome-profile` |
-| 小红书 | 20 / 1000 / 1–18 图 | 填好留窗，状态 `awaiting_user` | 支持，`save-draft` 存草稿箱，状态 `draft_saved`（**尚未真实实测**） | 草稿绑定浏览器 profile，重复跑会多份同名稿 |
-| 公众号 | 32 / 50000 / 摘要120 / 作者16 / ≤20 图 | 仅存草稿 | 支持（本来就是这样） | 作者需在草稿里手填 |
+| X | 加权 280（premium 配置 25000）/ 无标题 / ≤4 图 | 填好留窗，`awaiting_user` | 支持，读到确认记 `draft_saved` | 支持 `publish`：点 Post 并读回 `/status/` 链接才算 `published`（**未实测真实发布**） |
+| 小红书 | 20 / 1000 / 1–18 图 | 填好留窗，`awaiting_user` | 支持，`draft_saved`（未实测） | 支持 `publish`：调 `xhs-publish post --submit`，`submitted:true` 才记 `published`（**未实测真实发布**） |
+| 公众号 | 32 / 50000 / 摘要120 / 作者16 / ≤20 图 | 仅存草稿 | 支持 | 不支持（skill 明确禁止发表），请求会报错说明 |
 
 X 草稿验证：关闭编辑框 → 弹窗点「保存」→ 先读页面提示（saved to drafts / 已保存 / 草稿箱），没有再重开编辑框点右上角「Drafts」核对首行文字。两处都没有就记 `unknown`，不谎报。
 
@@ -65,6 +65,7 @@ X 草稿验证：关闭编辑框 → 弹窗点「保存」→ 先读页面提示
 4. `fill` 增加 `mode:"draft"`：小红书走 `xhs-publish/scripts/save-draft.mjs`，公众号沿用原路径；X 也支持——填完关闭编辑框并保存，读到确认才记 `draft_saved`，未确认记 `unknown`。X 专用编辑器已启用（`browserExecution:true`），配置改前备份在 `evidence/publish-redesign-20261123/config-before-x-draft-*.json`。
 5. 清理历史数据：先删 10 条缺栏目测试记录 + 2 条测试原稿，再按指示删剩余 10 条旧已发布 X 回执（已导出 `evidence/publish-redesign-20261123/removed-legacy-posts-*.json`）。当前记录 0 条。
 6. 离线自测三组通过：`platform-rules-selftest`、`prep-status-selftest`、`l1-web-selftest`。
+7. 2026-11-23 22:19 起 `mode` 增加 `publish`：X 由已验证编辑器填完后点 Post 并读回 `/status/` 链接；小红书调 `xhs-publish post --account ai --submit`，`submitted:true` 才记 `published`；公众号请求会明确报「只能存草稿」。契约改为 `submit:true`、`publishPlatforms:["x","xhs"]`，`Update-Maitian.ps1` 的启动后校验同步改为核对 `publishPlatforms`。真实发布尚未实测。
 
 ## 运维命令（Windows，仓库根执行）
 

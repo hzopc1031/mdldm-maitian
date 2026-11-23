@@ -173,7 +173,7 @@ function existingXEditor(url) {
 }
 
 // 只管理本次新建的目标。保留新编辑页及所有旧标签，断开调试连接。
-export async function fillXEditor({ account, profile, job, folder }, connect = connectDedicatedBrowser, { saveDraft = false } = {}) {
+export async function fillXEditor({ account, profile, job, folder }, connect = connectDedicatedBrowser, { saveDraft = false, publish = false } = {}) {
   if (!/^[A-Za-z0-9_]{1,15}$/.test(account) || !isDedicatedXProfile(profile) || job.submit !== false ||
       !job.content.trim() || job.content.length > 2000 || job.images.length > 4) {
     throw new Error('X 文图草稿配置或素材未通过校验');
@@ -260,6 +260,31 @@ export async function fillXEditor({ account, profile, job, folder }, connect = c
     evidence.imageCount = after.imageCount;
     evidence.existingTabsPreserved = true;
     record();
+    if (publish) {
+      evidence.stage = 'publish';
+      record();
+      const clicked = await evaluate(() => {
+        const visible = el => el.getClientRects().length > 0;
+        const button = [...document.querySelectorAll('[data-testid="tweetButton"], [data-testid="tweetButtonInline"]')].filter(visible)[0];
+        if (!button) return false;
+        button.click();
+        return true;
+      });
+      if (!clicked) throw new Error('没有找到 X 发布按钮，结果未确认；请本人核对页面');
+      let url = '';
+      for (let i = 0; i < 40; i++) {
+        await delay(500);
+        url = await evaluate(() => location.href);
+        if (/\/status\/\d+/.test(url)) break;
+      }
+      const toast = await evaluate(() => document.body.innerText);
+      evidence.publishToast = typeof toast === 'string' ? toast.slice(-1000) : '';
+      evidence.publishUrl = url;
+      const ok = /\/status\/\d+/.test(url) || /your post was sent|post was sent|已发送|已发布/i.test(evidence.publishToast);
+      record();
+      if (!ok) throw new Error('未读到 X 发布成功确认，结果未确认；请到主页核对，勿重发');
+      return { submitted: true, url, editorFilled: true, imageCount: after.imageCount, screenshot: evidence.after };
+    }
     if (saveDraft) {
       evidence.stage = 'save-draft';
       record();

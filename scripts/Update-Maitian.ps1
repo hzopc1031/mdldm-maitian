@@ -77,7 +77,7 @@ try {db.prepare('VACUUM INTO ?').run(process.argv[3]);} finally {db.close();}
   for($n=0;$n -lt 40 -and !$contract;$n++) {
     try {$contract=Invoke-RestMethod 'http://127.0.0.1:8787/api/prep/contract' -TimeoutSec 2}catch {Start-Sleep -Milliseconds 250}
   }
-  if(!$contract -or $contract.version -ne 4 -or @($contract.finalPublishPlatforms).Count -ne 0 -or $contract.submit -ne $false){throw 'Preparation-only contract was not confirmed. Do not repeat platform actions.'}
+  if(!$contract -or $contract.version -ne 4 -or (@($contract.publishPlatforms) -join ',') -ne 'x,xhs'){throw 'Publish contract was not confirmed (expect x,xhs). Do not repeat platform actions.'}
   $current=Get-WorkbenchOwner
   $facts.newPid=$current.ProcessId
   $facts.contractVersion=$contract.version

@@ -1,0 +1,37 @@
+{
+	admin off
+	auto_https disable_redirects
+	default_sni 110.40.227.27
+	servers 127.0.0.1:18443 {
+		listener_wrappers {
+			proxy_protocol {
+				allow 127.0.0.1/32
+			}
+			tls
+		}
+	}
+}
+
+http://:18080 {
+	bind 127.0.0.1
+	header Cache-Control no-store
+	@browser path /
+	redir @browser https://110.40.227.27:80/ 308
+	respond 404
+}
+
+https://110.40.227.27:18443 {
+	bind 127.0.0.1
+	tls {
+		issuer acme https://acme-v02.api.letsencrypt.org/directory {
+			profile shortlived
+			alt_http_port 18080
+			disable_tlsalpn_challenge
+		}
+	}
+	header Cache-Control no-store
+	reverse_proxy 127.0.0.1:18787 {
+		header_up Host 110.40.227.27:80
+		header_up X-Maitian-Client-IP {remote_host}
+	}
+}

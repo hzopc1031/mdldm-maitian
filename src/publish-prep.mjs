@@ -34,7 +34,7 @@ export function prepCapabilities(config = {}, env = process.env) {
     const draft = platform === 'wechat' ? { supported: true, label: '保存公众号草稿（不发表）' }
       : platform === 'xhs' ? (draftScript && fs.existsSync(draftScript) ? { supported: true, label: '保存小红书草稿箱（不发布）' } : { supported: false, label: '本地未安装小红书存草稿脚本' })
       : { supported: enabled, label: enabled ? '保存 X 草稿箱（不发布）' : 'X 专用编辑器未启用；启用后才可填写或存草稿' };
-    return [platform, { script, installed, browserEnabled: enabled, inspectEnabled, publishEnabled:false, draft, ...(draftScript ? { draftScript } : {}),
+    return [platform, { script, installed, browserEnabled: enabled, inspectEnabled, publishEnabled: platform==='xhs' ? true : platform==='x' ? enabled : false, draft, ...(draftScript ? { draftScript } : {}),
       mode: platform === 'x' ? '正文和最多4张图可下载为文图包；编辑器填写须显式启用专用 Chrome，仅填写不发布' : platform === 'xhs' ? '本地 xhs-publish，固定 --account ai；只填写留窗，由本人点击发布' : '本地 wechat-publish，只保存草稿并核对成功提示',
       reason: platform === 'x' ? enabled ? '已启用专用 Chrome 填写；执行时重新核验账号、空白编辑页和完整文图，填好后由本人处理。' : 'X 编辑器填写未启用；需在本地配置启用并指定专用 Chrome，仍可下载文图包。' : !installed ? '本地 DSH skill 未安装；不回退旧 hub' : !keepWindow ? '本地 skill 不支持保留窗口，未适配' : enabled ? '使用本地技能专用窗口；执行时核验可见账号。登录、素材检查和本次保存回执决定结果。' : BROWSER_BLOCK }];
   }));
@@ -112,13 +112,18 @@ export function normalizePrep(input, config = {}) {
   return { platform, job, ...(wechatCover?{wechatCover}:{}), episodeId: input.episodeId || null, test: input.test === true, ...(source ? {source} : {}), ...(publication ? {publication} : {}) };
 }
 export function prepCommand(platform, kind, { script, jobFile }) {
-  if (!['xhs', 'wechat'].includes(platform) || !['check', 'execute'].includes(kind)) throw new Error('只支持检查和填写，不能发布');
+  if (!['xhs', 'wechat'].includes(platform) || !['check', 'execute', 'publish'].includes(kind)) throw new Error('只支持检查、填写和显式发布');
   if(platform==='wechat'&&kind==='execute')return [fileURLToPath(new URL('./prep-wechat-run.mjs',import.meta.url)),script,jobFile];
+  if(platform==='xhs'&&kind==='publish')return [script,'post','--job',jobFile,'--account','ai','--submit'];
   return [script, kind === 'check' ? platform === 'xhs' ? 'preflight' : 'check' : 'post', '--job', jobFile,
     ...(platform === 'xhs' ? kind === 'check' ? ['--kind', 'post', '--account', 'ai'] : ['--account', 'ai', '--keep-browser'] : [])];
 }
 export function acceptPrepResult(platform, kind, code, result) {
-  if(!['check','execute'].includes(kind))throw Error('只支持检查和填写，不能发布');
+  if(!['check','execute','publish'].includes(kind))throw Error('只支持检查、填写和显式发布');
+  if(platform==='xhs'&&kind==='publish'){
+    if(code!==0||result?.ok!==true||result?.submitted!==true)throw new Error('小红书发布回执不符合提交成功约束；结果未知，先核对原笔记，勿重跑');
+    return 'published';
+  }
   if (code !== 0 || result?.ok !== true || result?.submitted === true) throw new Error('本地 skill 失败或回执不符合只准备约束；先人工核对页面，勿直接重跑');
   if (kind === 'check') {
     if (!(platform === 'xhs' ? result.offlineOnly === true : result.offline === true)) throw new Error('缺少离线检查证明');
@@ -235,9 +240,9 @@ export function createPrepService({ db, home, root, config, secrets = [], spawnC
   }
   const jobFile = id => { get(id); return path.join(home, 'data', 'publish-prep', id, 'job.json'); };
   function startX(r, kind, cap, actor) {
-    if (!['execute','draft'].includes(kind)) throw new Error('X 文图任务不运行本地 skill 离线检查');
+    if (!['execute','draft','publish'].includes(kind)) throw new Error('X 文图任务不运行本地 skill 离线检查');
     if (kind==='draft' && !cap.draft?.supported) throw new Error(cap.draft?.label||'X 草稿未启用');
-    if (r.state === 'awaiting_user'||r.state === 'draft_saved') return r;
+    if (r.state === 'awaiting_user'||r.state === 'draft_saved'||r.state === 'published') return r;
     if (r.state !== 'prepared') throw new Error('X 编辑器结果需本人核对，禁止直接重跑');
     if (!cap.browserEnabled) throw new Error(cap.reason);
     const file = jobFile(r.id), job = JSON.parse(fs.readFileSync(file, 'utf8'));
@@ -253,11 +258,18 @@ export function createPrepService({ db, home, root, config, secrets = [], spawnC
     save(r);
     void (async () => {
       try {
-        const receipt = await runX({ account, profile, job, folder: path.dirname(file) }, undefined, { saveDraft: kind === 'draft' });
-        if (receipt?.submitted !== false || receipt.editorFilled !== true || receipt.imageCount !== job.images.length) {
+        const receipt = await runX({ account, profile, job, folder: path.dirname(file) }, undefined, { saveDraft: kind === 'draft', publish: kind === 'publish' });
+        if (kind === 'publish') {
+          if (receipt?.submitted !== true || typeof receipt.url !== 'string' || !/^https:\/\/x\.com\/[A-Za-z0-9_]+\/status\/\d+/.test(receipt.url)) {
+            throw new Error('未读到 X 发布成功回执及公开链接，结果未确认；请到主页核对，勿重发');
+          }
+          r.state = 'published';
+          r.evidence = { submitted: true, url: receipt.url, screenshot: receipt.screenshot };
+          r.url = receipt.url;
+          r.note = '已发布到 X，已读回公开链接。';
+        } else if (receipt?.submitted !== false || receipt.editorFilled !== true || receipt.imageCount !== job.images.length) {
           throw new Error('缺少 X 编辑器完整文图回执');
-        }
-        if (kind === 'draft') {
+        } else if (kind === 'draft') {
           if (receipt.draftSaved !== true) throw new Error('未读到 X 草稿保存确认，结果未确认；请到草稿箱核对');
           r.state = 'draft_saved';
           r.evidence = { submitted: false, savedAsDraft: true, imageCount: receipt.imageCount, screenshot: receipt.screenshot };
@@ -283,8 +295,12 @@ export function createPrepService({ db, home, root, config, secrets = [], spawnC
   function start(id, kind, caller, approval) {
     const actor=caller===undefined?null:normalizePrepAgent(caller);
     if(db.prepare("SELECT 1 FROM publish_preparations WHERE json_extract(record,'$.state')='running'").get()) throw new Error('已有准备操作在运行');
-    if (!['check', 'execute','draft'].includes(kind)) throw new Error('PUBLISH_DISABLED：此入口只填写，不发布');
+    if (!['check', 'execute','draft','publish'].includes(kind)) throw new Error('不支持的动作');
     const r = get(id), cap = prepCapabilities(config, env)[r.platform];
+    if(kind==='publish'){
+      if(r.platform==='wechat')throw new Error('公众号本地 skill 只存草稿，不能直接发表；请先存草稿，再由本人在后台发表或群发');
+      if(!cap.publishEnabled)throw new Error('此平台未启用直接发布');
+    }
     if(kind==='draft'){
       if(r.platform==='wechat')kind='execute';
       else if(!cap.draft?.supported)throw new Error(cap.draft?.label||'此平台存草稿未启用');
@@ -327,7 +343,8 @@ export function createPrepService({ db, home, root, config, secrets = [], spawnC
         if (kind === 'check' && result?.ok !== true) throw new Error('本地 skill 离线检查未通过；请检查素材、逐图审阅记录和图片哈希，不代表可上传');
         r.state = acceptPrepResult(r.platform, kind, code, result);
         if (kind === 'check') r.checkedDigest = digest;
-        r.note = kind === 'check' ? '本地 skill 离线检查通过；不代表平台验收' : r.platform === 'wechat' ? '已读到本次显式草稿保存成功回执；未发表' : '已填好，专用窗口留给你核对并亲自发布';
+        r.note = kind === 'check' ? '本地 skill 离线检查通过；不代表平台验收' : kind === 'publish' ? '已提交发布并读到成功回执；公开状态待核对' : r.platform === 'wechat' ? '已读到本次显式草稿保存成功回执；未发表' : '已填好，专用窗口留给你核对并亲自发布';
+        if(kind==='publish'&&typeof result.url==='string')r.url=result.url;
         if (kind !== 'check' && r.episodeId) {
           db.prepare('UPDATE tasks SET state=?,detail=?,updated_at=? WHERE episode_id=? AND platform=?').run(r.state, r.note, new Date().toISOString(), r.episodeId, r.platform);
         }

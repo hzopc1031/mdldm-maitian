@@ -1,4 +1,4 @@
-const time=at=>at&&Number.isFinite(Date.parse(at))?new Intl.DateTimeFormat('zh-CN',{timeZone:'Asia/Shanghai',dateStyle:'short',timeStyle:'short'}).format(new Date(at)):'时间未记录';
+﻿const time=at=>at&&Number.isFinite(Date.parse(at))?new Intl.DateTimeFormat('zh-CN',{timeZone:'Asia/Shanghai',dateStyle:'short',timeStyle:'short'}).format(new Date(at)):'时间未记录';
 const short=id=>String(id).slice(0,8);
 const tag=(esc,item)=>`<span class="status-tag" data-state="${esc(item.state)}" data-record-id="${esc(item.recordId??'')}">${esc(item.name)} · ${esc(item.label)}</span>`;
 const reference=(esc,item)=>`<span class="note">${esc(short(item.rowId))}${item.recordId?' / '+esc(short(item.recordId)):''}</span>`;
@@ -15,7 +15,7 @@ export function prepareSections(esc,data) {
   <section class="panel status-section" aria-labelledby="status-failures-heading"><h2 class="h2" id="status-failures-heading">失败详情</h2><p class="note">未知结果请先核对原平台，避免重复执行。旧记录缺少的报错字段不补造。</p>${data.failures.map(item=>`<details class="status-failure" data-failure-record="${esc(item.recordId??'')}"><summary>${esc(item.title)} · ${esc(item.name)} · ${esc(item.label)} ${reference(esc,item)}</summary><dl>${Object.entries(item.detail).map(([key,value])=>`<dt>${esc(key)}</dt><dd><pre>${esc(value||'未记录')}</pre></dd>`).join('')}</dl></details>`).join('')||'<p class="note">暂无失败或未知记录。</p>'}</section>${prompt}`;
 }
 export function preparePage(esc,data) {
- return `<main class="publish-page status-page"><header class="publish-heading"><div><h1 class="h1">发布状态</h1><p class="lead">内容由 AI 提交，这里查看进度和待办。</p></div><div class="btns"><button class="btn" type="button" data-open-ai-prompt>复制 AI 接入指令</button><span class="status-readonly">只读</span></div></header><p id="status-message" class="note" role="status" aria-live="polite">公众号仅存草稿；最终发布由你完成。</p><div id="status-sections">${prepareSections(esc,data)}</div></main>`;
+ return `<main class="publish-page status-page"><header class="publish-heading"><div><h1 class="h1">发布状态</h1><p class="lead">内容由 AI 提交，这里查看进度和待办。</p></div><div class="btns"><button class="btn" type="button" data-open-ai-prompt>复制 AI 接入指令</button><span class="status-readonly">只读</span></div></header><p id="status-message" class="note" role="status" aria-live="polite">公众号仅存草稿；X 和小红书可按稿件设置直接发布，发布后核对公开链接。</p><div id="status-sections">${prepareSections(esc,data)}</div></main>`;
 }
 export function initPreparePage({esc,api,toast}) {
  const root=document.querySelector('.status-page');if(!root)return;
@@ -58,7 +58,7 @@ export function initPreparePage({esc,api,toast}) {
    try{const data=await api('/api/prep/status');if(!root.isConnected)return;
      // 不打断已展开的诊断、键盘焦点或正在置前的按钮。
      if(!root.querySelector('details[open],button:disabled')&&!root.contains(document.activeElement))root.querySelector('#status-sections').innerHTML=prepareSections(esc,data);
-     root.querySelector('#status-message').textContent='公众号仅存草稿；最终发布由你完成。状态更新于 '+time(new Date().toISOString());
+     root.querySelector('#status-message').textContent='公众号仅存草稿；X 和小红书可按稿件设置直接发布，发布后核对公开链接。状态更新于 '+time(new Date().toISOString());
    }catch{if(root.isConnected)root.querySelector('#status-message').textContent='暂未取得新状态，保留上次记录。';}finally{refreshing=false;}
  },5000);
 }

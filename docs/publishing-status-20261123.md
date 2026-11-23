@@ -4,6 +4,8 @@
 
 2026-11-23 21:47：按 Liu 指示清理历史不规则数据：删除 10 条缺栏目的测试准备记录（含占用中的《【测试稿】填写后停下》）和 2 条测试原稿，并清掉对应任务目录；保留 10 条带栏目的真实已发布 X 记录。清理前一致性备份 `evidence/publish-redesign-20261123/hub-before-cleanup-2026-11-23T13-47-18-560Z.db`。状态页现为 10 行、无空栏目、无待办、无失败。
 
+2026-11-23 22:19：按 Liu「发草稿还是直接发布由 AI 控制」的要求，`fill` 的 `mode` 扩展为 `fill / draft / publish`。X 直接发布＝在已核验的专用编辑器点 Post 并读回 `/status/` 链接；小红书直接发布＝`post --account ai --submit` 且回执 `submitted:true`；公众号为唯一例外，只能存草稿，publish 请求会明确报错。契约改为 `submit:true`、`publishPlatforms:["x","xhs"]`，`Update-Maitian.ps1` 的启动校验同步改为核对 `publishPlatforms`。三组离线自测通过，已重启（PID 24200，备份 `hub-before-20261123-221914-721.db`）。两种真实发布都**尚未实测**。
+
 2026-11-23 22:11：X 存草稿实测通过。测试稿 `5a18a6eb` 建稿→检查→`fill(mode:"draft")`，状态 `draft_saved`；按 Drafts 列表首行核验，确认在 @PeanutPair 的 Unsent posts 里。修复点：确认按钮改用 `confirmationSheetConfirm`，保存后无 toast 时重开编辑框点 Drafts 核对。证据 `evidence/x-draft-20261123/`。X 草稿箱留 2 条【测试】草稿，待本人删；麦田保留该测试记录供核对。
 
 2026-11-23 22:08：X 接入填好留窗与存草稿两种收尾。`fill` 不带 mode 时填好留窗（本人点 Post）；`mode:"draft"` 时关闭编辑框并点保存，读到保存提示才记 `draft_saved`，读不到记 `unknown`。X 专用编辑器已启用（`browserExecution:true`，profile 未变，配置备份 `evidence/publish-redesign-20261123/config-before-x-draft-20261123-220709.json`）。三平台草稿能力现均为 supported。离线三组自测通过，正式 8787 已重启（PID 8404，备份 `hub-before-20261123-220745-092.db`）。X 真实存草稿仍需 9336 专用 Chrome 登录后实测。

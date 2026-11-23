@@ -187,7 +187,7 @@ try {
   // 新发布准备 API：执行真实 HTTP 路由，子进程全部替身；不运行第三方 skill。
   assert.equal((await request('/api/prep', {auth:false})).code,401);
   assert.equal((await request('/api/prep/contract')).json().version,4);
-  assert.deepEqual((await request('/api/prep/contract')).json().finalPublishPlatforms,[]);
+  assert.deepEqual((await request('/api/prep/contract')).json().publishPlatforms,['x','xhs']);
   assert.match((await request('/api/prep/rules-module')).body,/xWeightedCount/);
   const aiPrompt=await request('/api/prep/ai-prompt');assert.equal(aiPrompt.code,200);assert.match(aiPrompt.body,/Origin: http:\/\/127\.0\.0\.1:8787/);assert.match(aiPrompt.body,/scheduledAt/);assert.match(aiPrompt.body,/不能发布|不发布/);
   assert.equal((await request('/api/prep/posts',{action:{type:'create',input:{title:'test',content:'test'}}})).code,403);

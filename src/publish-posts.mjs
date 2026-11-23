@@ -113,9 +113,9 @@ export function createPostService({db,home,config,prep,spawnChild=spawn,env=proc
     return {post:get(id),validation};
   }
   function fill(id,p,caller,mode='fill') {
-    if(!['fill','draft'].includes(mode))fail('INVALID_INPUT','填写方式只接受 fill 或 draft');
+    if(!['fill','draft','publish'].includes(mode))fail('INVALID_INPUT','填写方式只接受 fill、draft 或 publish');
     const r=raw(id),e=r.editions[p];if(!e)fail('NOT_FOUND','平台不存在');if(!e?.preparationId)fail('CHECK_REQUIRED','请先检查平台版本');const validation=validateEdition(p,e,config);if(!validation.ok)fail('VALIDATION_FAILED','平台版本校验未通过');
-    prep.start(e.preparationId,mode==='draft'?'draft':'execute',caller);return get(id);
+    prep.start(e.preparationId,mode, caller);return get(id);
   }
   return {create,meta,get,list:()=>all().map(view),update,generate,check,fill,busy,
     asset(id,p,index){const r=raw(id),e=p==='master'?r.master:r.editions[p];if(!e)fail('NOT_FOUND','平台不存在');const file=index==='cover'?e.cover:e.images[Number(index)];if(!file)fail('NOT_FOUND','图片不存在');return file;},
