@@ -7,6 +7,7 @@ import { visibleXIdentity } from './l1-x-dom.mjs';
 const port = 9336;
 const compose = 'https://x.com/compose/post';
 const editorSelector = '[data-testid="tweetTextarea_0"]';
+const humanDelay = () => delay(5000 + Math.floor(Math.random() * 5000));
 const fileSelector = 'input[type="file"][data-testid="fileInput"]';
 
 export function isDedicatedXProfile(value) {
@@ -238,12 +239,14 @@ export async function fillXEditor({ account, profile, job, folder }, connect = c
     evidence.stage = 'fill-text';
     record();
     if (!await identity() || !await view('focus')) throw new Error('X 账号或空白编辑框已变化');
+    await humanDelay();
     await command('Input.insertText', { text });
     if (job.images.length) {
       const input = await waitFor(() => view('input', false), '未读回完整 X 正文或没有确认空附件区');
       if (!await identity()) throw new Error('设置附件前 X 身份已变化');
       evidence.stage = 'attach-images';
       record();
+      await humanDelay();
       await command('DOM.setFileInputFiles', { objectId: input, files: job.images });
     }
     const after = await waitFor(async () => {
@@ -261,6 +264,7 @@ export async function fillXEditor({ account, profile, job, folder }, connect = c
     evidence.existingTabsPreserved = true;
     record();
     if (publish) {
+      await humanDelay();
       evidence.stage = 'publish';
       record();
       const clicked = await evaluate(() => {
