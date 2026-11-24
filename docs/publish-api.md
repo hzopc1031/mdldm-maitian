@@ -50,7 +50,7 @@
 
 发布前必须先 `check` 通过；发布成功后 `r.url` 与证据里保留公开链接。结果未确认时按 `unknown` 停手，不重发、不换 ID。实际可用性看 `/api/prep` 的每平台 `publishEnabled`。
 
-公众号摘要用 digest（兼容 caption），最多120字；作者最多16字。现有 wechat.mjs 没有作者填写实现，作者保存在版本中，需在草稿里手填。图片上限：X 4、小红书18、公众号20。标题上限：小红书20（与本地 util.mjs 半字算法一致）、公众号32。X默认加权280；本地 `config.publishPrep.x.premium:true` 时25000。X话题计入实际下载正文及加权计数；小红书正文计数含skill为话题预留的字数。修改配置须先备份 config.json；本次没有改配置。前端和后端共用 `src/platform-rules.mjs`。
+公众号摘要用 digest（兼容 caption），最多120字；作者最多16字。现有 wechat.mjs 没有作者填写实现，作者保存在版本中，需在草稿里手填。图片上限：X 4、小红书18、公众号20。标题上限：小红书20（与本地 util.mjs 半字算法一致）、公众号32。X 默认按长帖 25000 加权；`config.publishPrep.x.premium:false` 时才按 280。X话题计入实际下载正文及加权计数；小红书正文计数含skill为话题预留的字数。修改配置须先备份 config.json；本次没有改配置。前端和后端共用 `src/platform-rules.mjs`。
 
 公众号执行由仓库 `prep-wechat-run.mjs` 包装原 skill 库：先精确profile核验，再读可见昵称，必须为TwoPeanuts的AI；仍调用原草稿保存实现及原清理函数。当前skill内置的第二次填写尝试在首次失败日志处被工作台保护中止；PAGE_CHANGED/UPLOAD_FAILED不会进入第二次尝试。不修改skill。若本地skill的重试边界发生变化，包装器停止而不继续填写。
 

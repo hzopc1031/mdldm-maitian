@@ -1,4 +1,4 @@
-// Shared browser/Node rules. xhsTitleCount mirrors local xhs-publish util.mjs titleLen.
+﻿// Shared browser/Node rules. xhsTitleCount mirrors local xhs-publish util.mjs titleLen.
 export const platforms = ['x','xhs','wechat'];
 export const charCount = value => Array.from(String(value ?? '')).length;
 export function xEditionText(input){const content=String(input.content??''),topics=(input.topics??[]).map(t=>String(t).replace(/^#/,'' )).filter(t=>t&&!content.includes('#'+t));return content+(topics.length?'\n\n'+topics.map(t=>'#'+t).join(' '):'');}
@@ -11,7 +11,7 @@ export function xWeightedCount(value) {
   return total+plain(input.slice(last));
 }
 export function platformRules(config={}) {
-  return {x:{title:null,body:config.publishPrep?.x?.premium===true?25000:280,imagesMin:0,imagesMax:4},xhs:{title:20,body:1000,imagesMin:1,imagesMax:18},wechat:{title:32,body:50000,digest:120,author:16,imagesMin:0,imagesMax:20}};
+  return {x:{title:null,body:config.publishPrep?.x?.premium===false?280:25000,imagesMin:0,imagesMax:4},xhs:{title:20,body:1000,imagesMin:1,imagesMax:18},wechat:{title:32,body:50000,digest:120,author:16,imagesMin:0,imagesMax:20}};
 }
 export function validateEdition(platform,input,config={}) {
   const rule=platformRules(config)[platform];if(!rule)throw Error('不支持的平台');
