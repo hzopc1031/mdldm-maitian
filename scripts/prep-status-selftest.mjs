@@ -1,10 +1,10 @@
-// 完全离线；模拟数据、临时内存库，无平台或浏览器动作。
+﻿// 完全离线；模拟数据、临时内存库，无平台或浏览器动作。
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import {DatabaseSync} from 'node:sqlite';
 import {prepStatus,readPrepStatus,STATUS_LABELS,statusLabel} from '../src/prep-status.mjs';
 import {preparePage,initPreparePage} from '../src/web/prepare-page.js';
-const expected={prepared:'已生成',generated:'已生成',checked:'检查通过',awaiting_user:'已填好待你点',draft_saved:'已存草稿',failed:'失败',check_failed:'失败',unknown:'未知',published:'已发布',submitted:'未知',already_exists:'未知',editing:'未生成',idle:'未生成',running:'处理中'};
+const expected={prepared:'已生成',generated:'已生成',checked:'检查通过',awaiting_user:'已填好待你点',draft_saved:'已存草稿',failed:'失败',check_failed:'失败',unknown:'未知',published:'已发布',submitted:'未知',already_exists:'平台已有同稿',editing:'未生成',idle:'未生成',running:'处理中'};
 assert.deepEqual(STATUS_LABELS,expected);assert.equal(statusLabel('new-state'),'未知');
 const catalog=Array.from({length:20},(_,i)=>({id:'mock'+i,name:'模拟平台'+i}));
 const records=[{id:'linked',platform:'mock0',state:'draft_saved'},{id:'pending',platform:'xhs',state:'awaiting_user',title:'待办'},
