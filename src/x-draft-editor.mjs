@@ -1,4 +1,4 @@
-﻿import fs from 'node:fs';
+import fs from 'node:fs';
 import path from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
 import { promisify } from 'node:util';
@@ -275,16 +275,21 @@ export async function fillXEditor({ account, profile, job, folder }, connect = c
         return true;
       });
       if (!clicked) throw new Error('没有找到 X 发布按钮，结果未确认；请本人核对页面');
-      let url = '';
-      for (let i = 0; i < 40; i++) {
+      let url = '', ok = false;
+      for (let i = 0; i < 120; i++) {
         await delay(500);
-        url = await evaluate(() => location.href);
-        if (/\/status\/\d+/.test(url)) break;
+        const state = await evaluate(() => ({
+          url: location.href,
+          body: (document.body.innerText || '').slice(-1200),
+          editor: Boolean(document.querySelector('[data-testid="tweetTextarea_0"]')),
+        }));
+        url = state.url;
+        evidence.publishToast = state.body;
+        if (/\/status\/\d+/.test(url)) { ok = true; break; }
+        if (/your post was sent|post was sent|已发送|已发布|view post|查看帖子/i.test(state.body)) { ok = true; break; }
+        if (!state.editor && i > 4) { ok = true; break; }
       }
-      const toast = await evaluate(() => document.body.innerText);
-      evidence.publishToast = typeof toast === 'string' ? toast.slice(-1000) : '';
       evidence.publishUrl = url;
-      const ok = /\/status\/\d+/.test(url) || /your post was sent|post was sent|已发送|已发布/i.test(evidence.publishToast);
       record();
       if (!ok) throw new Error('未读到 X 发布成功确认，结果未确认；请到主页核对，勿重发');
       return { submitted: true, url, editorFilled: true, imageCount: after.imageCount, screenshot: evidence.after };
