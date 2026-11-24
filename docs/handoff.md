@@ -1,8 +1,10 @@
 ﻿# 交接文件（HANDOFF）
 
-最后更新：2026-11-23 22:20（北京时间）。任何 AI 接手前先读本文件，再按文末「必读顺序」展开。
+最后更新：2026-11-24 07:49（北京时间，补本次X真实业务发布结果；其他历史内容未改）。任何 AI 接手前先读本文件，再按文末「必读顺序」展开。
 
 ## 一句话现状
+
+**11月24日真实X发布补证**：原稿65dbca9d-75ec-4f67-ac9a-81f8db227fd0经正式HTTP `fill(mode:publish)` 单次发布成功，实际原帖2125013136176816253，独立只读核验全文/来源通过。但工作台回执误报unknown，已在同ID备注说明，禁止重发。执行证据见[本次记录](<D:/Ai Infra Tools/DeepSeek Harness/X日常AI帖/2026-11-24-工作台发布/执行记录.md>)。发布器等待location变为/status、延后只取body尾1000字，本轮/home未捕获成功提示；待完善成功回执与原ID只读核对收敛。本次未改代码、服务、配置、skill，未直接改库，未把unknown伪改published。以下“0条”和“未实测”为11月23日历史快照，不代表本轮实况。
 
 2026-11-23 22:19 契约已改为可发布：`finalPublishPlatforms:["x","xhs"]`、`submit:true`、`fillModes:["fill","draft","publish"]`。接手时重新查接口，不用旧快照。
 
@@ -66,6 +68,10 @@ X 草稿验证：关闭编辑框 → 弹窗点「保存」→ 先读页面提示
 5. 清理历史数据：先删 10 条缺栏目测试记录 + 2 条测试原稿，再按指示删剩余 10 条旧已发布 X 回执（已导出 `evidence/publish-redesign-20261123/removed-legacy-posts-*.json`）。当前记录 0 条。
 6. 离线自测三组通过：`platform-rules-selftest`、`prep-status-selftest`、`l1-web-selftest`。
 7. 2026-11-23 22:19 起 `mode` 增加 `publish`：X 由已验证编辑器填完后点 Post 并读回 `/status/` 链接；小红书调 `xhs-publish post --account ai --submit`，`submitted:true` 才记 `published`；公众号请求会明确报「只能存草稿」。契约改为 `submit:true`、`publishPlatforms:["x","xhs"]`，`Update-Maitian.ps1` 的启动后校验同步改为核对 `publishPlatforms`。真实发布尚未实测。
+
+## 耗时（含 5–10 秒随机延迟）
+
+- 公众号 1.5–2 分钟；小红书 2–2.5 分钟；X 1–1.5 分钟；三端同一篇约 4–5 分钟。
 
 ## 运维命令（Windows，仓库根执行）
 

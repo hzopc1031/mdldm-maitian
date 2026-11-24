@@ -38,6 +38,8 @@
 
 `mode` 必填，只有两个值：`"draft"`（直接进平台草稿箱）或 `"publish"`（直接发布，仅 X、小红书）。没有默认值，不传会报 `mode 必填`；也没有第三种「填好留窗」的写法。draft 与 publish 都要先检查通过；结果未确认时按 `unknown` 处理，不重跑。实际可用性看 `/api/prep` 返回的 `draft.supported` 与 `publishEnabled`。
 
+执行时每步随机停 5–10 秒，单平台约 1–2.5 分钟，三端约 4–5 分钟。
+
 ## 直接发布（mode:publish）
 
 `fill` 带 `mode:"publish"` 表示由工作台直接发布出去（2026-11-23 22:19 起）：
