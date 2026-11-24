@@ -7,7 +7,7 @@ import path from 'node:path';
 import http from 'node:http';
 import {once} from 'node:events';
 import {spawn} from 'node:child_process';
-const supportedTests = ['unauth','invalid','home','traffic','system','prepare','prepare-flow','enabled-system','columns'];
+const supportedTests = ['unauth','invalid','home','traffic','system','prepare','prepare-flow','enabled-system','columns','columns-resize'];
 const tests = process.argv.length > 2 ? process.argv.slice(2) : supportedTests;
 if (tests.some(test => !supportedTests.includes(test))) throw new Error('Unknown browser acceptance scenario');
 const output=path.resolve(process.env.MAITIAN_QA_OUT || '_local-headless-accept');
@@ -32,7 +32,7 @@ const oldObservation=new Date(Date.now()-2*864e5).toISOString();
 saveObservation({platform:'xhs',account:'TwoPeanuts',captured_at:oldObservation,source:'isolated-test',example:true,
   posts:[{id:'stale-fixture',text:'旧观测（假数据）',created_at:oldObservation,views:12}]});
 const {handle}=await import('../src/web.mjs');
-let current, report, violations=[];
+let current, report, columnWrites=0, violations=[];
 // Added only to test responses; the production HTML and handler are unchanged.
 function browserChecks(test, image) {
   const options=JSON.stringify({test,image,width});
@@ -57,12 +57,14 @@ function browserChecks(test, image) {
       const expected=test==='home'?'/':test==='traffic'?'/p#/traffic':test.endsWith('system')?'/p#/system':'/p#/prepare';
       check(location.pathname+location.hash===expected,'POST preserved route');
       if(!sessionStorage.getItem('qa-reloaded')){sessionStorage.setItem('qa-reloaded','1');location.reload();return;}
-      if(test==='columns') {
+      if(test.startsWith('columns')) {
         await wait(()=>!!document.querySelector('[data-column-manage]'));
+        if(test==='columns-resize')dispatchEvent(new Event('resize'));
         document.querySelector('[data-column-manage]').click();
         const panel=document.querySelector('#column-manager');check(!panel.hidden,'manager opens');
         if(!sessionStorage.getItem('qa-columns-done')){
           let form=panel.querySelector('form');form.elements.namedItem('name').value='AI验收栏目';form.elements.namedItem('description').value='隔离界面验收，不涉及平台操作';
+          if(test==='columns-resize'){dispatchEvent(new Event('resize'));dispatchEvent(new Event('resize'));}
           form.requestSubmit();await wait(()=>panel.textContent.includes('栏目已创建'));
           const column=(await (await fetch('/api/prep/columns')).json()).columns.find(c=>c.name==='AI验收栏目');check(!!column,'created via page');
           panel.querySelector('[data-column-edit="'+column.id+'"]').click();form=panel.querySelector('form');check(form.elements.namedItem('name').value===column.name,'edit prefilled');
@@ -159,7 +161,7 @@ const server=http.createServer(async(req,res)=>{
     try {const value=JSON.parse(body); report={ok:value.ok===true,detail:String(value.detail).slice(0,300),viewport:value.viewport};}catch{report={ok:false,detail:'invalid QA report'};}
     res.end('ok');return;
   }
-  if(req.url.startsWith('/api/action') || (req.method==='POST' && req.url!=='/auth' && req.url!=='/api/prep' && !(current==='columns'&&req.url==='/api/prep/columns'))) {
+  if(req.url.startsWith('/api/action') || (req.method==='POST' && req.url!=='/auth' && req.url!=='/api/prep' && !(current.startsWith('columns')&&req.url==='/api/prep/columns'))) {
     violations.push('unexpected mutation');res.writeHead(403);res.end();return;
   }
   if(req.url==='/api/prep' && req.method==='POST') {
@@ -168,6 +170,7 @@ const server=http.createServer(async(req,res)=>{
     if(JSON.parse(body).type!=='create'){violations.push('unexpected skill');res.writeHead(403);res.end();return;}
     req=Object.assign(Object.create(req),{[Symbol.asyncIterator]:async function*(){yield Buffer.from(body);}});
   }
+  if(req.url==='/api/prep/columns'&&req.method==='POST')columnWrites++;
   const end=res.end.bind(res);
   res.end=(body,...args)=>{
     if((typeof body==='string'||Buffer.isBuffer(body)) && /^<!doctype html/i.test(String(body)))body=String(body).replace('</body>',browserChecks(current,fixtureImage)+'</body>');
@@ -184,7 +187,7 @@ const evidence={at:new Date().toISOString(),mode:'Chrome headless CLI; isolated 
 try {
   if(!binary)throw new Error('Chrome not found');
   for(const test of tests) {
-    current=test;report=null;
+    current=test;report=null;columnWrites=0;
     config.publishPrep.browserExecution=test==='enabled-system';
     for(const p of ['x','xhs','wechat'])config.l1[p].browserExecution=test==='enabled-system';
     if(test==='prepare') {
@@ -202,8 +205,10 @@ try {
     const timer=setTimeout(()=>{timedOut=true;child.kill();},25000);
     const [code]=await once(child,'close');clearTimeout(timer);
     if(test==='prepare')db.prepare('DELETE FROM publish_preparations WHERE id IN (?,?)').run('legacy-wechat-fixture','project-x-fixture');
-    const result={test,ok:code===0&&!timedOut&&report?.ok===true&&fs.existsSync(shot),code,detail:report?.detail || 'browser did not confirm assertions',viewport:report?.viewport,screenshot:shot};
+    const writesOk=!test.startsWith('columns')||columnWrites===2;
+    const result={test,ok:code===0&&!timedOut&&report?.ok===true&&fs.existsSync(shot)&&writesOk,code,detail:!writesOk?'expected exactly one create and one edit':report?.detail || 'browser did not confirm assertions',...(test.startsWith('columns')?{columnWrites}:{}),viewport:report?.viewport,screenshot:shot};
     evidence.results.push(result);console.log(JSON.stringify(result));
+    if(test.startsWith('columns'))db.prepare('DELETE FROM publish_columns WHERE name IN (?,?)').run('AI验收栏目','AI案例库');
   }
   if(violations.length)throw new Error('test attempted forbidden operations');
 }catch(e){evidence.results.push({test:'environment',ok:false,detail:e.code || e.message});}

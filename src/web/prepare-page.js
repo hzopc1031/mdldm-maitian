@@ -3,6 +3,9 @@ const short=id=>String(id).slice(0,8);
 const tag=(esc,item)=>`<span class="status-tag" data-state="${esc(item.state)}" data-record-id="${esc(item.recordId??'')}">${esc(item.name)} · ${esc(item.label)}</span>`;
 const reference=(esc,item)=>`<span class="note">${esc(short(item.rowId))}${item.recordId?' / '+esc(short(item.recordId)):''}</span>`;
 let activeColumn='全部',lastData=null;
+// The page shell also invokes initialization on resize. Bind each DOM root once;
+// a newly rendered page still gets its own listeners and polling timer.
+const initializedPages=new WeakSet();
 export function columnManager(esc,columns=[]) {
  return `<div class="column-manager-heading"><div><h2 class="h2">栏目管理</h2><p class="note">AI 根据栏目说明选择。修改名称会同步已有记录，稿件内容和发布状态保持不变。</p></div><button class="btn" type="button" data-column-close>收起</button></div><div class="column-manager-grid"><div class="column-list">${columns.map(c=>`<article class="column-definition"><div><h3>${esc(c.name)}</h3><p class="note">${esc(c.description)}</p></div><button class="btn" type="button" data-column-edit="${esc(c.id)}" aria-label="编辑${esc(c.name)}">编辑</button></article>`).join('')}</div><form data-column-form class="column-form"><h3 data-column-form-title>新建栏目</h3><label>栏目名称<input name="name" required maxlength="40" placeholder="如：AI工具分享"></label><label>栏目说明<textarea name="description" required maxlength="500" rows="4" placeholder="说明适合哪些内容，帮助 AI 选择"></textarea></label><p data-column-message class="note" role="status" aria-live="polite"></p><div class="btns"><button class="btn pri" type="submit">保存栏目</button><button class="btn" type="button" data-column-new>取消编辑</button></div></form></div>`;
 }
@@ -20,7 +23,8 @@ export function preparePage(esc,data) {
  return `<main class="publish-page status-page"><header class="publish-heading"><div><h1 class="h1">发布状态</h1><p class="lead">内容由 AI 提交，这里查看进度和待办。</p></div><div class="btns"><button class="btn" type="button" data-column-manage aria-expanded="false" aria-controls="column-manager">管理栏目</button><button class="btn" type="button" data-copy-prompt>复制 AI 接入指令</button></div></header><section id="column-manager" class="panel status-section column-manager" hidden>${columnManager(esc,data.columns)}</section><p id="status-message" class="note" role="status" aria-live="polite">公众号仅存草稿；X 和小红书可按稿件设置直接发布，发布后核对公开链接。</p><div id="status-sections">${prepareSections(esc,data)}</div></main>`;
 }
 export function initPreparePage({esc,api,toast}) {
- const root=document.querySelector('.status-page');if(!root)return;
+ const root=document.querySelector('.status-page');if(!root||initializedPages.has(root))return;
+ initializedPages.add(root);
  const focusRecord=()=>{const params=new URLSearchParams(location.hash.split('?')[1]||''),id=params.get('post')||params.get('record');if(!id)return;const node=[...root.querySelectorAll('[data-status-row],[data-record-id]')].find(el=>el.dataset.statusRow===id||el.dataset.recordId===id);if(node){node.scrollIntoView({block:'center'});(node.closest('[data-status-row]')||node).focus();}};
  focusRecord();
  root.addEventListener('click',async event=>{
