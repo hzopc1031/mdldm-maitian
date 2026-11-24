@@ -1,4 +1,4 @@
-import fs from 'node:fs';
+﻿import fs from 'node:fs';
 import path from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
 import { promisify } from 'node:util';
@@ -175,7 +175,7 @@ function existingXEditor(url) {
 // 只管理本次新建的目标。保留新编辑页及所有旧标签，断开调试连接。
 export async function fillXEditor({ account, profile, job, folder }, connect = connectDedicatedBrowser, { saveDraft = false, publish = false } = {}) {
   if (!/^[A-Za-z0-9_]{1,15}$/.test(account) || !isDedicatedXProfile(profile) || job.submit !== false ||
-      !job.content.trim() || job.content.length > 2000 || job.images.length > 4) {
+      !job.content.trim() || job.content.length > 25000 || job.images.length > 4) {
     throw new Error('X 文图草稿配置或素材未通过校验');
   }
   const evidence = { at: new Date().toISOString(), stage: 'verify-browser', submitted: false };
