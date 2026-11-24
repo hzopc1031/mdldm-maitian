@@ -7,7 +7,7 @@ import { visibleXIdentity } from './l1-x-dom.mjs';
 const port = 9336;
 const compose = 'https://x.com/compose/post';
 const editorSelector = '[data-testid="tweetTextarea_0"]';
-const humanDelay = () => delay(5000 + Math.floor(Math.random() * 5000));
+const humanDelay = () => delay(1000 + Math.floor(Math.random() * 4000));
 const fileSelector = 'input[type="file"][data-testid="fileInput"]';
 
 export function isDedicatedXProfile(value) {
