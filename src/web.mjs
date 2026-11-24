@@ -13,7 +13,7 @@ import { createPrepService, BROWSER_BLOCK } from './publish-prep.mjs';
 import {createPostService} from './publish-posts.mjs';
 import {readPrepStatus} from './prep-status.mjs';
 import {platformRules} from './platform-rules.mjs';
-import {prepColumns,reclassifyColumns} from './prep-columns.mjs';
+import {readPrepColumns,managePrepColumn,reclassifyColumns} from './prep-columns.mjs';
 import { createAgeReviewReader } from './l1-age-review.mjs';
 import { videoPrefillJobs } from './video-prefill-jobs.mjs';
 import { videoPrefillPublications } from './video-prefill-publications.mjs';
@@ -329,13 +329,26 @@ export async function handle(req, res) {
   }
   if (u.pathname === '/api/prep/rules-module' && req.method==='GET') return send(res,200,fs.readFileSync(path.join(DIR,'platform-rules.mjs')),'text/javascript; charset=utf-8');
   if (u.pathname === '/api/prep' && req.method === 'GET') return send(res, 200, { capabilities: prep.publicCapabilities(), rules:platformRules(config), records: ageReview.forRecords(prep.list()) });
-  if (u.pathname === '/api/prep/contract' && req.method === 'GET') return send(res,200,{version:4,columnOnly:true,columns:prepColumns,columnSelection:'caller_selects_defined',agentAttribution:'caller_reported',operationActors:true,finalPublishPlatforms:['x','xhs'],submit:true,manuscriptVersion:2,requiredCreate:['column','scheduledAt','actor'],requiredFill:['mode'],scheduledPublish:'recorded_only',noteLimit:500,fillModes:['draft','publish'],publishPlatforms:['x','xhs']});
+  if (u.pathname === '/api/prep/contract' && req.method === 'GET') return send(res,200,{version:4,columnOnly:true,columns:readPrepColumns(db),columnSelection:'caller_selects_defined',columnManagement:true,agentAttribution:'caller_reported',operationActors:true,finalPublishPlatforms:['x','xhs'],submit:true,manuscriptVersion:2,requiredCreate:['column','scheduledAt','actor'],requiredFill:['mode'],scheduledPublish:'recorded_only',noteLimit:500,fillModes:['draft','publish'],publishPlatforms:['x','xhs']});
+  if(u.pathname==='/api/prep/columns') {
+    if(!isLoopback(req.socket.remoteAddress)||!localRequestAllowed(req))return send(res,403,{code:'LOCAL_ONLY',error:'栏目管理仅允许同源本机调用'});
+    if(req.method==='GET')return send(res,200,{ok:true,columns:readPrepColumns(db)});
+    if(req.method!=='POST')return send(res,405,{code:'METHOD_NOT_ALLOWED',error:'只支持读取、新建和编辑栏目'});
+    try{
+      let body='';for await(const chunk of req){body+=chunk;if(Buffer.byteLength(body)>16384)return send(res,413,{error:'请求过大'});}
+      const a=JSON.parse(body);if(!a||Object.keys(a).some(k=>!['type','id','input','revision','actor'].includes(k)))throw Object.assign(Error('栏目管理字段不对'),{code:'INVALID_INPUT'});
+      if(actions.some(a=>!a.done)||prep.busy()||posts.busy())return send(res,409,{code:'BUSY',error:'当前有操作运行，请稍后再管理栏目'});
+      return send(res,200,managePrepColumn(db,a));
+    }catch(e){return send(res,e.code==='CONFLICT'?409:e.code==='NOT_FOUND'?404:400,{code:e.code??'INVALID_INPUT',error:redactL1(e.message,[W.key,W.widgetToken])});}
+  }
   if (u.pathname === '/api/prep/ai-prompt' && req.method === 'GET') {
     try {
       const markdown=fs.readFileSync(path.join(ROOT,'docs','ai-publish-prompt.md'),'utf8');
       const block=/```text\r?\n([\s\S]*?)```/.exec(markdown);
       if(!block)throw new Error('prompt block missing');
-      return send(res,200,block[1],'text/plain; charset=utf-8');
+      const columns=readPrepColumns(db);
+      const prompt=block[1].replaceAll('{{COLUMN_EXAMPLE}}',JSON.stringify(columns[0]?.name??'请先定义栏目').slice(1,-1))+'\n【平台当前栏目，按主要内容选择】\n'+columns.map(c=>'- '+c.name+'：'+c.description).join('\n');
+      return send(res,200,prompt,'text/plain; charset=utf-8');
     } catch { return send(res,404,{code:'NOT_FOUND',error:'接入指令尚未生成'}); }
   }
   if(u.pathname.startsWith('/api/prep/posts')) {

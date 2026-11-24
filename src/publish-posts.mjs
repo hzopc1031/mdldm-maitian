@@ -7,14 +7,14 @@ import {spawn} from 'node:child_process';
 import {wechatEditionJob} from './prep-wechat.mjs';
 import {normalizePrep} from './publish-prep.mjs';
 import {normalizePrepAgent} from './prep-agent.mjs';
-import {prepColumn} from './prep-columns.mjs';
+import {prepColumn,initPrepColumns,readPrepColumns} from './prep-columns.mjs';
 import {platforms,validateEdition,platformRules} from './platform-rules.mjs';
 const fields=['title','content','images','cover','topics','video','digest','caption','author','imagePositions','promotionReview'];
 const locked=['running','unknown','awaiting_user','draft_saved','published','submitted','already_exists','failed'];
 const fail=(code,message)=>{throw Object.assign(Error(message),{code});};
 const isoTime=/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(?::\d{2}(?:\.\d{1,9})?)?(?:Z|[+-]\d{2}:\d{2})$/;
-export function postColumn(value) {
-  return prepColumn(value);
+export function postColumn(value,columns) {
+  return prepColumn(value,columns);
 }
 export function postSchedule(value) {
   if(typeof value!=='string'||!isoTime.test(value))fail('INVALID_INPUT','定时时间须为带时区的 ISO 时间，如 2026-11-24T09:00:00+08:00');
@@ -44,6 +44,7 @@ export function manuscript(input) {
 }
 const editionSchema={type:'object',additionalProperties:false,required:['title','content','topics','digest','author'],properties:{title:{type:'string'},content:{type:'string'},topics:{type:'array',items:{type:'string'}},digest:{type:'string'},author:{type:'string'}}};
 export function createPostService({db,home,config,prep,spawnChild=spawn,env=process.env,generationTimeout=240000}) {
+  initPrepColumns(db);
   db.exec('CREATE TABLE IF NOT EXISTS publish_posts (id TEXT PRIMARY KEY, record TEXT NOT NULL)');
   const save=r=>db.prepare('INSERT OR REPLACE INTO publish_posts VALUES (?,?)').run(r.id,JSON.stringify(r));
   const raw=id=>{const row=db.prepare('SELECT record FROM publish_posts WHERE id=?').get(id);if(!row)fail('NOT_FOUND','原稿不存在');return JSON.parse(row.record);};
@@ -59,12 +60,12 @@ export function createPostService({db,home,config,prep,spawnChild=spawn,env=proc
     if(caller===undefined)fail('INVALID_INPUT','建稿需要 AI 来源：runtime、sessionId');
     let source;
     try{source=actor(caller);}catch(error){fail('INVALID_INPUT',error.message);}
-    const record={version:2,id:crypto.randomUUID(),column:postColumn(meta.column),scheduledAt:postSchedule(meta.scheduledAt),note:postNote(meta.note),master,editions:Object.fromEntries(platforms.map(p=>[p,{...master,cover:master.cover??master.images[0]??null}])),generation:{state:'idle'},createdAt:new Date().toISOString(),actor:source,actorAttribution:'caller_reported',revision:1,operations:[]};
+    const record={version:2,id:crypto.randomUUID(),column:postColumn(meta.column,readPrepColumns(db)),scheduledAt:postSchedule(meta.scheduledAt),note:postNote(meta.note),master,editions:Object.fromEntries(platforms.map(p=>[p,{...master,cover:master.cover??master.images[0]??null}])),generation:{state:'idle'},createdAt:new Date().toISOString(),actor:source,actorAttribution:'caller_reported',revision:1,operations:[]};
     save(record);return get(record.id);
   }
   function meta(id,patch={},caller) {
     const r=raw(id),fields=[];
-    if(patch.column!==undefined){r.column=postColumn(patch.column);fields.push('column');}
+    if(patch.column!==undefined){r.column=postColumn(patch.column,readPrepColumns(db));fields.push('column');}
     if(patch.scheduledAt!==undefined){r.scheduledAt=postSchedule(patch.scheduledAt);fields.push('scheduledAt');}
     if(patch.note!==undefined){r.note=postNote(patch.note);fields.push('note');}
     if(!fields.length)fail('INVALID_INPUT','改元信息需要栏目、定时时间或备注');

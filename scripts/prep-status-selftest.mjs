@@ -32,7 +32,8 @@ const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&
 const html=preparePage(esc,data);
 assert.match(html,/发布记录/);assert.match(html,/待你处理/);assert.match(html,/失败详情/);
 assert.equal((html.match(/data-status-window=/g)||[]).length,1);
-assert.doesNotMatch(html,/<textarea|<input|<select|data-action=|data-prep=|新建原稿|生成各平台版本|platform-card-grid/);
+assert.match(html,/data-column-form/);assert.match(html,/栏目说明/);
+assert.doesNotMatch(html,/<select|data-action=|data-prep=|新建原稿|生成各平台版本|platform-card-grid/);
 assert.match(preparePage(esc,prepStatus()),/暂无发布记录/);
 assert.doesNotMatch(preparePage(esc,prepStatus({records:[{id:'x',platform:'wechat',state:'unknown',title:'<script>unsafe</script>'}]})),/<script>unsafe/);
 for(const file of ['src/web/publish-prep.js','src/web/prepare-page.js','src/prep-status.mjs','src/web/mt.css','docs/publish-api.md'])assert.doesNotMatch(fs.readFileSync(new URL('../'+file,import.meta.url),'utf8'),/三种表达|三端|三个平台|三张卡片|three independent/);

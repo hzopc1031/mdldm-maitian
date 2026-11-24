@@ -60,9 +60,9 @@ export async function continueProjectDraft({id, action, actor, authorizationRef,
   return projectDraftReceipt(result.record, base);
 }
 
-function draftRequest(input) {
+function draftRequest(input,columns) {
   // Local CLI only checks the broad supported envelope; server applies its actual tier.
-  const {source} = normalizePrep(input,{publishPrep:{x:{premium:true}}});
+  const {source} = normalizePrep(input,{publishPrep:{x:{premium:true}}},columns);
   if (!source) throw new Error('项目交稿需要来源项目、栏目和运行编号');
   const body = JSON.stringify({type:'create', input});
   if (Buffer.byteLength(body) > prepRequestLimit) throw new Error('稿件请求过大');
@@ -71,7 +71,10 @@ function draftRequest(input) {
 
 export async function submitProjectDraft({home, input, base='http://127.0.0.1:8787', request=fetch}) {
   localBase(base);
-  const body = draftRequest(input);
+  let columns;
+  try {columns=(await projectDraftContract({base,request})).columns;}
+  catch(error){if(error.name!=='TimeoutError'&&error.cause?.code!=='ECONNREFUSED')throw error;}
+  const body = draftRequest(input,columns);
   let response;
   try {
     response = await request(`${base}/api/prep`, {

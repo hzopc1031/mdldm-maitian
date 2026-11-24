@@ -7,7 +7,7 @@ import path from 'node:path';
 import http from 'node:http';
 import {once} from 'node:events';
 import {spawn} from 'node:child_process';
-const supportedTests = ['unauth','invalid','home','traffic','system','prepare','prepare-flow','enabled-system'];
+const supportedTests = ['unauth','invalid','home','traffic','system','prepare','prepare-flow','enabled-system','columns'];
 const tests = process.argv.length > 2 ? process.argv.slice(2) : supportedTests;
 if (tests.some(test => !supportedTests.includes(test))) throw new Error('Unknown browser acceptance scenario');
 const output=path.resolve(process.env.MAITIAN_QA_OUT || '_local-headless-accept');
@@ -57,6 +57,29 @@ function browserChecks(test, image) {
       const expected=test==='home'?'/':test==='traffic'?'/p#/traffic':test.endsWith('system')?'/p#/system':'/p#/prepare';
       check(location.pathname+location.hash===expected,'POST preserved route');
       if(!sessionStorage.getItem('qa-reloaded')){sessionStorage.setItem('qa-reloaded','1');location.reload();return;}
+      if(test==='columns') {
+        await wait(()=>!!document.querySelector('[data-column-manage]'));
+        document.querySelector('[data-column-manage]').click();
+        const panel=document.querySelector('#column-manager');check(!panel.hidden,'manager opens');
+        if(!sessionStorage.getItem('qa-columns-done')){
+          let form=panel.querySelector('form');form.elements.namedItem('name').value='AI验收栏目';form.elements.namedItem('description').value='隔离界面验收，不涉及平台操作';
+          form.requestSubmit();await wait(()=>panel.textContent.includes('栏目已创建'));
+          const column=(await (await fetch('/api/prep/columns')).json()).columns.find(c=>c.name==='AI验收栏目');check(!!column,'created via page');
+          panel.querySelector('[data-column-edit="'+column.id+'"]').click();form=panel.querySelector('form');check(form.elements.namedItem('name').value===column.name,'edit prefilled');
+          form.elements.namedItem('name').value='AI案例库';form.elements.namedItem('description').value='更新后的栏目说明，验证改名与说明保存';
+          form.requestSubmit();await wait(()=>panel.textContent.includes('栏目已更新'));
+          sessionStorage.setItem('qa-columns-done','1');location.reload();return;
+        }
+        const columns=(await (await fetch('/api/prep/contract')).json()).columns;
+        check(columns.some(c=>c.name==='AI案例库'&&c.description.includes('更新后')),'rename persisted after reload');
+        check(!columns.some(c=>c.name==='AI验收栏目'),'old name removed');
+        check(columns.length===4,'three defaults plus UI-created column');
+        check(document.querySelectorAll('[data-column-filter]').length===5,'empty columns available in filter');
+        const form=panel.querySelector('form');form.elements.namedItem('name').value='轮询时保留';
+        await new Promise(r=>setTimeout(r,5500));check(panel.querySelector('input[name=name]').value==='轮询时保留','poll does not erase open form');form.reset();
+        const input=panel.querySelector('input');check(input.getBoundingClientRect().right<=innerWidth,'form fits viewport');
+        check(document.documentElement.scrollWidth<=document.documentElement.clientWidth+1,'manager has no horizontal overflow');
+      }
       if(test==='home'||test==='traffic') {
         const summary=document.querySelector('.account-summary');check(!!summary,'account summary visible');
         check(summary.innerText.includes('今日发布作品'),'daily cohort heading');
@@ -136,7 +159,7 @@ const server=http.createServer(async(req,res)=>{
     try {const value=JSON.parse(body); report={ok:value.ok===true,detail:String(value.detail).slice(0,300),viewport:value.viewport};}catch{report={ok:false,detail:'invalid QA report'};}
     res.end('ok');return;
   }
-  if(req.url.startsWith('/api/action') || (req.method==='POST' && req.url!=='/auth' && req.url!=='/api/prep')) {
+  if(req.url.startsWith('/api/action') || (req.method==='POST' && req.url!=='/auth' && req.url!=='/api/prep' && !(current==='columns'&&req.url==='/api/prep/columns'))) {
     violations.push('unexpected mutation');res.writeHead(403);res.end();return;
   }
   if(req.url==='/api/prep' && req.method==='POST') {

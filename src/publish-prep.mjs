@@ -11,7 +11,7 @@ import { xhsWindow } from './prep-window.mjs';
 import { l1Account } from './l1-account.mjs';
 import { fillXEditor, isDedicatedXProfile } from './x-draft-editor.mjs';
 import { normalizePrepAgent } from './prep-agent.mjs';
-import {prepColumn} from './prep-columns.mjs';
+import {prepColumn,initPrepColumns,readPrepColumns} from './prep-columns.mjs';
 import { finishXhsDraft } from './prep-xhs-draft.mjs';
 import {validateEdition,xEditionText} from './platform-rules.mjs';
 import {wechatRichJob} from './prep-wechat.mjs';
@@ -45,12 +45,12 @@ function text(value, name, max, required = false) {
   return value.trim();
 }
 
-function prepSource(source) {
+function prepSource(source,columns) {
   if (!source || typeof source !== 'object' || Array.isArray(source) || Object.keys(source).some(key => !['project', 'column', 'category', 'runId','agent'].includes(key))) {
     throw new Error('稿件来源只接受项目、栏目、运行编号和AI来源；兼容历史分类字段');
   }
   const project = text(source.project, '来源项目', 100, true);
-  const column = prepColumn(source.column);
+  const column = prepColumn(source.column,columns);
   const category = source.category===undefined ? undefined : text(source.category, '历史分类', 60);
   const runId = text(source.runId, '运行编号', 120, true);
   if ([project, column, category??''].some(value => /[\x00-\x1f\x7f]/.test(value)) || !/^[\w.:@-]+$/.test(runId)) throw new Error('来源或运行编号格式不对');
@@ -68,10 +68,10 @@ function prepPublication(receipt, platform, source, input) {
   if (!Number.isFinite(published) || !Number.isFinite(verified) || published>verified || verified>Date.now()) throw new Error('请提供实际发布时间及随后核对原帖的时间');
   return {url:receipt.url, account:match[1], postId:match[2], publishedAt:new Date(published).toISOString(), verifiedAt:new Date(verified).toISOString()};
 }
-export function normalizePrep(input, config = {}) {
+export function normalizePrep(input, config = {}, columns) {
   if (!input || typeof input !== 'object' || Array.isArray(input) || !['x', 'xhs', 'wechat'].includes(input.platform)) throw new Error('仅支持 X、小红书图文、公众号');
   if (Object.keys(input).some(k => !['platform', 'title', 'content', 'caption','digest','author','cover','coverImage','coverFromBody','imagePositions','htmlFile','inlineImages','video','version', 'images', 'topics', 'promotionReview', 'episodeId', 'test', 'source', 'publication'].includes(k))) throw new Error('发布准备包含不支持的字段（不接受 submit、命令或凭据）');
-  const source = input.source === undefined ? null : prepSource(input.source);
+  const source = input.source === undefined ? null : prepSource(input.source,columns);
   const platform = input.platform;
   const publication = input.publication === undefined ? null : prepPublication(input.publication, platform, source, input);
   const title = text(input.title ?? '', '标题', 500, platform !== 'x');
@@ -180,6 +180,7 @@ const contentDigestFor = data => crypto.createHash('sha256').update(JSON.stringi
 })).digest('hex');
 
 export function createPrepService({ db, home, root, config, secrets = [], spawnChild = spawn, runX = fillXEditor, env = process.env }) {
+  initPrepColumns(db);
   // 单独表不改变原 hub 的 tasks 状态约定；准备完成绝不等于 published。
   db.exec('CREATE TABLE IF NOT EXISTS publish_preparations (id TEXT PRIMARY KEY, record TEXT NOT NULL)');
   const save = r => db.prepare('INSERT OR REPLACE INTO publish_preparations VALUES (?,?)').run(r.id, JSON.stringify(r));
@@ -210,7 +211,7 @@ export function createPrepService({ db, home, root, config, secrets = [], spawnC
   }
   function create(input) {
     if (db.prepare("SELECT 1 FROM publish_preparations WHERE json_extract(record,'$.state')='running'").get()) throw new Error('已有准备操作在运行');
-    const {source, publication, wechatCover, ...data} = normalizePrep(input, config);
+    const {source, publication, wechatCover, ...data} = normalizePrep(input, config,readPrepColumns(db));
     if (publication && publication.account.toLowerCase() !== l1Account(config,'x').toLowerCase()) throw new Error('原帖账号与工作台 X 账号不符');
     const contentDigest = contentDigestFor(data);
     const same = source
