@@ -13,6 +13,7 @@ import { createPrepService, BROWSER_BLOCK } from './publish-prep.mjs';
 import {createPostService} from './publish-posts.mjs';
 import {readPrepStatus} from './prep-status.mjs';
 import {platformRules} from './platform-rules.mjs';
+import {prepColumns,reclassifyColumns} from './prep-columns.mjs';
 import { createAgeReviewReader } from './l1-age-review.mjs';
 import { videoPrefillJobs } from './video-prefill-jobs.mjs';
 import { videoPrefillPublications } from './video-prefill-publications.mjs';
@@ -328,7 +329,7 @@ export async function handle(req, res) {
   }
   if (u.pathname === '/api/prep/rules-module' && req.method==='GET') return send(res,200,fs.readFileSync(path.join(DIR,'platform-rules.mjs')),'text/javascript; charset=utf-8');
   if (u.pathname === '/api/prep' && req.method === 'GET') return send(res, 200, { capabilities: prep.publicCapabilities(), rules:platformRules(config), records: ageReview.forRecords(prep.list()) });
-  if (u.pathname === '/api/prep/contract' && req.method === 'GET') return send(res,200,{version:4,columnOnly:true,agentAttribution:'caller_reported',operationActors:true,finalPublishPlatforms:['x','xhs'],submit:true,manuscriptVersion:2,requiredCreate:['column','scheduledAt','actor'],requiredFill:['mode'],scheduledPublish:'recorded_only',noteLimit:500,fillModes:['draft','publish'],publishPlatforms:['x','xhs']});
+  if (u.pathname === '/api/prep/contract' && req.method === 'GET') return send(res,200,{version:4,columnOnly:true,columns:prepColumns,columnSelection:'caller_selects_defined',agentAttribution:'caller_reported',operationActors:true,finalPublishPlatforms:['x','xhs'],submit:true,manuscriptVersion:2,requiredCreate:['column','scheduledAt','actor'],requiredFill:['mode'],scheduledPublish:'recorded_only',noteLimit:500,fillModes:['draft','publish'],publishPlatforms:['x','xhs']});
   if (u.pathname === '/api/prep/ai-prompt' && req.method === 'GET') {
     try {
       const markdown=fs.readFileSync(path.join(ROOT,'docs','ai-publish-prompt.md'),'utf8');
@@ -349,9 +350,10 @@ export async function handle(req, res) {
       }
       if(req.method==='POST'&&u.pathname==='/api/prep/posts') {
         let body='';for await(const chunk of req){body+=chunk;if(Buffer.byteLength(body)>prepRequestLimit)return send(res,413,{code:'TOO_LARGE',error:'请求过大'});}
-        const a=JSON.parse(body);if(!a||Object.keys(a).some(k=>!['type','id','platform','platforms','input','actor','column','scheduledAt','note','mode'].includes(k)))throw Object.assign(Error('操作字段不对；不接受 submit 或发布授权'),{code:'INVALID_INPUT'});
+        const a=JSON.parse(body);if(!a||Object.keys(a).some(k=>!['type','id','platform','platforms','input','actor','column','scheduledAt','note','mode','assignments'].includes(k)))throw Object.assign(Error('操作字段不对；不接受 submit 或发布授权'),{code:'INVALID_INPUT'});
         if(['publish','submit'].includes(a.type))return send(res,403,{code:'PUBLISH_DISABLED',error:'Liu要求最后一步由本人操作；接口只填写，不发布'});
         if(actions.some(a=>!a.done)||prep.busy()||posts.busy())return send(res,409,{code:'BUSY',error:'另一个操作正在运行，请先查状态'});
+        if(a.type==='columns')return send(res,200,reclassifyColumns(db,a.assignments,a.actor));
         if(a.type==='create')return send(res,200,{ok:true,post:posts.create(a.input,a.actor,{column:a.column,scheduledAt:a.scheduledAt,note:a.note})});
         if(a.type==='meta')return send(res,200,{ok:true,post:posts.meta(a.id,{column:a.column,scheduledAt:a.scheduledAt,note:a.note},a.actor)});
         if(a.type==='update')return send(res,200,{ok:true,post:posts.update(a.id,a.platform,a.input,a.actor)});

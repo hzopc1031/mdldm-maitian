@@ -11,6 +11,7 @@ import { xhsWindow } from './prep-window.mjs';
 import { l1Account } from './l1-account.mjs';
 import { fillXEditor, isDedicatedXProfile } from './x-draft-editor.mjs';
 import { normalizePrepAgent } from './prep-agent.mjs';
+import {prepColumn} from './prep-columns.mjs';
 import { finishXhsDraft } from './prep-xhs-draft.mjs';
 import {validateEdition,xEditionText} from './platform-rules.mjs';
 import {wechatRichJob} from './prep-wechat.mjs';
@@ -49,7 +50,7 @@ function prepSource(source) {
     throw new Error('稿件来源只接受项目、栏目、运行编号和AI来源；兼容历史分类字段');
   }
   const project = text(source.project, '来源项目', 100, true);
-  const column = text(source.column, '栏目', 80, true);
+  const column = prepColumn(source.column);
   const category = source.category===undefined ? undefined : text(source.category, '历史分类', 60);
   const runId = text(source.runId, '运行编号', 120, true);
   if ([project, column, category??''].some(value => /[\x00-\x1f\x7f]/.test(value)) || !/^[\w.:@-]+$/.test(runId)) throw new Error('来源或运行编号格式不对');

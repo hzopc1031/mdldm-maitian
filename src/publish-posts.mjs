@@ -7,14 +7,14 @@ import {spawn} from 'node:child_process';
 import {wechatEditionJob} from './prep-wechat.mjs';
 import {normalizePrep} from './publish-prep.mjs';
 import {normalizePrepAgent} from './prep-agent.mjs';
+import {prepColumn} from './prep-columns.mjs';
 import {platforms,validateEdition,platformRules} from './platform-rules.mjs';
 const fields=['title','content','images','cover','topics','video','digest','caption','author','imagePositions','promotionReview'];
 const locked=['running','unknown','awaiting_user','draft_saved','published','submitted','already_exists','failed'];
 const fail=(code,message)=>{throw Object.assign(Error(message),{code});};
 const isoTime=/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(?::\d{2}(?:\.\d{1,9})?)?(?:Z|[+-]\d{2}:\d{2})$/;
 export function postColumn(value) {
-  if(typeof value!=='string'||!value.trim()||value.trim().length>80||/[\x00-\x1f\x7f]/.test(value))fail('INVALID_INPUT','建稿需要栏目：非空文字，最多80字，不含控制字符');
-  return value.trim();
+  return prepColumn(value);
 }
 export function postSchedule(value) {
   if(typeof value!=='string'||!isoTime.test(value))fail('INVALID_INPUT','定时时间须为带时区的 ISO 时间，如 2026-11-24T09:00:00+08:00');

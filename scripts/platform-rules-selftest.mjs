@@ -1,4 +1,4 @@
-﻿import assert from 'node:assert/strict';
+import assert from 'node:assert/strict';
 import fs from 'node:fs';import path from 'node:path';import os from 'node:os';
 import {DatabaseSync} from 'node:sqlite';import {EventEmitter} from 'node:events';
 import {xWeightedCount,xhsTitleCount,validateEdition} from '../src/platform-rules.mjs';
@@ -30,17 +30,17 @@ let child,resultPath,prompt;const prep=createPrepService({db,home,root:home,conf
 const spawnChild=(bin,args,options)=>{assert.equal(options.shell,false);assert.equal(options.windowsHide,true);assert.equal(args.includes('--sandbox'),true);assert.equal(args.includes('danger-full-access'),true);resultPath=args[args.indexOf('-o')+1];child=new EventEmitter();child.stdin=new EventEmitter();child.stdin.end=value=>{prompt=value;};child.kill=()=>{};return child;};
 const posts=createPostService({db,home,config:{},prep,env:{MAITIAN_LOCAL_SKILLS:skills},spawnChild});
 try{
- const actor={runtime:'codex',sessionId:'selftest-codex'},scheduledAt=new Date(Date.now()+86400000).toISOString(),meta={column:'AI新闻',scheduledAt};
+ const actor={runtime:'codex',sessionId:'selftest-codex'},scheduledAt=new Date(Date.now()+86400000).toISOString(),meta={column:'AI热点新闻',scheduledAt};
  assert.throws(()=>posts.create(input,actor),/栏目/);
- assert.throws(()=>posts.create(input,actor,{column:'AI新闻'}),/定时时间/);
- assert.throws(()=>posts.create(input,{column:'AI新闻'},meta),/AI来源/);
+ assert.throws(()=>posts.create(input,actor,{column:'AI热点新闻'}),/定时时间/);
+ assert.throws(()=>posts.create(input,{column:'AI热点新闻'},meta),/AI来源/);
  assert.throws(()=>posts.create(input,actor,{column:'  ',scheduledAt}),/栏目/);
- assert.throws(()=>posts.create(input,actor,{column:'AI新闻',scheduledAt:'2099-01-01T00:00:00'}),/带时区/);
- assert.throws(()=>posts.create(input,actor,{column:'AI新闻',scheduledAt:'2020-01-01T00:00:00+08:00'}),/晚于当前时间/);
- const first=posts.create(input,actor,{...meta,note:'  备注A\n第二行  '});assert.equal(first.version,2);assert.equal(first.column,'AI新闻');assert.equal(first.scheduledAt,scheduledAt);assert.equal(first.note,'备注A\n第二行');assert.equal(first.editions.x.validation.ok,true);
+ assert.throws(()=>posts.create(input,actor,{column:'AI热点新闻',scheduledAt:'2099-01-01T00:00:00'}),/带时区/);
+ assert.throws(()=>posts.create(input,actor,{column:'AI热点新闻',scheduledAt:'2020-01-01T00:00:00+08:00'}),/晚于当前时间/);
+ const first=posts.create(input,actor,{...meta,note:'  备注A\n第二行  '});assert.equal(first.version,2);assert.equal(first.column,'AI热点新闻');assert.equal(first.scheduledAt,scheduledAt);assert.equal(first.note,'备注A\n第二行');assert.equal(first.editions.x.validation.ok,true);
  assert.throws(()=>posts.create(input,actor,{...meta,note:'x'.repeat(501)}),/备注/);
- const moved=posts.meta(first.id,{column:'AI日报',note:'改后备注'},actor);assert.equal(moved.column,'AI日报');assert.equal(moved.note,'改后备注');assert.equal(moved.scheduledAt,scheduledAt);
- assert.equal(posts.meta(first.id,{scheduledAt:new Date(Date.now()+2*86400000).toISOString()},actor).column,'AI日报');
+ const moved=posts.meta(first.id,{column:'AI实战详解',note:'改后备注'},actor);assert.equal(moved.column,'AI实战详解');assert.equal(moved.note,'改后备注');assert.equal(moved.scheduledAt,scheduledAt);
+ assert.equal(posts.meta(first.id,{scheduledAt:new Date(Date.now()+2*86400000).toISOString()},actor).column,'AI实战详解');
  assert.equal(posts.meta(first.id,{note:null},actor).note,null);
  assert.throws(()=>posts.meta(first.id,{},actor),/栏目/);
  assert.throws(()=>posts.create({...input,submit:true},actor,meta));assert.throws(()=>posts.fill(first.id,'x',null,'fill'),/mode 必填/);

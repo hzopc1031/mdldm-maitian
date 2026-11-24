@@ -2,6 +2,7 @@
 import {PLATFORM_CATALOG} from './platform-registry.mjs';
 import {redactSkillValue,skillText,stderrTail} from './prep-skill-errors.mjs';
 import {redactL1} from './l1-web.mjs';
+import {prepColumns} from './prep-columns.mjs';
 
 export const STATUS_LABELS=Object.freeze({
   prepared:'已生成',generated:'已生成',checked:'检查通过',awaiting_user:'已填好待你点',
@@ -38,10 +39,10 @@ export function prepStatus({posts=[],records=[],catalog=PLATFORM_CATALOG,config=
       const state=record?.state??edition?.state??(generated&&post.generation?.state==='done'?'generated':generated&&post.generation?.state==='failed'?'failed':generated&&post.generation?.state==='running'?'running':'editing');
       return item(platform,state,record,{error:post.generation?.error});
     })}));
-  for(const record of records)if(!linked.has(record.id))rows.push({id:record.id,kind:'legacy',title:clean(record.title||'未命名准备记录'),at:record.createdAt??null,column:record.source?.column?clean(record.source.column):null,scheduledAt:record.scheduledAt??null,note:record.note?clean(record.note):null,actor:record.source?.agent?{runtime:clean(record.source.agent.runtime),name:clean(record.source.agent.name),session:clean(record.source.agent.sessionId)}:null,items:[item(record.platform,record.state,record)]});
+  for(const record of records)if(!linked.has(record.id))rows.push({id:record.id,kind:'legacy',title:clean(record.title||'未命名准备记录'),at:record.createdAt??null,column:(record.column??record.source?.column)?clean(record.column??record.source.column):null,scheduledAt:record.scheduledAt??null,note:record.note?clean(record.note):null,actor:record.source?.agent?{runtime:clean(record.source.agent.runtime),name:clean(record.source.agent.name),session:clean(record.source.agent.sessionId)}:null,items:[item(record.platform,record.state,record)]});
   rows.sort((a,b)=>String(b.at??'').localeCompare(String(a.at??'')));
   const entries=rows.flatMap(row=>row.items.map(item=>({...item,rowId:row.id,title:row.title})));
-  return {ok:true,readOnly:true,submit:false,finalPublishPlatforms:[],platforms,rows,
+  return {ok:true,readOnly:true,submit:false,finalPublishPlatforms:[],columns:prepColumns,platforms,rows,
     pending:entries.filter(item=>item.state==='awaiting_user'),failures:entries.filter(item=>item.detail)};
 }
 

@@ -48,7 +48,7 @@ const { submitProjectDraft, readProjectDraft, continueProjectDraft } = await imp
 const {callerPrepAgent}=await import('../src/prep-agent.mjs');
 const actor={runtime:'codex',name:'Codex',sessionId:'fixture-codex-session',basis:'environment'};
 const reviewer={runtime:'dsh',name:'DSH审稿助手',sessionId:'fixture-dsh-session',basis:'declared'};
-const source = {project:'AI 精选项目', column:'每日 AI 精选', runId:'2026-11-21:0830',agent:actor};
+const source = {project:'AI 精选项目', column:'AI实战详解', runId:'2026-11-21:0830',agent:actor};
 assert.deepEqual(callerPrepAgent({CODEX_THREAD_ID:actor.sessionId}),actor);
 assert.throws(()=>callerPrepAgent({}),/未识别AI调用环境/);
 assert.throws(()=>callerPrepAgent({CODEX_THREAD_ID:'one',CODEX_SESSION_ID:'two'}),/冲突/);
@@ -92,7 +92,7 @@ try {
   assert.equal((await submitProjectDraft({home,base,input:{...input,source:{...source,category:'兼容旧分类'}}})).id,record.id,'legacy category does not split a column or alter provenance');
   await assert.rejects(submitProjectDraft({home,base,input:{...input,source:{...source,agent:{...actor,sessionId:'another-ai-session'}}}}),/不同AI来源/);
   await assert.rejects(submitProjectDraft({home, base, input:{...input, submit:true}}), /不支持/);
-  const other = await submitProjectDraft({home, base, input:{...input, source:{...source, column:'热点扫描'}}});
+  const other = await submitProjectDraft({home, base, input:{...input, source:{...source, column:'AI热点新闻'}}});
   assert.notEqual(other.id, record.id, 'same content from different columns keeps its provenance');
   assert.equal((await records()).length,3);
   const publication = {url:'https://x.com/FixtureX/status/12345', publishedAt:'2020-01-01T10:00:00Z', verifiedAt:'2020-01-01T10:01:00Z'};
@@ -150,14 +150,14 @@ try {
     {cwd:new URL('../',import.meta.url),env:{...process.env,MAITIAN_PREP_BASE:base}});
   assert.deepEqual(JSON.parse(cli.stdout),saved);
   const draftFile=path.join(home,'real-shape-draft.json');
-  fs.writeFileSync(draftFile,JSON.stringify({...input,source:{project:'隔离项目',column:'工具解读',runId:'cli-no-category'}}));
+  fs.writeFileSync(draftFile,JSON.stringify({...input,source:{project:'隔离项目',column:'AI实战详解',runId:'cli-no-category'}}));
   const submitted=await promisify(execFile)(process.execPath,['scripts/l1-submit-prep.mjs',draftFile,'--agent','grok','--session','fixture-grok-session','--agent-name','Grok交稿助手'],
     {cwd:new URL('../',import.meta.url),env:{...process.env,MAITIAN_PREP_BASE:base}});
   const cliRecord=JSON.parse(submitted.stdout);
   assert.equal(cliRecord.source.category,undefined);
   assert.deepEqual(cliRecord.source.agent,{runtime:'grok',name:'Grok交稿助手',sessionId:'fixture-grok-session',basis:'declared'});
   assert.equal((await (await fetch(base+'/api/prep/contract')).json()).agentAttribution,'caller_reported');
-  assert.deepEqual((await (await fetch(base+'/api/prep/contract')).json()).finalPublishPlatforms,[]);
+  assert.deepEqual((await (await fetch(base+'/api/prep/contract')).json()).finalPublishPlatforms,['x','xhs']);
 
   const xhs=await submitProjectDraft({home,base,input:{platform:'xhs',title:'隔离发布协议验证',content:'mock protocol only',images:[card],source:{...source,runId:'publish-cli'}}});
   await continueProjectDraft({id:xhs.id,action:'check',actor,base});
@@ -179,7 +179,7 @@ try {
   }).listen(0,'127.0.0.1');
   await once(oldServer,'listening');
   try {
-    const legacy=await promisify(execFile)(process.execPath,['scripts/l1-submit-prep.mjs','--x-receipt',oldReceipt,'历史项目','原栏目','历史分类'],
+    const legacy=await promisify(execFile)(process.execPath,['scripts/l1-submit-prep.mjs','--x-receipt',oldReceipt,'历史项目','AI热点新闻','历史分类'],
       {cwd:new URL('../',import.meta.url),env:{...process.env,MAITIAN_PREP_BASE:'http://127.0.0.1:'+oldServer.address().port}});
     assert.equal(legacyInput.source.agent,undefined,'legacy running server keeps its existing receipt ingestion');
     assert.match(JSON.parse(legacy.stdout).attributionNote,/AI来源未记录/);

@@ -18,13 +18,15 @@
 POST /api/prep/posts，例如（Windows 用 curl.exe，JSON 存成 UTF-8 文件用 --data-binary 传，避免中文引号问题）：
 
 {"type":"create",
- "column":"AI新闻",
+ "column":"AI热点新闻",
  "scheduledAt":"2026-11-24T09:00:00+08:00",
  "note":"可选备注，最多500字",
  "actor":{"runtime":"dsh","name":"DSH内容助手","sessionId":"本次真实会话ID","basis":"declared"},
  "input":{"title":"标题","content":"正文","images":["D:\\素材\\01.png","D:\\素材\\02.png"],"cover":"D:\\素材\\01.png","topics":["AI"],"digest":"公众号摘要","author":"作者"}}
 
-- column：栏目，必填，1–80 字。
+- column：栏目，由平台定义，AI根据原稿主要目的选择；先读取当次契约的 columns，只能精确填写「AI热点新闻」或「AI实战详解」。不另起名称，不增加分类。
+- AI热点新闻：新消息、模型/产品更新、人物与公司动向及影响，重点是发生了什么、为什么值得关注。
+- AI实战详解：工具用法、教程、实践案例、排错和方法取舍，重点是能做什么、怎样做、有哪些限制。新闻里顺带提到用法仍可归新闻；工具/人物只是主题，按正文主要收益判断。混合稿选主要目的对应的一项，不创建混合栏目。
 - scheduledAt：计划发布时间，必填，必须带时区（+08:00 或 Z）且晚于当前时间。它只是记录，到点不会自动执行。
 - actor：AI 来源，必填。runtime 只能是 codex / dsh / grok；sessionId 必须是本次真实会话编号，不能编造；name 可省略。
 - note：备注，可选，≤500 字，可换行。

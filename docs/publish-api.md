@@ -2,9 +2,13 @@
 
 2026-11-23，按 Liu 11:33 的批准方案及 11:37 补充实现。只使用本机 HTTP；不新建 skill，不改 skill 索引。监听 `127.0.0.1:8787`。沿用 Host、loopback、Origin、Fetch Metadata 和转发头校验；新接口即使在启用口令的模式也只允许本机直连。POST 必须带 `Origin: http://127.0.0.1:8787`。不要传网页口令、Cookie、token 或平台凭据。
 
-所有 JSON 是 UTF-8。POST 的顶层只接受 `type,id,platform,platforms,input,actor,column,scheduledAt,note,mode`。顶层 `publish`/`submit` 动作仍拒绝；平台动作由 `fill` 的必填 `mode` 决定：`draft` 存草稿、`publish` 直接发布（仅 X、小红书）。公众号只能存草稿，不发表、不群发。
+所有 JSON 是 UTF-8。POST 的顶层只接受 `type,id,platform,platforms,input,actor,column,scheduledAt,note,mode,assignments`。顶层 `publish`/`submit` 动作仍拒绝；平台动作由 `fill` 的必填 `mode` 决定：`draft` 存草稿、`publish` 直接发布（仅 X、小红书）。公众号只能存草稿，不发表、不群发。
 
-建稿（`type:create`）必须同时带 `column`、`scheduledAt`、`actor` 三项：栏目是自由文字（1–80 字，不含控制字符）；定时时间是带时区的 ISO 时间且必须晚于当前时间；AI 来源上报 `runtime` 与会话编号。定时只记录计划发布时间，供状态页展示，**不会自动填写或发布**。`note`（备注）可选，最多 500 字、可换行，只本地保存并显示在状态页。建稿后可用 `type:meta` 单独改栏目、定时或备注。
+建稿（`type:create`）必须同时带 `column`、`scheduledAt`、`actor` 三项：栏目由平台定义，AI读取当次契约的 `columns` 后，按内容主旨精确选择「AI热点新闻」或「AI实战详解」，其他名称拒绝；定时时间是带时区的 ISO 时间且必须晚于当前时间；AI 来源上报 `runtime` 与会话编号。定时只记录计划发布时间，供状态页展示，**不会自动填写或发布**。`note`（备注）可选，最多 500 字、可换行，只本地保存并显示在状态页。建稿后可用 `type:meta` 单独改栏目、定时或备注。
+
+栏目定义和本次历史整理见[两个固定栏目](columns-20261124.md)。新闻侧重消息与影响；实战侧重用法、案例、排错与取舍，不按音乐、视频、开发等继续分栏目。旧单平台交稿入口同样校验两个固定名称。
+
+既有记录改栏目可用 `type:columns,actor,assignments:[{kind:"post"或"legacy",id,column,expectedColumn}]`，最多100项。先备份，再按实际原ID及旧栏目（缺失填null）整理；整批事务提交，冲突即回滚。同步关联准备记录，只变更栏目和审计，不改正文、图片、来源AI、平台状态或unknown锁，不执行任何平台动作。旧单缺来源时仅保存独立栏目，不补造来源。
 
 ## 接口
 
