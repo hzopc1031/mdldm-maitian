@@ -4,6 +4,8 @@
 
 ## 一句话现状
 
+**2026-11-26 21:35 零点采集核对**：用户截图X最近观测仍11/24。正式X最近成功为11/24 10:45手动更新；midnight报告仅目标11/21和11/22，X均失败，后续3个目标日无报告。本机实际automations目录没有旧id=automation定义，但data/l1-schedule.json仍ACTIVE，web.mjs只读旧标记而误报enabled；官方view仅渲染卡片，没有状态元数据。当前不能说零点正常执行，任务何时/为何缺失未证实。本轮仅诊断，未恢复/新建任务或补采，后续先核实官方任务状态和是否曾取消，避免重复恢复。详见项目根evidence/midnight-audit-20261126/核对记录.md、readback.json；历史“已ACTIVE”不是当前实况。
+
 **2026-11-24 16:51 技术栈问答已核查**：DSH官方前端为React/TypeScript、Vite Web构建、CSS Modules与自有主题/控件、Zustand/Immer状态引擎、Cordis及typed UI Slots、HTTP RPC/事件流，桌面Electron。本机独立CLI安装包0.2.1-rc.5与官方master分开标注，未假定运行中桌面版本。详细依据及与当前原生JS工作台的差异见[DSH前端技术栈](dsh-frontend-stack-20261124.md)。仅分析/文档，无迁移、应用修改、安装、重启或平台动作；当前栏目修复状态如下。
 
 **2026-11-24 10:46 管理栏目点击故障已修复（Codex，同会话）**：resize重复调用initPreparePage、重复绑定事件，同一点击展开后立即收起；隔离Chrome先失败后通过证明。WeakSet保证每个DOM根只初始化一次，新页面仍正常初始化。桌面1422/窄屏522 resize→新建→编辑→刷新→轮询保持通过，每场景恰好2次栏目写入（一创建一编辑）；三项必需回归及语法检查通过。正式/static/prepare-page.js返回200、与本地修复源码完全相同、Cache-Control:no-store，发布页200，现有页面刷新一次即可加载。维护脚本发现另一X采集运行而退出1，未停止或重启任何进程；本次前端静态文件已生效，无后端变更/数据库修改/平台动作，不需等采集或补重启。详见项目根evidence/column-click-fix-20261124/执行记录.md。此前“管理已验收”漏了resize场景，以本段修复结果为准；README与prep-xhs-draft既有改动保留。下一步：使用者刷新页面；本项无待实施项。
