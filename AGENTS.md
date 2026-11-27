@@ -50,3 +50,5 @@
 - 2026-11-27 首页脚本教训：board.html与pages.html为独立入口；共享账户状态/API/选择器由两页共同加载x-account-context.js，不引用仅在mt.js内定义的符号。HTTP200或Chrome exit0不等于页面渲染通过；需检查根首页及跨页账户切换，保留先失败后通过证据。详见evidence/home-account-context-fix-20261127/执行记录.md。
 
 - 2026-11-27 20:55 X评论已接入麦田：AI决定目标/正文/明确已登录账户，先读docs/comments-api.md，enqueue即请求发送。不得把实现授权当任意真实评论授权；本轮没有实发。请求编号与账号/目标/正文防重，unknown不换ID重跑，重启未执行队列暂停；与本工作台发帖/采集/登录互斥。旧运行中AI任务尚需读指令改接，不声称已自动迁移。PS5辅助文件检查被执行策略拦截，未改策略/换通道；本轮实际维护在已验证的PS7路径成功，详见evidence/comments-20261127/执行记录.md。
+
+- 2026-11-27 21:23 评论浏览器准备：原默认账户只有连接、无监听即失败，现精确匹配本地x-publish公开路由后launch复用/启动，再双重核PID/profile与/home账号。只清自有标签，不关共享Chrome。原失败d071adae-ee71-4323-b061-4cd2ebf7889b本轮未resume，11表及历史保持；由原AI原ID续办。证据evidence/comments-no-listener-20261127/执行记录.md。

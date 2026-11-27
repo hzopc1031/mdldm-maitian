@@ -11,6 +11,32 @@ import {isDedicatedXProfile} from './x-draft-editor.mjs';
 import {commentPageView,openCommentTarget,commentComposer} from './x-comment-dom.mjs';
 
 const mismatch=message=>{throw Error(message);};
+const sameProfile=(a,b)=>typeof a==='string'&&typeof b==='string'&&path.resolve(a).toLowerCase()===path.resolve(b).toLowerCase();
+export async function withSharedCommentPage(task,{profile,port},fn,driver){
+ const routeError=message=>{throw Object.assign(Error(message),{code:'X_BROWSER_ROUTE_MISMATCH'});};
+ if(port!==9336||!isDedicatedXProfile(profile,port))routeError('原X账户专用浏览器目录或端口不符');
+ const routes=Object.values(driver.listAccounts().accounts).filter(r=>r.port===port&&sameProfile(r.profile,profile)&&r.expectedHandle?.toLowerCase()===task.account.toLowerCase());
+ if(routes.length!==1)routeError('工作台与本地x-publish的公开账号路由不一致，未启动浏览器');
+ const route=routes[0];
+ if(route.proxy){const proxy=new URL(route.proxy);if(!['http:','https:','socks5:'].includes(proxy.protocol)||proxy.username||proxy.password||proxy.search||proxy.hash||!['','/'].includes(proxy.pathname))routeError('X专用代理配置须为无凭据的服务地址');}
+ let page,phase='prepare';
+ try{
+  // Existing x-publish launch verifies an occupied port before reusing it;
+  // absent listeners start only this exact dedicated profile. No comment retry.
+  const launched=await driver.launch({port,profile,proxy:route.proxy,startUrl:'about:blank'});
+  const owner=await driver.verifyBrowserProfile(port,profile);
+  if(!Number.isInteger(launched.pid)||owner.pids?.[0]!==launched.pid||!sameProfile(owner.profile,profile))throw Error('启动后浏览器归属变化');
+  page=await driver.Page.attach(port,{owned:true,startUrl:'about:blank'});
+  if(page._owned!==true||page._port!==port||typeof page.targetId!=='string'||!page.targetId)throw Error('未取得本轮自有标签');
+  const again=await driver.verifyBrowserProfile(port,profile);
+  if(owner.pids[0]!==again.pids?.[0]||!sameProfile(again.profile,profile))throw Error('连接后浏览器归属变化');
+  phase='operation';
+  return await fn({goto:url=>page.goto(url),evaluate:(fn,...args)=>page.eval(`(${fn.toString()})(...${JSON.stringify(args)})`),type:content=>page.typeText(content),screenshot:file=>page.screenshot(file)});
+ }catch(error){
+  if(phase==='operation')throw error;
+  throw Object.assign(Error(`X专用浏览器启动或连接未就绪：${error.message}；未发送，请检查专用窗口后沿原ID恢复`),{code:'X_BROWSER_UNAVAILABLE'});
+ }finally{await page?.closeOwned();}
+}
 export function verifyCommentContext(view,task,replyUrl){
  const expected=replyUrl?commentUrl(replyUrl):task.target,actual=commentUrl(view.url);
  if(actual.id!==expected.id||actual.handle!==expected.handle)mismatch('当前页面并非指定的公开对象');
@@ -48,13 +74,9 @@ export async function withCommentPage(task,{config,db},fn){
  const settings=scoped.publishPrep?.x,profile=settings?.browserProfile,port=settings?.browserPort??9336;
  if(port!==9336||!isDedicatedXProfile(profile,port)||settings?.browserExecution!==true)throw Error('原X账户专用执行浏览器未配置');
  const root=process.env.MAITIAN_LOCAL_SKILLS||path.join(os.homedir(),'.dsh','skills');
- const {verifyBrowserProfile,Page}=await import(pathToFileURL(path.join(root,'x-publish/scripts/lib/cdp.mjs')).href);
- const owner=await verifyBrowserProfile(port,profile);let page;
- try{
-  page=await Page.attach(port,{owned:true,startUrl:'about:blank'});
-  const again=await verifyBrowserProfile(port,profile);if(owner.pids?.[0]!==again.pids?.[0])throw Error('浏览器归属变化');
-  return await fn({goto:url=>page.goto(url),evaluate:(fn,...args)=>page.eval(`(${fn.toString()})(...${JSON.stringify(args)})`),type:content=>page.typeText(content),screenshot:file=>page.screenshot(file)});
- }finally{await page?.closeOwned();}
+ const cdp=await import(pathToFileURL(path.join(root,'x-publish/scripts/lib/cdp.mjs')).href);
+ const {listAccounts}=await import(pathToFileURL(path.join(root,'x-publish/scripts/lib/accounts.mjs')).href);
+ return withSharedCommentPage(task,{port,profile},fn,{...cdp,listAccounts});
 }
 export async function executeXComment(task,{folder,beforeSubmit,onStage=()=>{},onContext=()=>{}},{config,db,withPage=withCommentPage,wait=delay,now=()=>new Date()}={}){
  let intent=false;

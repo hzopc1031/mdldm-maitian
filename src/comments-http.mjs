@@ -5,7 +5,7 @@ import {COMMENT_STATES} from './comment-service.mjs';
 import {redactL1} from './l1-web.mjs';
 
 export function createCommentsHttp({service,accounts,home,send,secrets=[]}){
- const contract=()=>({version:1,platform:'x',plainTextOnly:true,enqueueMeansSend:true,accountSelectionRequired:true,accounts:accounts(),states:COMMENT_STATES,
+ const contract=()=>({version:1,platform:'x',plainTextOnly:true,browserReadiness:'reuse_or_start_dedicated',enqueueMeansSend:true,accountSelectionRequired:true,accounts:accounts(),states:COMMENT_STATES,
   requiredInput:['platform','accountId','rootUrl','targetUrl','content','requestId'],actorRequired:true,idempotency:['accountId+requestId','actualAccount+targetStatusId+content'],unknownRetry:false,restartQueue:'paused',maxPageSize:200});
  const prompt=()=>`你负责决定X评论目标、正文和账号，麦田只执行。先GET /api/comments/contract，从accounts选择已登录账号。POST /api/comments，头Origin为本机工作台地址，Content-Type: application/json。\n请求：${JSON.stringify({type:'enqueue',input:{platform:'x',accountId:'实际账户ID',rootUrl:'https://x.com/author/status/原帖ID',targetUrl:'https://x.com/author/status/直接回复对象ID',content:'你决定的完整评论',requestId:'稳定任务编号'},actor:{runtime:'codex',sessionId:'本次真实会话ID'}})}\nenqueue会立即请求发送，并非草稿。回复主帖时rootUrl=targetUrl；回复评论时targetUrl是该评论，rootUrl是原帖。记录actor只能上报真实AI身份，不冒充认证。返回ID后GET /api/comments/record?id=ID轮询；sent才是已核验公开评论，读取url。unknown禁止重发、改requestId或换账户重建；paused/明确未提交的failed只能以原ID和actor调用type:resume。排队任务可type:cancel。不要直接操作浏览器或绕过工作台补发。工作台不自动选帖/改稿。\n本次可选账号：${JSON.stringify(accounts())}`;
  return async(req,res,u)=>{
