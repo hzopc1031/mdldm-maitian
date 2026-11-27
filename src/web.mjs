@@ -11,6 +11,9 @@ import { home } from './l1-config.mjs';
 import { authPage, cleanTarget, isLoopback, localRequestAllowed } from './web-auth.mjs';
 import { createPrepService, BROWSER_BLOCK } from './publish-prep.mjs';
 import {createPostService} from './publish-posts.mjs';
+import {createCommentService} from './comment-service.mjs';
+import {executeXComment} from './x-comment-executor.mjs';
+import {createCommentsHttp} from './comments-http.mjs';
 import {readPrepStatus} from './prep-status.mjs';
 import {platformRules} from './platform-rules.mjs';
 import {readPrepColumns,managePrepColumn,reclassifyColumns} from './prep-columns.mjs';
@@ -41,6 +44,8 @@ function collectionSchedule() {
 }
 const prep = createPrepService({ db, config, home, root: ROOT, secrets: [W.key, W.widgetToken],canUseXAccount });
 const posts=createPostService({db,home,config,prep,canUseXAccount});
+const comments=createCommentService({db,home,config,secrets:[W.key,W.widgetToken],canUseAccount:canUseXAccount,isExternalBusy:()=>actions.some(a=>!a.done)||prep.busy()||posts.busy(),execute:(r,ctx)=>executeXComment(r,ctx,{config,db})});
+const commentsHttp=createCommentsHttp({service:comments,accounts:xPublishAccounts,home,send,secrets:[W.key,W.widgetToken]});
 const videoJobs=videoPrefillJobs(db,{redact:value=>redactL1(value,[W.key,W.widgetToken])});
 const videoPublications=videoPrefillPublications(db,videoJobs);
 db.exec(ageSamplingSchema);
@@ -49,7 +54,7 @@ const saveMeta=db.prepare('INSERT OR REPLACE INTO meta (key,value) VALUES (?,?)'
 const ageSamplingEnabled=()=>getMeta('l1:age:enabled')==='true';
 
 function launchDueAgeSampling(){
-  if(!ageSamplingEnabled()||actions.some(record=>!record.done)||prep.busy())return;
+  if(!ageSamplingEnabled()||actions.some(record=>!record.done)||prep.busy()||comments.busy())return;
   const status=l1Status(), accounts={};
   for(const platform of agePlatforms){
     const current=status[platform];
@@ -166,7 +171,7 @@ export function overviewData(xAccountId='default') {
   const visibleIds=new Set(visible.filter(e=>e.tasks.some(t=>t.platform==='x')).map(e=>e.id));
   const at = e => Date.parse(e.publishedAt || e.observedAt || e.createdAt) || 0;
   return {
-    xAccountId,xAccounts:listXAccounts(db,config).map(a=>({...a,status:l1Status(a.id).x,summary:a.handle?accountSummary(db,'x',a.handle):null})),
+    commentBusy:comments.busy(),xAccountId,xAccounts:listXAccounts(db,config).map(a=>({...a,status:l1Status(a.id).x,summary:a.handle?accountSummary(db,'x',a.handle):null})),
     platforms:PLATFORM_CATALOG.map(p=>({...p,selected:selectedPlatforms(db).includes(p.id)})),
     accountSummaries: configuredSummaries(db, scoped, l1Account),
     episodes: visible.sort((a, b) => at(b) - at(a) || a.id.localeCompare(b.id)),
@@ -339,13 +344,14 @@ export async function handle(req, res) {
       return send(res,200,{ok:true,job:videoPublications.annotate(videoJobs.record(input))});
     } catch(error) {return send(res,400,{error:redactL1(error.message,[W.key,W.widgetToken])});}
   }
+  if(u.pathname==='/api/comments'||u.pathname.startsWith('/api/comments/'))return commentsHttp(req,res,u);
   if (u.pathname === '/api/l1/status' && req.method === 'GET') {
-    try{return send(res,200,{platforms:l1Status(u.searchParams.get('accountId')||'default'),xAccounts:listXAccounts(db,config).map(a=>({...a,status:l1Status(a.id).x})),actions:actions.slice(-8).reverse()});}catch(error){return send(res,400,{error:error.message});}
+    try{return send(res,200,{platforms:l1Status(u.searchParams.get('accountId')||'default'),xAccounts:listXAccounts(db,config).map(a=>({...a,status:l1Status(a.id).x})),actions:actions.slice(-8).reverse(),comments:{running:comments.busy(),queued:comments.list({limit:1}).counts.queued}});}catch(error){return send(res,400,{error:error.message});}
   }
   if(u.pathname==='/api/l1/x-accounts'&&req.method==='POST'){
     if(!isLoopback(req.socket.remoteAddress)||req.headers.origin!==`http://${req.headers.host}`||!req.headers['content-type']?.startsWith('application/json'))return send(res,403,{error:'只接受工作台本机页面操作'});
     let raw='';for await(const chunk of req){raw+=chunk;if(Buffer.byteLength(raw)>4096)return send(res,413,{error:'请求过大'});}
-    try{if(actions.some(a=>!a.done)||prep.busy())return send(res,409,{error:'已有操作在运行，请稍候'});const input=JSON.parse(raw),account=createXAccount(db,input);return send(res,200,{ok:true,account});}catch(error){return send(res,400,{error:error.message});}
+    try{if(actions.some(a=>!a.done)||prep.busy()||comments.busy())return send(res,409,{error:'已有操作在运行，请稍候'});const input=JSON.parse(raw),account=createXAccount(db,input);return send(res,200,{ok:true,account});}catch(error){return send(res,400,{error:error.message});}
   }
   if (u.pathname === '/api/prep/status') {
     if(!isLoopback(req.socket.remoteAddress)||!localRequestAllowed(req))return send(res,403,{code:'LOCAL_ONLY',error:'仅允许同源本机直连调用'});
@@ -355,7 +361,7 @@ export async function handle(req, res) {
   }
   if (u.pathname === '/api/prep/rules-module' && req.method==='GET') return send(res,200,fs.readFileSync(path.join(DIR,'platform-rules.mjs')),'text/javascript; charset=utf-8');
   if (u.pathname === '/api/prep' && req.method === 'GET') return send(res, 200, { capabilities: prep.publicCapabilities(), rules:platformRules(config), records: ageReview.forRecords(prep.list()) });
-  if (u.pathname === '/api/prep/contract' && req.method === 'GET') return send(res,200,{version:4,columnOnly:true,columns:readPrepColumns(db),columnSelection:'caller_selects_defined',columnManagement:true,xMultiAccount:true,xAccounts:listXAccounts(db,config).map(({id,label,handle})=>({id,label,handle})),defaultXAccount:'default',xAccountSelection:'accountId',requiredXFill:['accountId'],xPublishAccounts:xPublishAccounts(),agentAttribution:'caller_reported',operationActors:true,finalPublishPlatforms:['x','xhs'],submit:true,manuscriptVersion:2,requiredCreate:['column','scheduledAt','actor'],requiredFill:['mode'],scheduledPublish:'recorded_only',noteLimit:500,fillModes:['draft','publish'],publishPlatforms:['x','xhs']});
+  if (u.pathname === '/api/prep/contract' && req.method === 'GET') return send(res,200,{version:4,columnOnly:true,columns:readPrepColumns(db),columnSelection:'caller_selects_defined',columnManagement:true,xMultiAccount:true,xAccounts:listXAccounts(db,config).map(({id,label,handle})=>({id,label,handle})),defaultXAccount:'default',xAccountSelection:'accountId',comments:{contract:'/api/comments/contract',page:'/p#/comments'},requiredXFill:['accountId'],xPublishAccounts:xPublishAccounts(),agentAttribution:'caller_reported',operationActors:true,finalPublishPlatforms:['x','xhs'],submit:true,manuscriptVersion:2,requiredCreate:['column','scheduledAt','actor'],requiredFill:['mode'],scheduledPublish:'recorded_only',noteLimit:500,fillModes:['draft','publish'],publishPlatforms:['x','xhs']});
   if(u.pathname==='/api/prep/columns') {
     if(!isLoopback(req.socket.remoteAddress)||!localRequestAllowed(req))return send(res,403,{code:'LOCAL_ONLY',error:'栏目管理仅允许同源本机调用'});
     if(req.method==='GET')return send(res,200,{ok:true,columns:readPrepColumns(db)});
@@ -363,7 +369,7 @@ export async function handle(req, res) {
     try{
       let body='';for await(const chunk of req){body+=chunk;if(Buffer.byteLength(body)>16384)return send(res,413,{error:'请求过大'});}
       const a=JSON.parse(body);if(!a||Object.keys(a).some(k=>!['type','id','input','revision','actor'].includes(k)))throw Object.assign(Error('栏目管理字段不对'),{code:'INVALID_INPUT'});
-      if(actions.some(a=>!a.done)||prep.busy()||posts.busy())return send(res,409,{code:'BUSY',error:'当前有操作运行，请稍后再管理栏目'});
+      if(actions.some(a=>!a.done)||prep.busy()||comments.busy()||posts.busy())return send(res,409,{code:'BUSY',error:'当前有操作运行，请稍后再管理栏目'});
       return send(res,200,managePrepColumn(db,a));
     }catch(e){return send(res,e.code==='CONFLICT'?409:e.code==='NOT_FOUND'?404:400,{code:e.code??'INVALID_INPUT',error:redactL1(e.message,[W.key,W.widgetToken])});}
   }
@@ -391,7 +397,7 @@ export async function handle(req, res) {
         let body='';for await(const chunk of req){body+=chunk;if(Buffer.byteLength(body)>prepRequestLimit)return send(res,413,{code:'TOO_LARGE',error:'请求过大'});}
         const a=JSON.parse(body);if(!a||Object.keys(a).some(k=>!['type','id','platform','platforms','input','actor','column','scheduledAt','note','mode','assignments','accountId'].includes(k)))throw Object.assign(Error('操作字段不对；不接受 submit 或发布授权'),{code:'INVALID_INPUT'});
         if(['publish','submit'].includes(a.type))return send(res,403,{code:'PUBLISH_DISABLED',error:'Liu要求最后一步由本人操作；接口只填写，不发布'});
-        if(actions.some(a=>!a.done)||prep.busy()||posts.busy())return send(res,409,{code:'BUSY',error:'另一个操作正在运行，请先查状态'});
+        if(actions.some(a=>!a.done)||prep.busy()||comments.busy()||posts.busy())return send(res,409,{code:'BUSY',error:'另一个操作正在运行，请先查状态'});
         if(a.accountId!==undefined&&!['create','fill','select-x-account'].includes(a.type))throw Object.assign(Error('X账户只能在建稿、选择账号或执行时指定'),{code:'INVALID_INPUT'});
         if(a.type==='columns')return send(res,200,reclassifyColumns(db,a.assignments,a.actor));
         if(a.type==='create')return send(res,200,{ok:true,post:posts.create(a.input,a.actor,{column:a.column,scheduledAt:a.scheduledAt,note:a.note,accountId:a.accountId})});
@@ -441,7 +447,7 @@ export async function handle(req, res) {
       const a = JSON.parse(body);
       if(['publish','submit'].includes(a?.type))return send(res,403,{code:'PUBLISH_DISABLED',error:'Liu 2026-11-23 11:33 要求：此入口只填写，最后发布由本人操作'});
       if (!a || Object.keys(a).some(k => !['type', 'input', 'id','actor','approval'].includes(k)) || (a.actor!==undefined&&!['check','execute','publish'].includes(a.type)) || a.approval!==undefined&&a.type!=='publish') throw new Error('操作字段不对');
-      if (actions.some(a => !a.done) || prep.busy()) return send(res, 409, { error: '另一个操作还在运行' });
+      if (actions.some(a => !a.done) || prep.busy()||comments.busy()) return send(res, 409, { error: '另一个操作还在运行' });
       if (['window','window-check'].includes(a.type)) return send(res,200,{ok:true,window:await prep.window(a.id,a.type==='window')});
       if (a.type==='release-window') return send(res,200,{ok:true,record:prep.releaseWindow(a.id)});
       const record = a.type === 'create' ? prep.create(a.input) : ['check', 'execute'].includes(a.type) ? prep.start(a.id, a.type,a.actor) : null;
@@ -464,7 +470,7 @@ export async function handle(req, res) {
     if(req.headers.origin!==`http://${req.headers.host}`)return send(res,403,{error:'只允许同源平台设置请求'});
     let body='';for await(const chunk of req){body+=chunk;if(Buffer.byteLength(body)>4096)return send(res,413,{error:'请求过大'});}
     try {
-      if(actions.some(a=>!a.done)||prep.busy())return send(res,409,{error:'请等当前任务完成后再修改平台'});
+      if(actions.some(a=>!a.done)||prep.busy()||comments.busy())return send(res,409,{error:'请等当前任务完成后再修改平台'});
       const a=JSON.parse(body),p=platformById(a.platform);if(!p||Object.keys(a).some(k=>!['platform','selected','account'].includes(k)))throw new Error('平台设置参数不正确');
       if(a.account!==undefined){
         if(typeof a.account!=='string'||!a.account.trim()||a.account.length>100||/[\r\n]/.test(a.account)||/cookie:|bearer\s|https?:\/\/|[\w.+-]+@[\w.-]+\.[A-Za-z]{2,}/i.test(a.account))throw new Error('仅填写平台公开账号名，不填写密码、邮箱、Cookie或网址');
@@ -480,7 +486,7 @@ export async function handle(req, res) {
     if(req.headers.origin!==`http://${req.headers.host}`)return send(res,403,{error:'只允许同源作品登记请求'});
     let body='';for await(const chunk of req){body+=chunk;if(Buffer.byteLength(body)>16384)return send(res,413,{error:'内容过长'});}
     try {
-      if(actions.some(a=>!a.done)||prep.busy())return send(res,409,{error:'请等当前任务完成后再登记作品'});
+      if(actions.some(a=>!a.done)||prep.busy()||comments.busy())return send(res,409,{error:'请等当前任务完成后再登记作品'});
       const a=JSON.parse(body),p=platformById(a.platform);if(!p?.native||Object.keys(a).some(k=>!['platform','title','publishedAt','url'].includes(k)))throw new Error('请选择原生平台');
       const account=l1Account(config,p.id);if(typeof a.title!=='string'||!a.title.trim()||a.title.length>8000)throw new Error('请填写作品标题或正文第一段');
       if(typeof a.publishedAt!=='string'||!/T.*(?:Z|[+-]\d{2}:\d{2})$/.test(a.publishedAt)||!Number.isFinite(Date.parse(a.publishedAt))||Date.parse(a.publishedAt)>Date.now())throw new Error('请填写已发布作品的真实发布时间');
@@ -519,7 +525,7 @@ export async function handle(req, res) {
         return send(res, 200, { ok: true });
       }
       if (['doctor', 'sync'].includes(a.type) && config.l1?.[a.platform]?.browserExecution === false) return send(res, 409, { error: BROWSER_BLOCK });
-      if (actions.some(x => !x.done) || prep.busy()) return send(res, 409, { error: '上一个 L1 操作还在跑，等它结束' });
+      if (actions.some(x => !x.done) || prep.busy()||comments.busy()) return send(res, 409, { error: '上一个 L1 操作还在跑，等它结束' });
       const previousIdentity = l1Status(xId)[a.platform].identity;
       if (previousIdentity) db.prepare('INSERT OR REPLACE INTO meta (key,value) VALUES (?,?)').run(`l1:web:identity:${key}`, JSON.stringify(previousIdentity));
       const rec = launchL1(a, { root: ROOT, secrets: [W.key, W.widgetToken],
@@ -546,6 +552,8 @@ export function startWeb() {
   initLogin(ROOT);
   srv.listen(W.port || 8787, '127.0.0.1', () => {
     console.log(`麦田网页：http://127.0.0.1:${srv.address().port}/`);
+    const commentTimer=setInterval(()=>{void comments.drain().catch(error=>console.error('评论队列：'+redactL1(error.message,[W.key,W.widgetToken])));},1000).unref();
+    srv.once('close',()=>clearInterval(commentTimer));
     const ageTimer=setInterval(()=>{
       try{launchDueAgeSampling();}catch(error){console.error('同龄采样：'+redactL1(error.message,[W.key,W.widgetToken]));}
     },5*60000).unref();

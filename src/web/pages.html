@@ -30,7 +30,7 @@ const M = (e, p) => ((e.tasks.find(t => t.platform === p) || {}).m) || null;
 const timeOf = e => e.publishedAt || e.schedule || e.observedAt || e.createdAt;
 const publishedLabel=(e,at)=>e.dateOnly?`${new Intl.DateTimeFormat('zh-CN',{timeZone:'Asia/Shanghai',year:'numeric',month:'numeric',day:'numeric'}).format(new Date(at))}（仅日期）`:when(at);
 const episodeLabel = e => e.episode == null ? '已导入作品' : `第 ${esc(e.episode)} 期`;
-const busy = () => !!O?.actions?.some(a => !a.done);
+const busy = () => !!O?.commentBusy || !!O?.actions?.some(a => !a.done);
 const abtn = (a, text, cls = '', cf = '') => `<button class="btn ${cls}" ${(pendingAction || busy() && !['mark','show-login','cancel-login'].includes(a.type)) ? 'disabled' : ''} data-act='${esc(JSON.stringify(a))}' data-confirm="${esc(cf)}" ${pendingAction && pendingAction.type===a.type && pendingAction.platform===a.platform ? 'aria-busy="true"' : ''}>${text}</button>`;
 const collectButtons = () => ['x', 'xhs', 'wechat'].map(platform => abtn({ type: 'collect', platform }, `采集 ${PN[platform]}`)).join('');
 const tile = (lab, val, sub = '') => `<div class="panel tile"><div class="lab">${lab}</div><div class="val">${val}</div><div class="dl">${sub}</div></div>`;
@@ -189,11 +189,12 @@ function vSystem() {
   <details class="panel system-advanced"><summary>操作记录与最近动态</summary><div class="system-history">${O.actions.length?O.actions.map(a=>`<div class="prow"><span class="st-chip ${a.done?(a.ok?'published':'failed'):'scheduled'}">${a.done?(a.ok?'完成':'未完成'):'进行中'}</span><span>${esc(PN[a.platform])} · ${esc(actionName(a))}</span><span class="d">${esc(when(a.endedAt||a.startedAt))}</span></div>`).join(''):'<p class="note">本次启动后暂无操作记录，最近结果保留在平台卡片中。</p>'}${O.feed.length?`<h3>最近动态</h3>${O.feed.map(f=>`<div class="fd"><span>${esc(when(f.ts))}</span><span>${esc(f.nick||'')}</span><span>${esc(f.platform)}</span><span>${esc(f.action)}</span></div>`).join('')}`:''}</div></details>`;
 }
 
+async function vComments(){const data=await api('/api/comments?accountId='+encodeURIComponent(O.xAccountId||'default'));const page=await import('/static/comment-page.js');after=()=>page.initCommentPage({esc,api,toast,accountId:O.xAccountId||'default'});return page.commentPage(esc,data);}
 async function render() {
   const h = location.hash || '#/traffic', key = h.startsWith('#/ep/') ? 'archive' : h.slice(2).split(/[/?]/)[0], app = $('#app');
   if (h === '#/prepare?format=video' && $('#video-project')) return;
   after = () => {};
-  let body; try { body = h.startsWith('#/prepare') ? await vPrepare() : h.startsWith('#/ep/') ? await vEpisode(decodeURIComponent(h.slice(5))) : ({ traffic: vTraffic, calendar: vCalendar, convert: vConvert, archive: vArchive, system: vSystem }[key] || vTraffic)(); } catch (e) { body = `<div class="empty" style="height:40vh">出错了：${esc(e.message)}</div>`; }
+  let body; try { body = h.startsWith('#/comments') ? await vComments() : h.startsWith('#/prepare') ? await vPrepare() : h.startsWith('#/ep/') ? await vEpisode(decodeURIComponent(h.slice(5))) : ({ traffic: vTraffic, calendar: vCalendar, convert: vConvert, archive: vArchive, system: vSystem }[key] || vTraffic)(); } catch (e) { body = `<div class="empty" style="height:40vh">出错了：${esc(e.message)}</div>`; }
   if ((location.hash || '#/traffic') !== h) return;
   app.innerHTML = topbar(O, key) + body; after();
   const focus=key==='system'?h.split('/')[2]:null;if(focus&&focusedPlatform!==focus){document.getElementById?.(focus==='platforms'?'all-platforms':'platform-'+focus)?.scrollIntoView({block:'start'});focusedPlatform=focus;}if(!focus)focusedPlatform='';

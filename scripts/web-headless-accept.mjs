@@ -7,7 +7,7 @@ import path from 'node:path';
 import http from 'node:http';
 import {once} from 'node:events';
 import {spawn} from 'node:child_process';
-const supportedTests = ['unauth','invalid','home','traffic','system','prepare','prepare-flow','enabled-system','columns','columns-resize','x-accounts','x-publish-accounts'];
+const supportedTests = ['unauth','invalid','home','traffic','system','prepare','prepare-flow','enabled-system','columns','columns-resize','x-accounts','x-publish-accounts','comments'];
 const tests = process.argv.length > 2 ? process.argv.slice(2) : supportedTests;
 if (tests.some(test => !supportedTests.includes(test))) throw new Error('Unknown browser acceptance scenario');
 const output=path.resolve(process.env.MAITIAN_QA_OUT || '_local-headless-accept');
@@ -32,7 +32,7 @@ const oldObservation=new Date(Date.now()-2*864e5).toISOString();
 saveObservation({platform:'xhs',account:'TwoPeanuts',captured_at:oldObservation,source:'isolated-test',example:true,
   posts:[{id:'stale-fixture',text:'旧观测（假数据）',created_at:oldObservation,views:12}]});
 const {handle}=await import('../src/web.mjs');
-let current, report, columnWrites=0, accountWrites=0, publishWrites=0, fixturePost, fixtureTarget, violations=[];
+let current, report, columnWrites=0, accountWrites=0, publishWrites=0, fixturePost, fixtureTarget, commentWrites=0, violations=[];
 // Added only to test responses; the production HTML and handler are unchanged.
 function browserChecks(test, image) {
   const options=JSON.stringify({test,image,width});
@@ -54,9 +54,35 @@ function browserChecks(test, image) {
       if(login) {login.value='isolated-render-fixture';document.querySelector('form').requestSubmit();return;}
       await wait(()=>test==='home'||test==='x-accounts'&&location.pathname==='/'?!!document.querySelector('.hero'):!!document.querySelector('.h1'));
       check(!document.body.innerText.includes('出错了：'),'no render error');
-      const expected=test==='home'||test==='x-accounts'&&sessionStorage.getItem('qa-account-home')?'/':test==='traffic'?'/p#/traffic':test.endsWith('system')||test==='x-accounts'?'/p#/system':'/p#/prepare';
+      const expected=test==='home'||test==='x-accounts'&&sessionStorage.getItem('qa-account-home')?'/':test==='traffic'?'/p#/traffic':test==='comments'?'/p#/comments':test.endsWith('system')||test==='x-accounts'?'/p#/system':'/p#/prepare';
       check(location.pathname+location.hash===expected,'POST preserved route');
       if(!sessionStorage.getItem('qa-reloaded')){sessionStorage.setItem('qa-reloaded','1');location.reload();return;}
+      if(test==='comments'){
+        await wait(()=>document.querySelectorAll('[data-comment-record]').length===3);
+        check(!!document.querySelector('a[href="/p#/comments"]'),'comment navigation present');
+        check(document.body.innerText.includes('直接回复的评论')&&document.body.innerText.includes('查看发出的评论'),'public parent and reply links');
+        check(document.body.innerText.includes('<'+'script>unsafe<'+'/script>'),'untrusted content escaped');
+        const unknown=document.querySelector('[data-comment-record^="22222222"]');check(!unknown.querySelector('button'),'unknown has no resend action');
+        if(!sessionStorage.getItem('qa-comments-done')){
+          const dom=await import('/__qa/comment-dom');
+          const fixture=document.createElement('section');
+          fixture.innerHTML='<div data-testid="SideNav_AccountSwitcher_Button">@PeanutPair<span data-testid="UserAvatar-Container-PeanutPair"></span></div><main data-testid="primaryColumn"><article><a href="https://x.com/author/status/100"><time datetime="2026-11-27T00:00:00Z">time</time></a><div data-testid="tweetText">root</div></article><article><a href="https://x.com/other/status/200"><time datetime="2026-11-27T00:00:00Z">time</time></a><div data-testid="tweetText">target</div><div data-testid="quoteTweet"><a href="https://x.com/quote/status/999"><time>quote</time></a><div data-testid="tweetText">quoted text</div><button data-testid="reply">quoted reply</button></div><button data-testid="reply" id="fixture-open">reply</button></article></main><div role="dialog"><article><a href="https://x.com/other/status/200"><time>target</time></a></article><div data-testid="tweetTextarea_0" contenteditable="true"></div><button data-testid="tweetButton">send</button></div>';
+          document.body.append(fixture);let opened=0,submitted=0;fixture.querySelector('#fixture-open').onclick=()=>opened++;fixture.querySelector('[data-testid=tweetButton]').onclick=()=>submitted++;
+          const view=dom.commentPageView();check(view.cards.map(c=>c.id).join(',')==='100,200','quoted card excluded from main identities');check(view.cards[1].content==='target','quoted text excluded');
+          check(dom.openCommentTarget('200','other')&&opened===1,'reply chooses target own button once');
+          check(dom.commentComposer('200','other','PeanutPair','exact body','focus')===true,'empty matching reply editor focused');
+          fixture.querySelector('[contenteditable]').innerText='exact body';check(dom.commentComposer('200','other','PeanutPair','exact body','read').ready,'full text read back');
+          check(dom.commentComposer('300','other','PeanutPair','exact body','submit')===null&&submitted===0,'wrong parent never submits');
+          check(dom.commentComposer('200','other','WrongUser','exact body','submit')===null&&submitted===0,'wrong account never submits');
+          check(dom.commentComposer('200','other','PeanutPair','exact body','submit')===true&&submitted===1,'single scoped submit');fixture.remove();
+          document.querySelector('[data-comment-cancel]').click();await wait(()=>!document.querySelector('[data-comment-cancel]'));
+          const select=document.querySelector('[data-comment-state]');select.value='unknown';select.dispatchEvent(new Event('change',{bubbles:true}));await wait(()=>document.querySelectorAll('[data-comment-record]').length===1);check(document.body.innerText.includes('未知结果样本'),'state filter');
+          sessionStorage.setItem('qa-comments-done','1');location.reload();return;
+        }
+        check(!document.querySelector('[data-comment-cancel]'),'cancel persisted after refresh');
+        check(document.documentElement.scrollWidth<=document.documentElement.clientWidth+1,'comment page fits viewport');
+        await finish(true,'评论关系/来源/状态、正文转义、取消/筛选/刷新和真实DOM定位/错对象错账号拒绝均通过；无平台动作');return;
+      }
       if(test==='x-publish-accounts') {
         if(!sessionStorage.getItem('qa-publish-submitted')){
           await wait(()=>!!document.querySelector('[data-x-publish]'));
@@ -203,14 +229,16 @@ function browserChecks(test, image) {
   }.toString()})(${options});</script>`;
 }
 const server=http.createServer(async(req,res)=>{
+  if(req.url==='/__qa/comment-dom'&&current==='comments'){res.writeHead(200,{'content-type':'text/javascript'});res.end(fs.readFileSync(path.resolve('src/x-comment-dom.mjs')));return;}
   if(req.url==='/__qa/report') {
     let body='';for await(const d of req)body+=d;
     try {const value=JSON.parse(body); report={ok:value.ok===true,detail:String(value.detail).slice(0,300),viewport:value.viewport};}catch{report={ok:false,detail:'invalid QA report'};}
     res.end('ok');return;
   }
-  if(req.url.startsWith('/api/action') || (req.method==='POST' && req.url!=='/auth' && req.url!=='/api/prep' && !(current==='x-publish-accounts'&&req.url==='/api/prep/posts') && !(current==='x-accounts'&&req.url==='/api/l1/x-accounts') && !(current.startsWith('columns')&&req.url==='/api/prep/columns'))) {
+  if(req.url.startsWith('/api/action') || (req.method==='POST' && req.url!=='/auth' && req.url!=='/api/prep' && !(current==='comments'&&req.url==='/api/comments') && !(current==='x-publish-accounts'&&req.url==='/api/prep/posts') && !(current==='x-accounts'&&req.url==='/api/l1/x-accounts') && !(current.startsWith('columns')&&req.url==='/api/prep/columns'))) {
     violations.push('unexpected mutation');res.writeHead(403);res.end();return;
   }
+  if(current==='comments'&&req.url==='/api/comments'&&req.method==='POST'){let raw='';for await(const chunk of req)raw+=chunk;const a=JSON.parse(raw);if(a.type!=='cancel'){violations.push('unexpected comment execution');res.writeHead(403);res.end();return;}commentWrites++;req=Object.assign(Object.create(req),{[Symbol.asyncIterator]:async function*(){yield Buffer.from(raw);}});}
   if(req.url==='/api/prep' && req.method==='POST') {
     // Only local create is allowed in rendered acceptance; never invoke a skill.
     let body='';for await(const d of req)body+=d;
@@ -249,9 +277,18 @@ const evidence={at:new Date().toISOString(),mode:'Chrome headless CLI; isolated 
 try {
   if(!binary)throw new Error('Chrome not found');
   for(const test of tests) {
-    current=test;report=null;columnWrites=0;accountWrites=0;publishWrites=0;
+    current=test;report=null;columnWrites=0;accountWrites=0;publishWrites=0;commentWrites=0;
     config.publishPrep.browserExecution=test==='enabled-system';
     for(const p of ['x','xhs','wechat'])config.l1[p].browserExecution=test==='enabled-system';
+    if(test==='comments'){
+      const at=new Date().toISOString(),actor={runtime:'codex',name:'Codex',sessionId:'offline-comments-ui'};
+      for(const [n,state] of [['1','sent'],['2','unknown'],['3','queued']]){
+        const id=n.repeat(8)+'-'+n.repeat(4)+'-'+n.repeat(4)+'-'+n.repeat(4)+'-'+n.repeat(12);
+        const r={id,platform:'x',accountId:'default',account:'PeanutPair',state,requestId:'fixture-'+n,createdAt:at,actor,root:{id:'100',handle:'author',url:'https://x.com/author/status/100'},target:{id:'200',handle:'other',url:'https://x.com/other/status/200'},content:state==='unknown'?'<script>unsafe</script>未知结果样本':'隔离评论样本'+n,...(state==='sent'?{url:'https://x.com/PeanutPair/status/901',verifiedAt:at}:{}),...(state==='unknown'?{error:'发送结果未确认，禁止重发'}:{})};
+        db.prepare('INSERT INTO comment_jobs VALUES (?,?,?,?)').run(id,'ui-fixture-'+n,state,JSON.stringify(r));
+      }
+    }
+
     if(test==='x-publish-accounts'){
       const {createXAccount,bindXAccount}=await import('../src/x-accounts.mjs');
       for(const [label,handle] of [['工作登录样本','DemoWork'],['出行登录样本','DemoTrip'],['未登录样本',null]]){
@@ -267,7 +304,7 @@ try {
       insert.run('legacy-wechat-fixture',JSON.stringify({id:'legacy-wechat-fixture',platform:'wechat',title:'旧草稿回执（假数据）',state:'unknown',kind:'execute',evidence:{submitted:null,savedAsDraft:false}}));
       insert.run('project-x-fixture',JSON.stringify({id:'project-x-fixture',platform:'x',title:'已发布回执（假数据）',state:'published',source:{project:'AI 精选项目',column:'每日 AI 精选',category:'AI 工具',runId:'fixture-run'},publishedAt:'2026-11-21T01:00:05Z',url:'https://x.com/PeanutPair/status/456',publication:{postId:'456'}}));
     }
-    const target=test==='home'?'/':test==='traffic'?'/p#/traffic':test==='unauth'||test.endsWith('system')||test==='x-accounts'?'/p#/system':'/p#/prepare';
+    const target=test==='home'?'/':test==='traffic'?'/p#/traffic':test==='comments'?'/p#/comments':test==='unauth'||test.endsWith('system')||test==='x-accounts'?'/p#/system':'/p#/prepare';
     const shot=path.join(output,test+'.png');
     const child=spawn(binary,['--headless=new','--incognito','--no-first-run','--no-default-browser-check','--disable-extensions','--disable-background-networking',
       `--window-size=${width},1800`,'--user-data-dir='+path.join(folder,'profile-'+test),'--screenshot='+shot,'--dump-dom','--timeout=18000',
@@ -277,8 +314,8 @@ try {
     const timer=setTimeout(()=>{timedOut=true;child.kill();},25000);
     const [code]=await once(child,'close');clearTimeout(timer);
     if(test==='prepare')db.prepare('DELETE FROM publish_preparations WHERE id IN (?,?)').run('legacy-wechat-fixture','project-x-fixture');
-    const writesOk=(!test.startsWith('columns')||columnWrites===2)&&(test!=='x-accounts'||accountWrites===2)&&(test!=='x-publish-accounts'||publishWrites===1);
-    const result={test,ok:code===0&&!timedOut&&report?.ok===true&&fs.existsSync(shot)&&writesOk,code,detail:!writesOk?'expected exactly one create and one edit':report?.detail || 'browser did not confirm assertions',...(test.startsWith('columns')?{columnWrites}:{}),viewport:report?.viewport,screenshot:shot};
+    const writesOk=(!test.startsWith('columns')||columnWrites===2)&&(test!=='x-accounts'||accountWrites===2)&&(test!=='x-publish-accounts'||publishWrites===1)&&(test!=='comments'||commentWrites===1);
+    const result={test,ok:code===0&&!timedOut&&report?.ok===true&&fs.existsSync(shot)&&writesOk,code,detail:!writesOk?`Unexpected write counts columns=${columnWrites}, accounts=${accountWrites}, comments=${commentWrites}; ${report?.detail||'no browser report'}`:report?.detail || 'browser did not confirm assertions',...(test.startsWith('columns')?{columnWrites}:{}),viewport:report?.viewport,screenshot:shot};
     evidence.results.push(result);console.log(JSON.stringify(result));
     if(test.startsWith('columns'))db.prepare('DELETE FROM publish_columns WHERE name IN (?,?)').run('AI验收栏目','AI案例库');
   }

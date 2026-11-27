@@ -2,7 +2,7 @@
 function workbenchNav(on,siteOn=false) {
   const local=typeof location==='undefined'||['127.0.0.1','localhost'].includes(location.hostname);
   const agents=local?'http://127.0.0.1:3351/':'/agents/';
-  const items=[['/','总览','board'],['/p#/prepare','发布','prepare'],['/p#/traffic','数据统计','traffic'],['/p#/calendar','发布日历','calendar'],['/p#/archive','作品库','archive'],['/p#/system','账号与采集','system'],[agents,'项目调度台','agents']];
+  const items=[['/','总览','board'],['/p#/prepare','发布','prepare'],['/p#/comments','评论','comments'],['/p#/traffic','数据统计','traffic'],['/p#/calendar','发布日历','calendar'],['/p#/archive','作品库','archive'],['/p#/system','账号与采集','system'],[agents,'项目调度台','agents']];
   if(siteOn)items.splice(4,0,['/p#/convert','站点转化','convert']);
   return `<nav class="nav" aria-label="工作台导航">${items.map(([url,label,key])=>`<a href="${url}" class="${key===on?'on ':''}${key==='prepare'?'nav-publish':''}" ${key===on?'aria-current="page"':''}>${label}</a>`).join('')}</nav>`;
 }

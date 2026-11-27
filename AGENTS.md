@@ -48,3 +48,5 @@
 - 2026-11-27 X发布账户最终规则：发布页及AI fill均必须显式accountId，只能从contract.xPublishAccounts已确认登录列表选择；原稿未准备前可select-x-account，检查后目标固定，unknown不换号/重建。评论模块尚未开发，本轮无平台动作。详细交接与证据见docs/x-multi-account-20261127.md。
 
 - 2026-11-27 首页脚本教训：board.html与pages.html为独立入口；共享账户状态/API/选择器由两页共同加载x-account-context.js，不引用仅在mt.js内定义的符号。HTTP200或Chrome exit0不等于页面渲染通过；需检查根首页及跨页账户切换，保留先失败后通过证据。详见evidence/home-account-context-fix-20261127/执行记录.md。
+
+- 2026-11-27 20:55 X评论已接入麦田：AI决定目标/正文/明确已登录账户，先读docs/comments-api.md，enqueue即请求发送。不得把实现授权当任意真实评论授权；本轮没有实发。请求编号与账号/目标/正文防重，unknown不换ID重跑，重启未执行队列暂停；与本工作台发帖/采集/登录互斥。旧运行中AI任务尚需读指令改接，不声称已自动迁移。PS5辅助文件检查被执行策略拦截，未改策略/换通道；本轮实际维护在已验证的PS7路径成功，详见evidence/comments-20261127/执行记录.md。

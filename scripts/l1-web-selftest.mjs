@@ -249,6 +249,12 @@ try {
   assert.equal((await request('/api/prep',{action:{type:'create',input:{platform:'x',content:'bad',submit:true}}})).code,400);
   assert.equal((await request('/api/prep',{action:{type:'create',input:{platform:'x',content:'bad'}},headers:{origin:'https://evil.test'}})).code,403);
 
+  assert.equal((await request('/api/comments/contract')).json().version,1);
+  assert.equal((await request('/api/comments')).json().total,0);
+  assert.equal((await request('/api/comments',{action:{type:'enqueue',input:{platform:'x'},actor:{runtime:'codex',sessionId:'offline'}},headers:postHeaders})).code,400);
+  assert.equal((await request('/api/comments/contract',{auth:false})).code,401);
+  assert.equal((await request('/api/comments',{action:{type:'cancel',id:'none'},headers:{origin:'https://evil.test'}})).code,403);
+
   // 执行真实页面模板，核验空数据、系统控制和持久化失败记录均可渲染。
   const elements = new Map();
   const element = key => { if (!elements.has(key)) elements.set(key, { innerHTML: '', style: {}, append() {} }); return elements.get(key); };

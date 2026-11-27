@@ -13,7 +13,7 @@ foreach($file in @($node,$launcher,$entry,$database)){if(!(Test-Path -LiteralPat
 $tokens=$null;$parseErrors=$null
 [void][System.Management.Automation.Language.Parser]::ParseFile($launcher,[ref]$tokens,[ref]$parseErrors)
 if($parseErrors.Count){throw 'Existing launcher failed PowerShell syntax validation.'}
-foreach($rel in @('src/db.mjs','src/publish-prep.mjs','src/publish-posts.mjs','src/prep-wechat.mjs','src/prep-wechat-run.mjs','src/platform-rules.mjs','src/prep-publication.mjs','src/prep-intake.mjs','src/prep-agent.mjs','src/l1-inspect.mjs','src/web.mjs','src/web/publish-prep.js','src/web/prepare-page.js','scripts/l1-submit-prep.mjs')) {
+foreach($rel in @('src/db.mjs','src/comment-service.mjs','src/comments-http.mjs','src/x-comment-executor.mjs','src/x-comment-dom.mjs','src/web/comment-page.js','src/publish-prep.mjs','src/publish-posts.mjs','src/prep-wechat.mjs','src/prep-wechat-run.mjs','src/platform-rules.mjs','src/prep-publication.mjs','src/prep-intake.mjs','src/prep-agent.mjs','src/l1-inspect.mjs','src/web.mjs','src/web/publish-prep.js','src/web/prepare-page.js','scripts/l1-submit-prep.mjs')) {
   & $node --check (Join-Path $repo $rel)
   if($LASTEXITCODE -ne 0){throw ('Node syntax validation failed: '+$rel)}
 }
@@ -27,6 +27,7 @@ function Get-WorkbenchOwner {
 function Assert-WorkbenchIdle {
   $status=Invoke-RestMethod 'http://127.0.0.1:8787/api/l1/status' -TimeoutSec 5
   $preparations=Invoke-RestMethod 'http://127.0.0.1:8787/api/prep' -TimeoutSec 5
+  if($status.comments.running){throw 'A comment operation is running; no restart performed.'}
   try {$postState=Invoke-RestMethod 'http://127.0.0.1:8787/api/prep/posts' -TimeoutSec 5;if(@($postState.posts|Where-Object{$_.generation.state -eq 'running'}).Count){throw 'A manuscript generation is running; no restart performed.'}}catch {if($_.Exception.Response.StatusCode.value__ -ne 404){throw}}
   if(@($status.actions|Where-Object{!$_.done}).Count -or @($status.platforms.PSObject.Properties|Where-Object{$_.Value.state -eq 'running'}).Count){throw 'An account or collection action is running; no restart performed.'}
   $query=@'
@@ -34,7 +35,9 @@ import {DatabaseSync} from 'node:sqlite';
 const db=new DatabaseSync(process.argv[2],{readOnly:true});
 try {
  const rows=db.prepare('SELECT record FROM publish_preparations ORDER BY rowid DESC').all().map(row=>JSON.parse(row.record));
- console.log(JSON.stringify({running:rows.filter(row=>row.state==='running').length,ids:rows.slice(0,30).map(row=>row.id)}));
+ const hasComments=db.prepare("SELECT 1 FROM sqlite_master WHERE name='comment_jobs' AND type='table'").get();
+ const commentsRunning=hasComments?db.prepare("SELECT count(*) n FROM comment_jobs WHERE state='running'").get().n:0;
+ console.log(JSON.stringify({running:rows.filter(row=>row.state==='running').length+commentsRunning,ids:rows.slice(0,30).map(row=>row.id)}));
 } finally {db.close();}
 '@
   $raw=$query | & $node --input-type=module - $database
