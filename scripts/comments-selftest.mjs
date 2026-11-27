@@ -78,7 +78,7 @@ try{
   if(fn.name==='visibleXIdentity')return {handle:identityHandle,url:currentUrl,login:false};
   if(fn.name==='commentPageView')return {url:currentUrl,cards:[root,parent,...(afterSubmit?[reply]:[])],toastUrls:afterSubmit?[reply.url]:[]};
   if(fn.name==='openCommentTarget'){opened=true;return true;}
-  if(fn.name==='commentComposer'){assert.equal(opened,true);const action=args.at(-1);if(action==='focus')return true;if(action==='submit'){assert.equal(typed,task.content);submits++;afterSubmit=true;return true;}return {ready:typed===task.content};}
+  if(fn.name==='commentComposer'){assert.equal(opened,true);assert.equal(args[5].id,parent.id);assert.equal(args[5].content,parent.content);const action=args[4];if(action==='focus')return true;if(action==='submit'){assert.equal(typed,task.content);submits++;afterSubmit=true;return true;}return {ready:typed===task.content};}
   throw Error('Unexpected DOM function '+fn.name);
  }};
  const opts={config,db,withPage:async(r,c,fn)=>fn(page),wait:async()=>{}};

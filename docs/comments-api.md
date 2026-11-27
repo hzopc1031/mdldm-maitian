@@ -63,3 +63,7 @@ curl.exe -sS -H 'Content-Type: application/json' -H 'Origin: http://127.0.0.1:87
 ## 2026-11-27 浏览器准备修正
 
 默认账户的9336无监听时，执行器现在调用既有x-publish的launch：从其公开账号配置匹配实际handle、精确profile/端口及代理，复用或启动同一专用浏览器，再复核PID和/home身份。不会接管不匹配的监听器或改用普通Chrome；启动/连接失败返回X_BROWSER_UNAVAILABLE并保持提交前failed，修复条件后沿原IDresume，不新建评论。已有专用浏览器只清理本轮自有标签，不关闭整份浏览器。
+
+## 2026-11-27 回复框定位修正
+
+兼容X嵌套dialog及没有status时间链接的目标预览；沿用加载等待。无链接预览必须与已验证目标快照和背景精确status对象的作者、全文、时间一致，聚焦/读回/提交前均检查，非空草稿或多编辑器停止。真实空白框核验通过，未发送；原失败任务由调用AI沿原IDresume。证据见../../evidence/comment-composer-20261127/执行记录.md。

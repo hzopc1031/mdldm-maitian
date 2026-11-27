@@ -100,12 +100,12 @@ export async function executeXComment(task,{folder,beforeSubmit,onStage=()=>{},o
   const oldIds=new Set(initial.cards.map(c=>c.id)),oldToasts=new Set(initial.toastUrls);
   if(!await page.evaluate(openCommentTarget,task.target.id,task.target.handle))throw Error('未找到指定对象自己的唯一回复按钮');
   const args=[task.target.id,task.target.handle,task.account,task.content];
-  await until(()=>page.evaluate(commentComposer,...args,'focus'),'未核实空白回复框及其目标上下文');
+  await until(()=>page.evaluate(commentComposer,...args,'focus',target),'未核实空白回复框及其目标上下文');
   onStage('writing');await page.type(task.content);
-  await until(async()=>{const v=await page.evaluate(commentComposer,...args,'read');return v?.ready;},'未读回完整评论正文或发送控件不可用');
+  await until(async()=>{const v=await page.evaluate(commentComposer,...args,'read',target);return v?.ready;},'未读回完整评论正文或发送控件不可用');
   await identity();await page.screenshot(path.join(folder,'before.png'));
   await beforeSubmit();intent=true;onStage('submitting');
-  if(!await page.evaluate(commentComposer,...args,'submit'))throw Error('提交前回复对象、身份或正文变化，结果未确认');
+  if(!await page.evaluate(commentComposer,...args,'submit',target))throw Error('提交前回复对象、身份或正文变化，结果未确认');
   onStage('verifying');let candidate;
   for(let i=0;i<24&&!candidate;i++){
    await wait(500);await identity();const view=await page.evaluate(commentPageView);

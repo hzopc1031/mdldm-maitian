@@ -4,6 +4,8 @@
 
 ## 一句话现状
 
+**2026-11-27 21:50 评论回复框已修复上线（Codex）**：真实X嵌套dialog与预览time无链接导致旧核验始终失败；改为唯一编辑器、最近dialog，并以已核目标快照比对预览/背景全文、时间、作者及精确原链接，输入读回/提交前重复核验。真实@PeanutPair空白框focus:true、五项回归和隔离延迟/错目标等DOM通过；正式4372→2692，备份及11表/原记录完全保持。原ID d071adae-ee71-4323-b061-4cd2ebf7889b仍failed、mayHaveSent:false、2次尝试，本轮未输入/resume/发送；真实发送仍待原调用AI沿原ID续办。详见[执行记录](../../evidence/comment-composer-20261127/执行记录.md)。
+
 **2026-11-27 21:23 评论no listener已修复上线（Codex）**：默认适配器原只连接，9336未监听即失败；现从本地x-publish公开配置精确匹配账户/profile/端口，复用或启动专用浏览器并强验PID，再用自有/home标签核账号。五项回归及真实只读@PeanutPair核验通过，自有标签关闭后9336仍200；正式19736→4372、备份及11表摘要保持，新contract.browserReadiness=reuse_or_start_dedicated。原ID d071adae-ee71-4323-b061-4cd2ebf7889b仍failed、mayHaveSent:false、无意图、1次尝试，未自动resume/发送，由原AI沿原ID继续。本轮未验证真实发送；浏览器先前为何退出未证实。详见[修复记录](../../evidence/comments-no-listener-20261127/执行记录.md)。
 
 **2026-11-27 20:55 X评论接口和记录页已上线（Codex）**：AI选择账户/原帖/直接回复对象/正文，POST /api/comments enqueue请求发送；工作台持久排队、双层防重、校验身份/上下文并单次执行，成功须公开新评论全文/作者/父对象/原帖关系核验。unknown不重发，重启旧队列暂停。导航评论页支持关系、来源、状态、上下文快照和回执，可复制实时AI接入指令。六项回归、1422/522隔离UI及真实本地DOM测试通过；正式8772→19736，备份后原9表摘要保持、评论任务与请求均0，真实GET-onlyChrome页面渲染通过。尚未真实X实发验收、未发送评论，旧运行中AI不会自动改用接口；第二账户仍需用户登录，零点任务未恢复。接口见[comments-api.md](comments-api.md)，备份/测试/PS5辅助文件执行策略拦截详情见[执行记录](../../evidence/comments-20261127/执行记录.md)。
