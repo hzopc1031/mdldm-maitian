@@ -211,6 +211,7 @@ try {
     }
   } finally { await new Promise(resolve => server.close(resolve)); }
   const ui = vm.createContext({ document: { createElement: () => ({ style: {} }), addEventListener() {} }, URLSearchParams });
+  vm.runInContext(fs.readFileSync(path.join(root, 'src/web/x-account-context.js'), 'utf8'), ui);
   vm.runInContext(fs.readFileSync(path.join(root, 'src/web/mt.js'), 'utf8'), ui);
   assert.equal(vm.runInContext("PN.wechat === '公众号' && PL.indexOf('wechat') === PL.indexOf('xhs') + 1", ui), true);
   assert.match(vm.runInContext("logo('wechat')", ui), /<svg viewBox="0 0 24 24">/);
@@ -219,6 +220,7 @@ try {
   const board = vm.createContext({ URLSearchParams, location: { search: '' }, innerWidth: 1000,
     document: { body: element('body'), hidden: true, querySelector: element, addEventListener() {} },
     setInterval() {}, setTimeout() {}, fetch() { return new Promise(() => {}); }, matchMedia() { return { matches: true }; }, addEventListener() {}, window: { addEventListener() {} } });
+  vm.runInContext(fs.readFileSync(path.join(root, 'src/web/x-account-context.js'), 'utf8'), board);
   vm.runInContext(fs.readFileSync(path.join(root, 'src/web/health.js'), 'utf8'), board);
   vm.runInContext(fs.readFileSync(path.join(root, 'src/web/board.html'), 'utf8').match(/<script>([\s\S]*?)<\/script>/)[1], board);
   board.input = overviewData();

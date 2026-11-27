@@ -256,6 +256,7 @@ try {
   const context = vm.createContext({ console, URLSearchParams, location: { hash: '#/system', search: '' },
     document: { hidden: true, body: element('body'), querySelector: element, createElement: () => element('new'), addEventListener(type,fn) {(listeners[type]||=[]).push(fn);} },
     fetch() { return new Promise(() => {}); }, setInterval() {}, clearInterval() {}, setTimeout() {}, addEventListener() {}, scrollTo() {} });
+  vm.runInContext(fs.readFileSync(path.join(root, 'src/web/x-account-context.js'), 'utf8'), context);
   vm.runInContext(fs.readFileSync(path.join(root, 'src/web/mt.js'), 'utf8'), context);
   vm.runInContext(fs.readFileSync(path.join(root, 'src/web/health.js'), 'utf8'), context);
   vm.runInContext(fs.readFileSync(path.join(root, 'src/web/x-accounts-ui.js'), 'utf8'), context);

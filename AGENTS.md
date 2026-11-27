@@ -46,3 +46,5 @@
 - 保存后读回关键段并检查入口链接；给Liu提供可直接打开的文件。文件已落盘不等于其他运行中的AI已自动读取。
 
 - 2026-11-27 X发布账户最终规则：发布页及AI fill均必须显式accountId，只能从contract.xPublishAccounts已确认登录列表选择；原稿未准备前可select-x-account，检查后目标固定，unknown不换号/重建。评论模块尚未开发，本轮无平台动作。详细交接与证据见docs/x-multi-account-20261127.md。
+
+- 2026-11-27 首页脚本教训：board.html与pages.html为独立入口；共享账户状态/API/选择器由两页共同加载x-account-context.js，不引用仅在mt.js内定义的符号。HTTP200或Chrome exit0不等于页面渲染通过；需检查根首页及跨页账户切换，保留先失败后通过证据。详见evidence/home-account-context-fix-20261127/执行记录.md。

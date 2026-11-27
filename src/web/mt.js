@@ -18,9 +18,6 @@ const ago = (iso) => { const m = Math.round((Date.now() - new Date(iso)) / 60000
 const inter = (m) => m ? (m.likes || 0) + (m.comments || 0) + (m.favorites || 0) + (m.shares || 0) : 0;
 const chip = (t) => `<span class="st-chip ${esc(t.state)}"><i>${({ published: '✓', scheduled: '◷', awaiting_user: '!', filled: '!', failed: '✕', not_logged_in: '✕', running: '…', planned: '◌' })[t.state] || '○'}</i>${esc(t.stateCn)}</span>`;
 const delta = (a, b) => { if (!b) return '<span style="color:var(--t3)">前 7 天没有数据</span>'; const p = (a - b) / b * 100; return `<span class="pill ${p >= 0 ? 'up' : 'down'}">${p >= 0 ? '↑' : '↓'} ${Math.abs(p).toFixed(0)}%</span><span style="color:var(--t3)">较前 7 天 ${fmt(b)}</span>`; };
-let selectedXAccount='default';try{selectedXAccount=localStorage.getItem('maitian:x-account')||'default';}catch{}
-async function api(p) { if(/^\/api\/(?:overview|prep\/status)(?:\?|$)/.test(p))p+=(p.includes('?')?'&':'?')+'xAccount='+encodeURIComponent(selectedXAccount);const r = await fetch(p); if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error || r.status); return r.json(); }
-document.addEventListener('change',event=>{if(!event.target.matches('[data-x-account-select]'))return;try{localStorage.setItem('maitian:x-account',event.target.value);}catch{}selectedXAccount=event.target.value;location.reload();});
 function toast(t) { const d = document.createElement('div'); d.className = 'toast'; d.textContent = t; document.body.append(d); setTimeout(() => d.remove(), 2600); }
 function topbar(O, on) {
   const h = O.health, n = new Date();
@@ -66,5 +63,3 @@ function drawLines(el, series) {
   const tip = document.createElement('div'); tip.id = 'tip'; document.addEventListener('DOMContentLoaded', () => document.body.append(tip));
   document.addEventListener('mousemove', (e) => { const t = e.target.closest && e.target.closest('[data-tip]'); if (!t) { tip.style.display = 'none'; return; } tip.textContent = t.dataset.tip; tip.style.display = 'block'; tip.style.left = Math.min(innerWidth - tip.offsetWidth - 8, e.clientX + 14) + 'px'; tip.style.top = Math.max(8, e.clientY - 34) + 'px'; });
 })();
-
-function xAccountPicker(O){return `${(O.xAccounts||[]).length>1?`<label class="x-account-picker">X账户 <select data-x-account-select aria-label="查看X账户">${O.xAccounts.map(a=>`<option value="${esc(a.id)}" ${a.id===O.xAccountId?'selected':''}>${esc(a.handle?'@'+a.handle:a.label+'（未登录）')}</option>`).join('')}</select></label>`:''}`;}

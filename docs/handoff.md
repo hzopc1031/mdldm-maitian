@@ -4,6 +4,8 @@
 
 ## 一句话现状
 
+**2026-11-27 20:05 首页api未定义已修复（Codex）**：上轮独立board.html调用仅在mt.js定义的api/xAccountPicker，首页未加载，导致HTTP200但实际渲染失败。现抽为x-account-context.js，首页/内页共用；隔离Chrome首页先失败后通过，五组离线回归、桌面首页/数据页、窄屏522跨页多账户切换通过。正式GET-only新Chrome真实渲染ok:true、mutations:[]，已目视截图；HTML/静态200/no-store且源码一致，用户刷新即可。服务8772未重启、无正式数据/平台操作。评论模块依旧未开发；X多账户实现与真实第二账号待用户登录的边界保持。详细证据[首页修复记录](../../evidence/home-account-context-fix-20261127/执行记录.md)。
+
 **2026-11-27 19:49 X通用多账户与发布必选账号已上线（Codex）**：用户自行新增账户，在独立窗口手动登录，以官方/home当前账号菜单绑定，账号不硬编码。登录/采集/粉丝/作品/发布归属隔离，旧default兼容。发布页每份可执行原稿必选已确认登录账号，选择→检查→固定目标→存草稿/发布；X fill必须accountId，后台拒绝空选、未登录/失效和目标不符，浏览器强验实际身份，unknown锁保留。13项回归及真实隔离Chrome桌面1422/窄屏522两组通过（最终平台执行mock）。正式两次备份更新12408→5320→8772，contract4新增xMultiAccount/requiredXFill；9张业务表行数/摘要完全一致，无新增正式测试数据。备份及证据见[执行记录](../../evidence/x-multi-account-20261127/执行记录.md)，接口见[x-multi-account-20261127.md](x-multi-account-20261127.md)。本轮无真实X登录/保存/发帖/评论；第二个真实账号待用户新增登录。评论可接现有浏览器自动化管理，模块未开发；零点任务未恢复。起始README及本页19:06外部补记保留，不并入本次提交。
 
 **2026-11-27 零点任务消失根因已确认**：原automation是绑定旧会话01a1f8b8-b749-7410-a08f-8c299ef2f7da的heartbeat，11/23 10:02:03旧会话归档；安装中Codex26.1120.5083.0的handleArchivedThreadSideEffects→deleteArchivedHeartbeats→deleteAutomation会删除该会话定时。目录mtime同秒，原任务在toml和automations表均缺失，无迁移记录。原创建/更新成功回执、归档DB状态、业务事件日志、安装包静态代码及SHA256已交叉留证；未发现独立删除工具调用，不推断归档操作者。工作台只读旧ACTIVE标记而显示已启用，是第二个健康显示缺陷。详见项目根evidence/midnight-rootcause-20261127/原因结论.md、evidence.json、audit.mjs。11/26原因未明为历史。本轮按“去查明”只调查，未恢复/重建任务、反归档、补采、平台动作或重启。下一步若恢复，绑定当前保留主会话并核真实触发和结果；不能把恢复定义当采集成功，也不能只改旧标记。

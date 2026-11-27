@@ -52,9 +52,9 @@ function browserChecks(test, image) {
         login.value='invalid-test-fixture';document.querySelector('form').requestSubmit();return;
       }
       if(login) {login.value='isolated-render-fixture';document.querySelector('form').requestSubmit();return;}
-      await wait(()=>test==='home'?!!document.querySelector('.hero'):!!document.querySelector('.h1'));
+      await wait(()=>test==='home'||test==='x-accounts'&&location.pathname==='/'?!!document.querySelector('.hero'):!!document.querySelector('.h1'));
       check(!document.body.innerText.includes('出错了：'),'no render error');
-      const expected=test==='home'?'/':test==='traffic'?'/p#/traffic':test.endsWith('system')||test==='x-accounts'?'/p#/system':'/p#/prepare';
+      const expected=test==='home'||test==='x-accounts'&&sessionStorage.getItem('qa-account-home')?'/':test==='traffic'?'/p#/traffic':test.endsWith('system')||test==='x-accounts'?'/p#/system':'/p#/prepare';
       check(location.pathname+location.hash===expected,'POST preserved route');
       if(!sessionStorage.getItem('qa-reloaded')){sessionStorage.setItem('qa-reloaded','1');location.reload();return;}
       if(test==='x-publish-accounts') {
@@ -73,6 +73,13 @@ function browserChecks(test, image) {
         check(document.querySelector('[data-x-account-select]').value===sessionStorage.getItem('qa-publish-target'),'view follows explicit target after execution');
         check(document.body.innerText.includes('已存草稿'),'mock receipt displayed after reload');
         await finish(true,'仅已登录账号可选、必选目标、选择→检查→执行及回执刷新；平台执行完全mock');return;
+      }
+      if(test==='x-accounts'&&location.pathname==='/'){
+        check(document.querySelector('[data-x-account-select]').value===sessionStorage.getItem('qa-selected-account'),'independent homepage loads the same account context');
+        check(!document.body.innerText.includes('页面加载失败'),'homepage has no context ReferenceError');
+        const overview=await (await fetch('/api/overview?xAccount='+sessionStorage.getItem('qa-selected-account'))).json();
+        check(!overview.episodes.some(e=>e.tasks.some(t=>t.platform==='x')),'homepage account does not inherit legacy X posts');
+        await finish(true,'新增两账户→系统页选择/刷新→独立首页沿用选择与隔离数据，全程无平台动作');return;
       }
       if(test==='x-accounts') {
         await wait(()=>!!document.querySelector('[data-add-x-account]'));
@@ -95,7 +102,7 @@ function browserChecks(test, image) {
         check(!overview.episodes.some(e=>e.tasks.some(t=>t.platform==='x')),'new account does not display legacy X posts');
         check(document.querySelectorAll('[data-x-account]').length===3,'no duplicate form handlers');
         check(document.documentElement.scrollWidth<=document.documentElement.clientWidth+1,'no overflow with account selector');
-        await finish(true,'通用账户新增两次、未登录采集阻止、真实切换刷新及旧数据隔离');return;
+        sessionStorage.setItem('qa-account-home','1');location.href='/';return;
       }
       if(test.startsWith('columns')) {
         await wait(()=>!!document.querySelector('[data-column-manage]'));
