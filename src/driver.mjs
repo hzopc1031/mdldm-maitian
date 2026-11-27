@@ -3,6 +3,7 @@ import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { config } from './feishu.mjs';
 import * as bridge from './bridge.mjs';
+import { pluginDir, pluginInfo } from './plugin.mjs';
 
 export const mode = (process.env.HUB_DRIVER || config.driver || 'direct');
 export const sleep = bridge.sleep;
@@ -11,10 +12,9 @@ async function load() {
   if (lib) return lib;
   const shim = await import('./chrome-shim.mjs');
   globalThis.chrome = shim.chrome;
-  const pluginDir = process.env.MAITIAN_PUBLISHER_DIR || config.pluginDir;
-  if (!pluginDir) throw new Error('请配置 pluginDir 或 MAITIAN_PUBLISHER_DIR 指向官方 publisher 仓库目录');
-  const pub = await import(pathToFileURL(path.join(pluginDir, 'lib/publish.js')).href);
-  const cdp = await import(pathToFileURL(path.join(pluginDir, 'lib/cdp.js')).href);
+  const dir = pluginDir();
+  const pub = await import(pathToFileURL(path.join(dir, 'lib/publish.js')).href);
+  const cdp = await import(pathToFileURL(path.join(dir, 'lib/cdp.js')).href);
   return (lib = { shim, pub, cdp });
 }
 // 正式加载原库、检查导出；不调用ensure/run/preflight，不打开浏览器。
@@ -40,12 +40,20 @@ export async function withTab(url, fn, { wait = 8000 } = {}) {
 }
 export async function busy() { if (mode !== 'plugin') return false; const j = await bridge.panel('job', [], 30000); return !!(j && j.running); }
 
+// 商店里的插件版本还没有某个平台的适配器（比如新平台刚加、商店还在审核）：这几个平台先跳过并说明
+const split = (pub, ids) => [ids.filter(id => pub.ADAPTERS[id]), ids.filter(id => !pub.ADAPTERS[id])];
+const tooOld = (id) => { const p = pluginInfo(); return `麦田发布助手 ${p.version || ''}（${p.source === 'store' ? '商店版' : '本地'}）还不支持 ${id}，等插件更新`; };
+
 // 跑一批平台；onState(st) 在每次状态变化时调用，st = {id, status, logs, tabId}
 export async function runBatch(project, batch, onState, onStall) {
   if (mode !== 'plugin') {
     const { pub } = await load();
-    const states = await pub.run(project, { rootPath: config.rootPath, platforms: batch, onChange: (st) => onState(st), shouldStop: () => false });
-    return Object.values(states);
+    const [ok, missing] = split(pub, batch);
+    const gone = missing.map(id => ({ id, status: '异常', logs: [{ kind: 'err', msg: tooOld(id) }] }));
+    gone.forEach(onState);
+    if (!ok.length) return gone;
+    const states = await pub.run(project, { rootPath: config.rootPath, platforms: ok, onChange: (st) => onState(st), shouldStop: () => false });
+    return [...Object.values(states), ...gone];
   }
   const r = await bridge.panel('startRaw', [project, batch, config.rootPath]);
   if (!r || !r.ok) throw new Error(`插件没能开始：${r ? r.error : '没有响应'}`);
@@ -61,13 +69,17 @@ export async function runBatch(project, batch, onState, onStall) {
 }
 export async function checkLogin(ids) {
   if (mode === 'plugin') { const r = await bridge.panel('checkLogin', [ids], 120000); return r && r.ok ? r.result : {}; }
-  return (await load()).pub.preflight(ids, { keepTabs: false });
+  const { pub } = await load(); const [ok, missing] = split(pub, ids);
+  const r = ok.length ? await pub.preflight(ok, { keepTabs: false }) : {};
+  for (const id of missing) r[id] = { ok: false, reason: tooOld(id) };
+  return r;
 }
 export async function links(project, ids) {
   if (mode === 'plugin') { const r = await bridge.panel('links', [project, ids], 600000); if (!r || !r.ok) throw new Error(r ? r.error : '没有响应'); return r.result; }
   return (await load()).pub.collectLinks(project, ids, {});
 }
-export async function openForLogin(urls) { const l = await load(); await l.shim.launchChrome({ foreground: true }); for (const u of urls) await chrome.tabs.create({ url: u, active: true }); }
+// 登录不需要插件代码：只开专用 Chrome 和页面（第一次还没装插件时也能用）
+export async function openForLogin(urls) { const shim = await import('./chrome-shim.mjs'); await shim.launchChrome({ foreground: true }); for (const u of urls) await shim.chrome.tabs.create({ url: u, active: true }); }
 export async function close() { if (lib) lib.shim.closeConnection(); }
 // 页面截图（存档用），返回 JPEG Buffer
 export async function screenshot(tabId) {

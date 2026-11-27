@@ -2,6 +2,7 @@
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import {parseArgs} from 'node:util';
 import {fileURLToPath} from 'node:url';
 import {creatorIdentityModule} from '../src/publisher-identity.mjs';
 import {nativeVisibleIdentity} from '../src/l1-native.mjs';
@@ -9,10 +10,12 @@ import {visibleXIdentity} from '../src/l1-x-dom.mjs';
 import {visibleIdentity as visibleXhsIdentity} from '../src/l1-xhs-dom.mjs';
 
 const here=path.dirname(fileURLToPath(import.meta.url));
-const workbench=process.argv.includes('--workbench');
+const {values}=parseArgs({options:{workbench:{type:'boolean'},'plugin-dir':{type:'string'}}});
+const workbench=values.workbench;
 const supported=['bilibili','xhs','douyin','channels','youtube','x','instagram'];
 const platforms=workbench?supported:['bilibili'];
-const upstream=path.resolve(here,'../../related/maitian-publisher');
+const pluginDir=values['plugin-dir']||process.env.MAITIAN_PUBLISHER_DIR;
+const upstream=pluginDir?path.resolve(pluginDir):path.resolve(here,'../../related/maitian-publisher');
 const manifest=JSON.parse(fs.readFileSync(path.join(upstream,'manifest.json'),'utf8'));
 if(manifest.version!=='0.4.0' || manifest.background?.service_worker!=='background.js'){
   throw new Error('该验收适配仅针对已核对的发布助手 0.4.0');

@@ -6,7 +6,6 @@
 $ErrorActionPreference = 'Stop'
 $Base = if ($env:MAITIAN_HOME) { $env:MAITIAN_HOME } else { Join-Path $HOME 'maitian' }
 $Hub  = Join-Path $Base 'mdldm-maitian'
-$Pub  = Join-Path $Base 'mdldm-maitian-publisher'
 
 function Say($t) { Write-Host "`n== $t" -ForegroundColor Green }
 function Ok($t)  { Write-Host "  OK $t" }
@@ -47,7 +46,7 @@ if (-not $nodeOk) {
 
 # ---------- 3. 克隆/更新两个仓库 ----------
 Say '下载麦田本体与发布助手'
-foreach ($r in @('mdldm-maitian','mdldm-maitian-publisher')) {
+foreach ($r in @('mdldm-maitian')) {
   $dest = Join-Path $Base $r
   if (Test-Path (Join-Path $dest '.git')) { Tip "更新 $r"; git -C $dest pull --ff-only -q }
   else {
@@ -71,8 +70,7 @@ foreach ($b in @('1-demo.bat','2-login.bat','3-doctor.bat','4-start.bat')) {
 
 # ---------- 5. 麦田发布助手（Chrome 插件） ----------
 Say '麦田发布助手（Chrome 插件）'
-Write-Host "  Chrome 打开 chrome://extensions → 打开右上角「开发者模式」→「加载已解压的扩展程序」→ 选 $Pub"
-Write-Host '  （上架 Chrome 应用商店后也可以直接从商店安装）'
+Write-Host '  从 Chrome 应用商店装：安装向导最后会在麦田的专用 Chrome 里打开商店页，点「添加至 Chrome」即可，之后自动更新'
 
 # ---------- 6. 发布 skill ----------
 Say '发布 skill'

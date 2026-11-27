@@ -15,3 +15,6 @@ _plan-l1-real.md
 _l1-selftest*
 inbox/
 reports/
+src/*.local.mjs
+
+.superpowers/

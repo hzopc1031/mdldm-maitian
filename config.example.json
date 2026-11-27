@@ -1,6 +1,8 @@
 {
   "name": "麦田",
   "feishuWebhook": "",
+  "plugin": "store",
+  "learnLinks": true,
   "pluginDir": "/path/to/obsidian-x-publisher",
   "extensionId": "插件以「加载已解压」安装后，chrome://extensions 里看到的扩展 ID",
   "bridge": "http://127.0.0.1:8765",
@@ -44,8 +46,9 @@
     "channels"
   ],
   "keepAliveMinutes": 60,
+  "disabled": [],
   "sampleHours": 6,
-  "xHandle": "PeanutPair",
+  "xHandle": "你的 X 用户名（不带 @）",
   "web": {
     "port": 8787,
     "requireLocalToken": true,
@@ -65,6 +68,7 @@
     "hostname": "固定远程地址，如 maitian.your-domain.com（可选，不配就用每次重启会变的临时地址）"
   },
   "site": {
+    "enabled": true,
     "name": "知识站",
     "base": "https://your-site.example.com",
     "adminPath": "/admin",

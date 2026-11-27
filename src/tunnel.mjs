@@ -24,8 +24,14 @@ async function publish(base) {
   if (prev !== url) await notify(`🌐 麦田远程地址${named ? '（固定，不会再变）' : ''}：${url}`).catch(e => console.error(e.message));
 }
 let sent = false;
+// 自愈：Clash TUN 用 fake-ip，Clash 重启后 cloudflared 手里缓存的 198.18.x 地址作废，会一直 TLS EOF 重试却不重新解析
+// （2026-11-17 断了一天多）。连续 10 分钟连不上就退出，让 launchd 重启进程重新解析。
+let downSince = null;
+setInterval(() => { if (downSince && Date.now() - downSince > 10 * 60e3) { console.error('隧道 10 分钟连不上，退出重启'); cf.kill(); process.exit(1); } }, 60e3);
 const onData = async (buf) => {
   const s = buf.toString(); process.stdout.write(s);
+  if (/Registered tunnel connection/.test(s)) downSince = null;
+  else if (/Unable to establish connection|Connection terminated/.test(s)) downSince ??= Date.now();
   if (sent) return;
   if (named && /Registered tunnel connection/.test(s)) { sent = true; await publish(`https://${config.tunnel.hostname}`); }
   const m = !named && s.match(/https:\/\/[a-z0-9-]+\.trycloudflare\.com/);

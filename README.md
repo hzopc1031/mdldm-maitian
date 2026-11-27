@@ -1,10 +1,11 @@
 <p align="center"><img src="docs/readme/banner.png" alt="麦田 · 给多平台博主的开源工作台" /></p>
 
 <p align="center">
+  <a href="https://maitian.mdldm.club/?utm_source=github&utm_medium=readme&utm_campaign=maitian-readme"><img src="https://img.shields.io/badge/官网-maitian.mdldm.club-7B5CFF" alt="官网" /></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-2ea44f" alt="MIT" /></a>
   <img src="https://img.shields.io/badge/macOS-only-1c1a16?logo=apple" alt="macOS" />
   <img src="https://img.shields.io/badge/Node.js-%E2%89%A5%2022.5-5FA04E?logo=nodedotjs&logoColor=white" alt="Node 22.5+" />
-  <a href="https://github.com/CzzzzzzJ/mdldm-maitian-publisher"><img src="https://img.shields.io/badge/Chrome-麦田发布助手-F2B21B?logo=googlechrome&logoColor=white" alt="麦田发布助手" /></a>
+  <a href="https://chromewebstore.google.com/detail/eaaipbilkhibicihiollecmbpneikpnj"><img src="https://img.shields.io/badge/Chrome-麦田发布助手-F2B21B?logo=googlechrome&logoColor=white" alt="麦田发布助手" /></a>
   <a href="https://github.com/CzzzzzzJ/mdldm-maitian/stargazers"><img src="https://img.shields.io/github/stars/CzzzzzzJ/mdldm-maitian?style=social" alt="Stars" /></a>
 </p>
 
@@ -43,14 +44,24 @@
 | 部分 | 做什么 | 在哪 |
 |---|---|---|
 | 发布 skill | 让 AI 助手（Claude Code / Codex）看片、写各平台文案、生成发布工程并校验 | 本仓库 [`skills/maitian-publish`](skills/maitian-publish/SKILL.md) |
-| 麦田发布助手 | Chrome 插件，各平台适配器：打开上传页、传视频和封面、填文案、设定时 | [mdldm-maitian-publisher](https://github.com/CzzzzzzJ/mdldm-maitian-publisher) |
+| 麦田发布助手 | Chrome 插件，各平台适配器：打开上传页、传视频和封面、填文案、设定时 | [Chrome 应用商店](https://chromewebstore.google.com/detail/eaaipbilkhibicihiollecmbpneikpnj)（装进麦田的专用 Chrome，自动更新） |
 | 麦田（本仓库） | 分发计划、调度、防重、等你点发布、取链接、采数据、网页大屏、飞书通知 | 本仓库 |
 
 链路：成片 → skill 写「发布素材.md」→ 生成 `publish.json` → `hub plan` 进分发计划 → `hub run` 分批填写 → 国内平台你点发布 → 到点取链接 → 每天采数据 → 大屏和飞书卡片。
 
-链路：成片 → skill 写「发布素材.md」→ 生成 `publish.json` → `hub plan` 进分发计划 → `hub run` 分批填写 → 国内平台你点发布 → 到点取链接 → 每天采数据 → 大屏和飞书卡片。
+## 安装
 
-## 一行装好
+三种方式，按自己习惯挑一种。
+
+### Agent 自动安装
+
+不动手也能装：把下面这段话复制给你的 AI 助手（Claude Code / Codex 等）。它会读专门的[安装指引](agent-install.md)，自行装好麦田本体，并把发布 skill 装进**它自己**的 skill 目录——各 Agent 的 skill 目录不同，所以让 Agent 按指引自行安装，不依赖一行安装脚本里写死的 Claude 路径：
+
+```text
+请帮我接入麦田的发布能力：阅读 https://raw.githubusercontent.com/CzzzzzzJ/mdldm-maitian/main/agent-install.md 并严格按其中的步骤完成安装与授权。
+```
+
+### 一行装好
 
 ```bash
 bash -c "$(curl -fsSL https://raw.githubusercontent.com/CzzzzzzJ/mdldm-maitian/main/scripts/install.sh)"
@@ -68,31 +79,27 @@ powershell -ExecutionPolicy Bypass -Command "irm https://raw.githubusercontent.c
 
 <p align="center"><img src="https://github.com/CzzzzzzJ/mdldm-maitian/releases/download/media/maitian-install.gif" width="720" alt="一行安装演示" /></p>
 
-<details>
-<summary><b>手动安装</b></summary>
+### 手动安装
 
 或者手动：
 
 需要：macOS、Node.js ≥ 22.5（用到内置 `node:sqlite`）、Google Chrome；可选 NAS（放成片）、飞书群机器人、cloudflared。
 
 ```bash
-git clone https://github.com/CzzzzzzJ/mdldm-maitian-publisher.git
 git clone https://github.com/CzzzzzzJ/mdldm-maitian.git && cd mdldm-maitian
 node src/demo.mjs                       # 先用假数据看看效果：http://localhost:8788/?key=demo
-node src/init.mjs                       # 安装向导：检查环境、生成 config.json、装开机自启、打开各平台登录页
+node src/init.mjs                       # 安装向导：检查环境、生成 config.json、装开机自启；在专用 Chrome 里从应用商店添加麦田发布助手、登录各平台
 node src/hub.mjs doctor                 # 登录完检查各平台登录态和上传页（不上传、不填写）
 ```
 
 打开向导最后给出的地址（`http://localhost:8787/?key=<web.key>`），之后浏览器会记住口令。手动安装也可以：`cp config.example.json config.json` 填好后跑 `scripts/install-launchd.sh`。
-
-</details>
 
 ### 三级上手
 
 | 级别 | 你能得到 | 要装的 | 大概时间 |
 |---|---|---|---|
 | L1 只看数据 | 各平台粉丝、已发作品的播放互动、大屏、飞书日报 | 麦田；专用 Chrome 里登录各平台；已发的期用 `hub adopt` 登记 | 30 分钟 |
-| L2 分发 | 一期一次填好七个平台，定时，自动取链接 | + 麦田发布助手；+ 发布 skill（或手写 `publish.json`） | 再 1 小时 |
+| L2 分发 | 一期一次填好七个平台，定时，自动取链接 | + [麦田发布助手](https://chromewebstore.google.com/detail/eaaipbilkhibicihiollecmbpneikpnj)（应用商店装进专用 Chrome）；+ 发布 skill（或手写 `publish.json`） | 再 1 小时 |
 | L3 转化 | 每期带来的注册和收入 | + 你自己的站点按 `src/site.mjs` 的接口接入 | 看站点 |
 
 ## 它做什么
@@ -106,7 +113,8 @@ node src/hub.mjs doctor                 # 登录完检查各平台登录态和�
 - **日历**：上周到未来两周，已发布、已定时、等你点、计划中的期一眼看清。
 - **粮仓（档案）**：每期的封面、文案快照、各平台链接、过程日志。
 - **复盘（数据分析）**：每期发布后第 1/3/7 天自动出复盘卡片：各平台占比、互动率、和上一期同龄对比（第 N 天对第 N 天）、期间涨粉、带来的注册；每周一出周报。网页单期页有同一份复盘表，转化页有每期转化漏斗（播放 → 注册 → 会员 → 收入）。
-- **飞书通知**：开跑、每个平台到位、异常、等你点发布、定时被平台改掉、每日日报、复盘和周报，都是带颜色的卡片。
+- **飞书通知**：开跑、每个平台到位、异常、等你点发布、定时被平台改掉、每日日报、复盘和周报，都是带颜色的卡片。webhook 和「飞书验证码登录」开关可以在网页「系统 → 集成」里编辑、测试，保存即生效。
+- **平台管理**：网页「系统 → 平台」列出每个平台的登录状态（体检结果），掉线了点「去登录」只打开这一家的后台，在跑麦田的那台 Mac 上用专用 Chrome 扫码；「全部检查」就是一次体检。不用的平台可以停用（不体检、不发布、不采粉丝），会写进 `config.json` 的 `disabled`。同一个平台登多个账号、在网页里嵌扫码做不到：登录态在专用 Chrome 的 profile 里，一个平台只有一份。
 
 ## 各平台的坑（实战总结）
 
@@ -133,8 +141,8 @@ publish.json ─▶│     │  ▲                 ▲                       �
             └───────────────────────────────────────────────┘
 ```
 
-- 平台填写逻辑在姊妹仓库 [麦田发布助手 mdldm-maitian-publisher](https://github.com/CzzzzzzJ/mdldm-maitian-publisher)（Chrome 插件）里，麦田直接加载它的 `lib/`，适配器只维护一份。`src/chrome-shim.mjs` 在 Node 里模拟插件需要的 `chrome.tabs` / `chrome.debugger`。
-- 发布工程 `publish.json` 由插件仓库的 `tools/make-publish.mjs` 从一份 Markdown 发布素材生成，`tools/validate.mjs` 校验（字数、禁词、封面比例、成片 faststart 等）。
+- 平台填写逻辑在 [麦田发布助手](https://chromewebstore.google.com/detail/eaaipbilkhibicihiollecmbpneikpnj)（Chrome 插件）里。插件从应用商店装进麦田的专用 Chrome 后由 Chrome 自动更新，麦田直接加载专用 Chrome 里这份插件的发布引擎（`src/plugin.mjs`），平台改版时插件更新一次，所有人自动生效。`src/chrome-shim.mjs` 在 Node 里模拟插件需要的 `chrome.tabs` / `chrome.debugger`。
+- 发布工程 `publish.json` 由 `src/make-publish.mjs` 从一份 Markdown 发布素材生成，`src/validate.mjs` 校验（字数、禁词、封面比例、成片 faststart 等），字段规则跟着插件走。
 
 </details>
 
@@ -142,6 +150,8 @@ publish.json ─▶│     │  ▲                 ▲                       �
 <summary><b>命令</b></summary>
 
 ```bash
+node src/hub.mjs login [--only bilibili,channels]   # 打开专用 Chrome 登录页（不带 --only = 全开；网页「系统 → 平台」按平台打开）
+node src/hub.mjs doctor [--only a,b] [--quiet]      # 体检登录态，结果给网页用；--quiet 不发飞书
 node src/hub.mjs plan [工程目录]            # 登记进分发计划（不带目录 = 扫描 rootPath）
 node src/hub.mjs run <工程目录> [--only x,zsz] [--force] [--now]   # 发一期；--now 让站点课程立即上线（默认推迟到定时前 30 分钟）
 node src/hub.mjs status [id] [--logs]
@@ -163,11 +173,12 @@ node src/hub.mjs daemon                     # 常驻（install-launchd.sh 装的
 
 | 项 | 说明 |
 |---|---|
-| `pluginDir` | 麦田发布助手（mdldm-maitian-publisher）的本地路径 |
+| `plugin` | `store`（默认）：用专用 Chrome 里从应用商店装的麦田发布助手 |
 | `rootPath` / `nasUrl` | 发布工程根目录；NAS 掉线或被挂到「…-1」时守护进程会自己卸掉重挂 |
 | `batches` | 上传批次。一次传太多平台会互相抢带宽导致超时，建议国内两两一批 |
 | `auto` / `manual` | 自动提交 / 等你点发布的平台 |
 | `keepAlive` | 容易掉登录的平台（视频号），定时刷一下保活 |
+| `disabled` | 停用的平台（如 `["instagram"]`）：不体检、不打开登录页、不发布、不采粉丝。网页「系统 → 平台」里也能开关 |
 | `site` | 自有站点，可选，见下 |
 | `board` | 飞书多维表格看板，可选 |
 | `web.key` | 网页口令，所有页面和接口没有口令一律 401 |
@@ -177,20 +188,13 @@ node src/hub.mjs daemon                     # 常驻（install-launchd.sh 装的
 <details>
 <summary><b>接入你自己的站点（可选，二次开发）</b></summary>
 
-不配 `config.site` 就整块关掉，网页上也不显示站点卡片和「转化」页。要看转化：
+不配 `config.site` 就整块关掉，网页上不显示站点卡片，「转化」页只说明怎么接。要看转化：
 
 1. 发布 skill 会在 B站、YouTube、X 的链接上带 `utm_campaign=<主题>-<序号>`；你的站点记下访客第一次带来的这个参数，注册和下单时一起存。
 2. 站点提供两个只读接口给麦田（用专用 Chrome 里的管理员登录态去调），字段见 [`src/site.mjs`](src/site.mjs) 顶部注释。
-3. 在 `config.site` 里填站点地址和接口路径。
+3. 在 `config.site` 里填站点地址和接口路径。也可以直接在网页「系统 → 集成」里编辑、点「测试连接」，保存即生效（不用重启守护进程）。
 
 作者用自己的课程站做了示例；你的站结构不同，改 `src/site.mjs` 和转化页即可。
-
-</details>
-
-<details>
-<summary><b>X 长文 + 视频帖引用长文（可选）</b></summary>
-
-发布素材「八、X」里加一行 `**长文：** https://x.com/compose/articles/edit/<id>`（先在 X 建好长文草稿，可用发布助手的 `tools/article.mjs` 把 Obsidian 笔记写进去），生成的 `publish.json` 里 X 会是 `"mode": "article+quote"`。麦田在定时前 25 分钟启动发布助手的 `tools/x-article-quote.mjs`：先上传视频帖，到点发布长文，取到长文链接后贴进视频帖变成引用再发出，结果推飞书。这一步用的是日常 Chrome 里装的发布助手（开发桥 127.0.0.1:8765）。
 
 </details>
 
@@ -200,7 +204,7 @@ node src/hub.mjs daemon                     # 常驻（install-launchd.sh 装的
 `scripts/install-launchd.sh --tunnel` 会装一个 cloudflared 隧道，地址推到飞书。
 
 - **固定域名（推荐）**：域名交给 Cloudflare 后，跑 `cloudflared tunnel login`、`cloudflared tunnel create maitian`、`cloudflared tunnel route dns maitian maitian.你的域名`，在 `config.json` 里加 `"tunnel": { "name": "maitian", "hostname": "maitian.你的域名" }`。地址永远不变，建议再在 Cloudflare Zero Trust 里给它加一层邮箱验证码登录（Access → Self-hosted 应用），然后在 `config.json` 的 `web.access` 填团队域名和应用的 AUD Tag：麦田会验证 Access 签发的登录凭证，手机上输邮箱收验证码就能进，不用再带 `?key=`。
-- **飞书验证码登录（推荐，零配置）**：`config.json` 的 `web` 里加 `"login": "feishu"`。远程打开麦田会先到登录页，点「发送验证码」，6 位码推到飞书群，输入后这台设备记住 30 天；验证码 5 分钟有效、只能用一次、错 5 次作废，60 秒内只能发一次。`?key=` 口令仍可用作备用。
+- **飞书验证码登录（推荐，零配置）**：`config.json` 的 `web` 里加 `"login": "feishu"`。远程打开麦田会先到登录页，点「发送验证码」，6 位码推到飞书群，输入后这台设备记住 30 天；验证码 5 分钟有效、只能用一次、错 5 次作废，60 秒内只能发一次。`?key=` 口令仍可用作备用。飞书 webhook 和这个开关也能在网页「系统 → 集成」里编辑、点「测试发送」，保存即生效。
 - **快速隧道（默认）**：不配 `tunnel` 时用 `https://xxx.trycloudflare.com`，不用账号，但每次重启地址都会变。
 
 </details>
@@ -219,26 +223,37 @@ iPhone 桌面 / 锁屏常驻显示全平台粉丝、今日涨粉、最新一期�
 
 - `config.json`、`data/`（数据库、日志）、`chrome-profile/`（各平台登录态）都不进 git。
 - 麦田只读你自己账号的创作者后台数据，不做互动自动化、不碰别人的账号。
+- 安装向导结尾、出错通知（每天最多一次）和没接站点时的「转化」页里，有一个作者知识站和交流群的链接，带 utm 参数，只是让知识站知道访客从麦田来；麦田本身不上报任何数据。不想看到就在 `config.json` 里加 `"learnLinks": false`。
 
 ## 作者
 
-<p align="center"><a href="https://www.mdldm.club/ai-course-promotion?utm_source=github&utm_medium=readme&utm_campaign=maitian"><img src="docs/readme/author.png" alt="麦当 mdldm · 0 基础 AI Agent 教学博主 · mdldm.club 知识站" /></a></p>
+<p align="center"><a href="https://www.mdldm.club/ai-course-promotion?utm_source=github&utm_medium=readme&utm_campaign=maitian-readme"><img src="docs/readme/author.png" alt="麦当 mdldm · 0 基础 AI Agent 教学博主 · mdldm.club 知识站" /></a></p>
 
 我是麦当，做 0 基础 AI Agent / AI Coding 教程。麦田是照着我自己的发布流程一点点搭起来的，一边发视频一边在改。
 
-- 📚 **知识站 [mdldm.club](https://www.mdldm.club/ai-course-promotion?utm_source=github&utm_medium=readme&utm_campaign=maitian)**：0 基础 AI Agent 课程 + 每周直播。麦田怎么搭、数据怎么采、怎么接自己的项目，课里讲得更细。
+- 📚 **知识站 [mdldm.club](https://www.mdldm.club/ai-course-promotion?utm_source=github&utm_medium=readme&utm_campaign=maitian-readme)**：0 基础 AI Agent 课程 + 每周直播。麦田怎么搭、数据怎么采、怎么接自己的项目，课里讲得更细。
 - 🎬 B站 / 小红书 / 抖音 / 视频号：搜「麦当mdldm」
 - ▶️ [YouTube](https://www.youtube.com/channel/UCOz23ZQMefLAgDdnraGV2RQ) · 𝕏 [@czzzzzzJ_](https://x.com/czzzzzzJ_)
 
 ### 交流群
 
-想一起聊麦田、多平台运营的，微信扫码进群（1 群已满，现在开的是 2 群）：
+想一起聊麦田、多平台运营的，微信扫码进群（1–5 群已满，现在开的是 6 群）：
 
-<p align="center"><img src="docs/readme/qr-group.jpg" width="260" alt="微信群：麦当 mdldm 的麦田 2 群" /></p>
+<p align="center"><img src="docs/readme/qr-group.jpg" width="260" alt="微信群：麦当 mdldm 的麦田 6 群" /></p>
 
-> 微信群码 7 天有效（这张 11 月 24 日前可扫），我会定期换；扫不进去就提个 Issue 喊我一声。
+> 微信群码 7 天有效（这张 11 月 27 日前可扫），我会定期换；扫不进去就提个 Issue 喊我一声。
 
 觉得有用就点个 ⭐ Star，这是我继续改下去的动力；遇到问题直接提 [Issue](https://github.com/CzzzzzzJ/mdldm-maitian/issues)。
+
+## Star History
+
+<a href="https://www.star-history.com/?repos=czzzzzzj%2Fmdldm-maitian&type=date&releases=&legend=top-left">
+ <picture>
+   <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/chart?repos=czzzzzzj/mdldm-maitian&type=date&theme=dark&legend=top-left" />
+   <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/chart?repos=czzzzzzj/mdldm-maitian&type=date&legend=top-left" />
+   <img alt="Star History Chart" src="https://api.star-history.com/chart?repos=czzzzzzj/mdldm-maitian&type=date&legend=top-left" />
+ </picture>
+</a>
 
 ## License
 

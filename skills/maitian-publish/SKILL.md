@@ -5,7 +5,7 @@ description: 麦田工作台的发布流程：把一条剪好的成片，整理�
 
 # 麦田 · 发布流程
 
-> 配合 [麦田](https://github.com/CzzzzzzJ/mdldm-maitian)（调度和数据）与 [麦田发布助手](https://github.com/CzzzzzzJ/mdldm-maitian-publisher)（各平台填写）使用。
+> 配合 [麦田](https://github.com/CzzzzzzJ/mdldm-maitian)（调度和数据）与 [麦田发布助手](https://chromewebstore.google.com/detail/eaaipbilkhibicihiollecmbpneikpnj)（Chrome 应用商店，各平台填写）使用。
 > 这份是通用版。你的个人偏好（文风、账号名、引流链接、封面模板）写在自己的个人 skill 里，开头写「先读 maitian-publish，再按本文件覆盖」。
 
 ## 三者分工
@@ -77,7 +77,6 @@ description: 麦田工作台的发布流程：把一条剪好的成片，整理�
 
 ## 八、X
 整节就是推文（中文按 2 字符计，超过 280 需要 Premium）
-**长文：** https://x.com/compose/articles/edit/<id>   ← 可选：这期要「长文 + 视频帖引用长文」时加这一行，其余内容就是视频帖文案
 
 ## 九、Instagram       ← 可选
 整节就是配文（≤2200 字，话题标签 ≤30 个，写在末尾；链接点不了，写「主页简介里的链接」）
@@ -122,8 +121,8 @@ ffmpeg -v error -y -i 封面/cover-4x3.png -filter_complex "[0]scale=1920:1080:f
 ### ⑤ 生成 publish.json 并校验
 
 ```bash
-node <发布助手>/tools/make-publish.mjs "<发布素材.md>" "<工程目录>" --require <账号名>
-node <发布助手>/tools/validate.mjs "<工程目录>"
+node <麦田>/src/make-publish.mjs "<发布素材.md>" "<工程目录>" --require <账号名>
+node <麦田>/src/validate.mjs "<工程目录>"
 ```
 
 有 ❌ 就改 md 再生成，直到「✅ 校验通过」；⚠️ 逐条看一眼。某个平台这期不发，在 `publish.json` 里给它加 `"skip": "原因"`。
@@ -148,8 +147,6 @@ node <麦田>/src/hub.mjs run "<工程目录>"     # 放后台跑
 - **自动提交卡住时**（页面已经填好，但麦田没点）：`hub submit <id> <instagram|youtube|x>` 单独提交一次。它会先查重，要求专用 Chrome 里恰好有一个填好的发帖页，然后存档截图、核对、点一次、记状态。不要自己另写脚本去点，避免发重。
 - **Instagram 查重**：定时中的 Reels 不在主页列表里，麦田会去「定时内容」页（`instagram.com/scheduled_content/`）翻到定时那一周核对。
 - **自有站点没有定时**：建课转码完就上线。想让会员抢先看就加 `--now`（`hub run <目录> --only zsz --now`），否则麦田会推迟到定时前 30 分钟再建课。
-
-X 长文模式：先在 X 建好长文草稿（可用 `node <发布助手>/tools/article.mjs <笔记.md> <草稿标签页 id>` 把 Obsidian 笔记写进去），把草稿地址写进「八、X」的 `**长文：**` 行。麦田会在定时前 25 分钟启动长文脚本：先上传视频帖，到点发长文，再把长文链接贴进视频帖变成引用发出。需要日常 Chrome 里装着麦田发布助手。
 
 ### ⑧ 你点发布（国内四家）
 

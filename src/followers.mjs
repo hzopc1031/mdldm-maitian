@@ -86,9 +86,9 @@ export function saveFollowers(platform, r) {
   return n;
 }
 export async function collectFollowers(only, skip = []) {
-  const out = {};
+  const out = {}, off = new Set([...(config.disabled || []), ...skip]);
   for (const [p, fn] of Object.entries(followerCollectors)) {
-    if ((only && !only.includes(p)) || skip.includes(p)) continue;
+    if ((only && !only.includes(p)) || off.has(p)) continue;
     try { const r = await fn(); if (!r) { out[p] = '没读到'; continue; } const n = saveFollowers(p, r); out[p] = { total: r.total, backfilled: n }; }
     catch (e) { out[p] = '出错：' + e.message.slice(0, 80); }
   }

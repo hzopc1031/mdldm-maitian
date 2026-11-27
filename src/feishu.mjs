@@ -1,6 +1,6 @@
 import fs from 'node:fs'; import path from 'node:path'; import { fileURLToPath } from 'node:url';
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-const CFG = process.env.MAITIAN_CONFIG || path.join(ROOT, 'config.json');
+export const CFG = process.env.MAITIAN_CONFIG || path.join(ROOT, 'config.json');
 if (!fs.existsSync(CFG)) { console.error('还没有 config.json：先运行 node src/init.mjs（安装向导），或者 node src/demo.mjs 用假数据看看效果'); process.exit(1); }
 export const config = JSON.parse(fs.readFileSync(CFG, 'utf8'));
 
@@ -42,8 +42,8 @@ export function toCard(text) {
   return { config: { wide_screen_mode: true }, header: { template, title: { tag: 'plain_text', content: title.slice(0, 80) }, ...(restHead.length ? { subtitle: { tag: 'plain_text', content: restHead.join(' ').slice(0, 80) } } : {}) }, elements };
 }
 
-async function post(body) {
-  const r = await fetch(config.feishuWebhook, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body), signal: AbortSignal.timeout(10000) });
+async function post(body, webhook = config.feishuWebhook) {
+  const r = await fetch(webhook, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body), signal: AbortSignal.timeout(10000) });
   return r.json().catch(() => ({}));
 }
 
@@ -56,4 +56,14 @@ export async function notify(text, { quiet = false } = {}) {
     if (j.code && j.code !== 0) { console.error('飞书卡片被拒，改发文字：', JSON.stringify(j)); j = await post({ msg_type: 'text', content: { text } }); }
     if (j.code && j.code !== 0) console.error('飞书返回：', JSON.stringify(j));
   } catch (e) { console.error('飞书通知失败：', e.message); }
+}
+
+// 系统页「测试发送」：用给定的 webhook 发一条文字消息，返回成功/失败原因
+export async function testFeishu(webhook) {
+  if (!webhook) return { ok: false, error: '先填 webhook' };
+  try {
+    const j = await post({ msg_type: 'text', content: { text: '麦田 · 集成测试 ✅\n这是一条从系统页发出的测试消息。' } }, webhook);
+    if (j && j.code !== undefined && j.code !== 0) return { ok: false, error: (j.msg && String(j.msg).slice(0, 200)) || JSON.stringify(j).slice(0, 200) };
+    return { ok: true };
+  } catch (e) { return { ok: false, error: e.message }; }
 }

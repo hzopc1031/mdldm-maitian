@@ -1,7 +1,7 @@
 #!/bin/bash
 # 麦田一行安装：
 #   bash -c "$(curl -fsSL https://raw.githubusercontent.com/CzzzzzzJ/mdldm-maitian/main/scripts/install.sh)"
-# 做的事：检查 git 和 Node（≥22.5）→ 把麦田和麦田发布助手克隆到 ~/maitian/ → 运行安装向导
+# 做的事：检查 git 和 Node（≥22.5）→ 把麦田下载到 ~/maitian/ → 运行安装向导（麦田发布助手从 Chrome 应用商店装）
 # 换目录：MAITIAN_HOME=~/somewhere bash -c "$(curl -fsSL …)"
 set -e
 DIR=${MAITIAN_HOME:-$HOME/maitian}
@@ -13,13 +13,12 @@ if ! command -v node >/dev/null; then echo "需要 Node.js 22.5 以上：brew in
 node -e 'const [a,b]=process.versions.node.split(".").map(Number);process.exit(a>22||(a===22&&b>=5)?0:1)' || { echo "Node.js 版本是 $(node -v)，需要 22.5 以上"; exit 1; }
 
 mkdir -p "$DIR"; cd "$DIR"
-for R in mdldm-maitian mdldm-maitian-publisher; do
+for R in mdldm-maitian; do
   if [ -d "$R/.git" ]; then say "更新 $R"; git -C "$R" pull --ff-only -q; else say "下载 $R"; for i in 1 2 3; do git clone --depth 1 "https://github.com/CzzzzzzJ/$R.git" && break; echo "下载失败，第 $i 次重试"; rm -rf "$R"; sleep 3; done; [ -d "$R/.git" ] || { echo "$R 下载失败，检查网络后重跑这条命令"; exit 1; }; fi
 done
 
 say "麦田发布助手（Chrome 插件）"
-echo "Chrome 打开 chrome://extensions → 打开右上角「开发者模式」→「加载已解压的扩展程序」→ 选 $DIR/mdldm-maitian-publisher"
-echo "（上架 Chrome 应用商店后也可以直接从商店安装）"
+echo "从 Chrome 应用商店装，安装向导最后会在麦田的专用 Chrome 里打开商店页，点「添加至 Chrome」即可，之后自动更新"
 
 say "发布 skill"
 L="$HOME/.claude/skills/maitian-publish"
