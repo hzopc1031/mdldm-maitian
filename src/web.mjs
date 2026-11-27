@@ -20,7 +20,8 @@ import { videoPrefillPublications } from './video-prefill-publications.mjs';
 import {ageSamplingSchema,agePlatforms,dueAgeSamples,saveAgeAttempt} from './l1-age-sampling.mjs';
 import { drainProjectDrafts, prepRequestLimit } from './prep-intake.mjs';
 import { l1Account } from './l1-account.mjs';
-import { configuredSummaries } from './l1-summary.mjs';
+import {initXAccounts,listXAccounts,createXAccount,xAccountConfig,resolveXRecord,xFollowerRows} from './x-accounts.mjs';
+import { configuredSummaries,accountSummary } from './l1-summary.mjs';
 import { displayNick } from './web-text.mjs';
 import {collectionKey} from './l1-collection-window.mjs';
 import {PLATFORM_CATALOG,platformById,selectedPlatforms,choosePlatform} from './platform-registry.mjs';
@@ -33,11 +34,13 @@ const short = (n) => (n || '').split(/[｜|]/)[0].trim();
 const nickOf = (name, pj) => displayNick(name, pj?.nick);
 const latest = db.prepare('SELECT * FROM metrics WHERE episode_id=? AND platform=? ORDER BY day DESC LIMIT 1');
 const actions = [];   // 最近的操作（内存里）
+initXAccounts(db);
+const xActionKey=a=>a.platform==='x'&&a.accountId&&a.accountId!=='default'?`x:${a.accountId}`:a.platform;
 function collectionSchedule() {
   try { const s=JSON.parse(fs.readFileSync(path.join(home,'data','l1-schedule.json'),'utf8'));return s.status==='ACTIVE' && s.automationId ? {enabled:true,time:'00:00',timezone:'Asia/Shanghai'} : {enabled:false}; } catch { return {enabled:false}; }
 }
-const prep = createPrepService({ db, config, home, root: ROOT, secrets: [W.key, W.widgetToken] });
-const posts=createPostService({db,home,config,prep});
+const prep = createPrepService({ db, config, home, root: ROOT, secrets: [W.key, W.widgetToken],canUseXAccount });
+const posts=createPostService({db,home,config,prep,canUseXAccount});
 const videoJobs=videoPrefillJobs(db,{redact:value=>redactL1(value,[W.key,W.widgetToken])});
 const videoPublications=videoPrefillPublications(db,videoJobs);
 db.exec(ageSamplingSchema);
@@ -112,17 +115,19 @@ export function feed(n = 14) {
     return { ts: l.ts, episode: names[l.episode_id] || '', nick: nicks[l.episode_id] || '', platform: NAMES[l.platform] || l.platform || '', action: ACT[l.action] || l.action, result: STATE_CN[r] || String(r).slice(0, 40) };
   });
 }
-export function l1Status() {
+export function l1Status(xAccountId='default') {
+  const scoped=xAccountConfig(config,xAccountId,db);
   return Object.fromEntries(L1_PLATFORMS.map(platform => {
+    const localConfig=platform==='x'?scoped:config,key=xActionKey({platform,accountId:xAccountId});
     let last = null;
-    try { last = JSON.parse(getMeta(`l1:web:${platform}`) || 'null'); } catch {}
-    const active = actions.find(a => a.platform === platform && a.type!=='age' && !a.done);
+    try { last = JSON.parse(getMeta(`l1:web:${key}`) || 'null'); } catch {}
+    const active = actions.find(a => xActionKey(a) === key && a.type!=='age' && !a.done);
     if (!active && last?.done === false) last = { ...last, done: true, ok: false,
       error: '上次操作随工作台重启而中断，请重新登录', tail: '上次操作随工作台重启而中断，请重新登录' };
-    let account; try { account=l1Account(config,platform); if(platform==='x')account='@'+account; } catch { account='尚未配置预期可见账号'; }
-    const profile = path.resolve(config.l1?.[platform]?.chromeProfile || (platform==='xhs'?config.chromeProfile:null) || path.join(home, `chrome-profile-l1-${platform}`));
+    let account; try { account=l1Account(localConfig,platform); if(platform==='x')account='@'+account; } catch { account='尚未配置预期可见账号'; }
+    const profile = path.resolve(localConfig.l1?.[platform]?.chromeProfile || (platform==='xhs'?config.chromeProfile:null) || path.join(home, `chrome-profile-l1-${platform}`));
     let identity = null;
-    try { identity = JSON.parse(getMeta(`l1:web:identity:${platform}`) || 'null'); } catch {}
+    try { identity = JSON.parse(getMeta(`l1:web:identity:${key}`) || 'null'); } catch {}
     const hasIdentityHistory = !!identity;
     if (identity?.account !== account || identity?.profile !== profile) identity = null;
     // Compatibility for the persisted successful check from before identity history existed.
@@ -135,29 +140,41 @@ export function l1Status() {
       : {state:identity?.status || (identity?.confirmedAt?'logged_in':'unknown'),checkedAt:identity?.checkedAt || identity?.confirmedAt};
     let collection = null;
     if(lastAction?.type==='collect' && lastAction.date && lastAction.done && lastAction.ok) {
-      try { const saved=JSON.parse(getMeta(collectionKey(platform,l1Account(config,platform),lastAction.date)) || 'null');
+      try { const saved=JSON.parse(getMeta(collectionKey(platform,l1Account(localConfig,platform),lastAction.date)) || 'null');
         if(saved && Date.parse(saved.capturedAt)>=Date.parse(lastAction.startedAt))collection=saved;
       } catch {}
     }
-    return [platform, { account, identity, loginStatus, selected:selectedPlatforms(db).includes(platform),
-      port: L1_PORTS[platform], profile,
+    return [platform, { account, identity, loginStatus, selected:selectedPlatforms(db).includes(platform),...(platform==='x'?{accountId:xAccountId}:{}),
+      port: platform==='x'?(scoped._xAccountRoute?.port??L1_PORTS.x):L1_PORTS[platform], profile,
       state: active ? 'running' : 'idle', last:lastAction && {...lastAction,...(collection?{collection}:{})},
       login: '点击登录后，在电脑专用窗口完成操作；系统自动确认账号并关闭本次窗口' }];
   }));
 }
 
 // 纯本地数据读取；overview/status 均不连接浏览器。
-export function overviewData() {
+function canUseXAccount(id){try{const r=resolveXRecord(db,config,id),s=l1Status(id).x;return !!r.handle&&s.loginStatus.state==='logged_in'&&!!s.identity?.confirmedAt;}catch{return false;}}
+function xPublishAccounts(){return listXAccounts(db,config).filter(a=>canUseXAccount(a.id)).map(({id,label,handle})=>({id,label,handle}));}
+export function overviewData(xAccountId='default') {
+  const scoped=xAccountConfig(config,xAccountId,db),selectedX=resolveXRecord(db,config,xAccountId);
+  const visible=episodes().map(e=>{
+    const row=episodeView(e),project=JSON.parse(getSnapshot(e.id)?.project||'{}');
+    const handle=row.tasks.find(t=>t.platform==='x')?.url?.match(/^https:\/\/(?:x|twitter)\.com\/([^/]+)\/status\//i)?.[1]||project.account;
+    const owns=handle?handle.toLowerCase()===selectedX.handle?.toLowerCase():xAccountId==='default';
+    if(!owns){row.tasks=row.tasks.filter(t=>t.platform!=='x');row.views=row.tasks.reduce((n,t)=>n+(t.m?.views||0),0);row.inter=row.tasks.reduce((n,t)=>n+['likes','comments','favorites','shares'].reduce((m,k)=>m+(t.m?.[k]||0),0),0);}
+    return row;
+  }).filter(e=>e.tasks.length);
+  const visibleIds=new Set(visible.filter(e=>e.tasks.some(t=>t.platform==='x')).map(e=>e.id));
   const at = e => Date.parse(e.publishedAt || e.observedAt || e.createdAt) || 0;
   return {
+    xAccountId,xAccounts:listXAccounts(db,config).map(a=>({...a,status:l1Status(a.id).x,summary:a.handle?accountSummary(db,'x',a.handle):null})),
     platforms:PLATFORM_CATALOG.map(p=>({...p,selected:selectedPlatforms(db).includes(p.id)})),
-    accountSummaries: configuredSummaries(db, config, l1Account),
-    episodes: episodes().map(e => episodeView(e)).sort((a, b) => at(b) - at(a) || a.id.localeCompare(b.id)),
+    accountSummaries: configuredSummaries(db, scoped, l1Account),
+    episodes: visible.sort((a, b) => at(b) - at(a) || a.id.localeCompare(b.id)),
     site: { days: db.prepare('SELECT * FROM site_daily ORDER BY day').all(), channels: db.prepare('SELECT * FROM site_channels ORDER BY revenue DESC').all(),
       campaigns: db.prepare('SELECT * FROM site_campaigns ORDER BY reg DESC').all(), campaignsOn: getMeta('siteCampaigns') === 'on' },
-    metrics: db.prepare('SELECT day, episode_id, platform, views FROM metrics ORDER BY day').all(),
-    followers: db.prepare("SELECT day, platform, total, gain, loss, source FROM followers WHERE day >= date('now','localtime','-40 day') ORDER BY day").all(),
-    samples: db.prepare('SELECT ts, episode_id, platform, views FROM samples ORDER BY ts').all(), feed: feed()
+    metrics: db.prepare('SELECT day, episode_id, platform, views FROM metrics ORDER BY day').all().filter(r=>r.platform!=='x'||visibleIds.has(r.episode_id)),
+    followers: [...db.prepare("SELECT day, platform, total, gain, loss, source FROM followers WHERE platform!='x' AND day >= date('now','localtime','-40 day') ORDER BY day").all(),...xFollowerRows(db,selectedX.handle)],
+    samples: db.prepare('SELECT ts, episode_id, platform, views FROM samples ORDER BY ts').all().filter(r=>r.platform!=='x'||visibleIds.has(r.episode_id)), feed: feed()
   };
 }
 
@@ -282,9 +299,10 @@ export async function handle(req, res) {
     return send(res, 200, widgetPage(widgetScript(req, 'maitian-loader.js')), 'text/html; charset=utf-8');
   }
   if (u.pathname === '/api/overview') {
+    const xId=u.searchParams.get('xAccount')||'default';try{xAccountConfig(config,xId,db);}catch(error){return send(res,400,{error:error.message});}
     return send(res, 200, { name: config.name || '麦田', siteOn: !!SITE, siteName: SITE ? SITE.name : '', siteLogo: !!(SITE && config.site.logo), board: config.board && config.board.url, driver: config.driver,
-      ...overviewData(), actions: actions.slice(-8).reverse(),
-      health: { mode: 'l1', daemon: false, schedule:collectionSchedule(), ageSampling:{enabled:ageSamplingEnabled(),platforms:agePlatforms,last:JSON.parse(getMeta('l1:age:last')||'null')}, platforms: l1Status() }, publishPrep: prep.publicCapabilities(), now: new Date().toISOString() });
+      ...overviewData(xId), actions: actions.slice(-8).reverse(),
+      health: { mode: 'l1', daemon: false, schedule:collectionSchedule(), ageSampling:{enabled:ageSamplingEnabled(),platforms:agePlatforms,last:JSON.parse(getMeta('l1:age:last')||'null')}, platforms: l1Status(xId) }, publishPrep: prep.publicCapabilities(), now: new Date().toISOString() });
   }
   if (u.pathname === '/api/age-sampling' && req.method === 'POST') {
     if (!isLoopback(req.socket.remoteAddress)||req.headers.origin!==`http://${req.headers.host}`||!req.headers['content-type']?.startsWith('application/json')) return send(res,403,{error:'只接受麦田本机页面操作'});
@@ -321,15 +339,23 @@ export async function handle(req, res) {
       return send(res,200,{ok:true,job:videoPublications.annotate(videoJobs.record(input))});
     } catch(error) {return send(res,400,{error:redactL1(error.message,[W.key,W.widgetToken])});}
   }
-  if (u.pathname === '/api/l1/status' && req.method === 'GET') return send(res, 200, { platforms: l1Status(), actions: actions.slice(-8).reverse() });
+  if (u.pathname === '/api/l1/status' && req.method === 'GET') {
+    try{return send(res,200,{platforms:l1Status(u.searchParams.get('accountId')||'default'),xAccounts:listXAccounts(db,config).map(a=>({...a,status:l1Status(a.id).x})),actions:actions.slice(-8).reverse()});}catch(error){return send(res,400,{error:error.message});}
+  }
+  if(u.pathname==='/api/l1/x-accounts'&&req.method==='POST'){
+    if(!isLoopback(req.socket.remoteAddress)||req.headers.origin!==`http://${req.headers.host}`||!req.headers['content-type']?.startsWith('application/json'))return send(res,403,{error:'只接受工作台本机页面操作'});
+    let raw='';for await(const chunk of req){raw+=chunk;if(Buffer.byteLength(raw)>4096)return send(res,413,{error:'请求过大'});}
+    try{if(actions.some(a=>!a.done)||prep.busy())return send(res,409,{error:'已有操作在运行，请稍候'});const input=JSON.parse(raw),account=createXAccount(db,input);return send(res,200,{ok:true,account});}catch(error){return send(res,400,{error:error.message});}
+  }
   if (u.pathname === '/api/prep/status') {
     if(!isLoopback(req.socket.remoteAddress)||!localRequestAllowed(req))return send(res,403,{code:'LOCAL_ONLY',error:'仅允许同源本机直连调用'});
     if(req.method!=='GET')return send(res,405,{error:'状态汇总仅供读取'},undefined,{allow:'GET'});
-    return send(res,200,readPrepStatus(db,{config,selected:selectedPlatforms(db),capabilities:prep.publicCapabilities(),secrets:[W.key,W.widgetToken]}));
+    const xId=u.searchParams.get('xAccount');try{if(xId)xAccountConfig(config,xId,db);}catch(error){return send(res,400,{error:error.message});}
+    return send(res,200,{...readPrepStatus(db,{config,xAccountId:xId,selected:selectedPlatforms(db),capabilities:prep.publicCapabilities(),secrets:[W.key,W.widgetToken]}),xPublishAccounts:xPublishAccounts()});
   }
   if (u.pathname === '/api/prep/rules-module' && req.method==='GET') return send(res,200,fs.readFileSync(path.join(DIR,'platform-rules.mjs')),'text/javascript; charset=utf-8');
   if (u.pathname === '/api/prep' && req.method === 'GET') return send(res, 200, { capabilities: prep.publicCapabilities(), rules:platformRules(config), records: ageReview.forRecords(prep.list()) });
-  if (u.pathname === '/api/prep/contract' && req.method === 'GET') return send(res,200,{version:4,columnOnly:true,columns:readPrepColumns(db),columnSelection:'caller_selects_defined',columnManagement:true,agentAttribution:'caller_reported',operationActors:true,finalPublishPlatforms:['x','xhs'],submit:true,manuscriptVersion:2,requiredCreate:['column','scheduledAt','actor'],requiredFill:['mode'],scheduledPublish:'recorded_only',noteLimit:500,fillModes:['draft','publish'],publishPlatforms:['x','xhs']});
+  if (u.pathname === '/api/prep/contract' && req.method === 'GET') return send(res,200,{version:4,columnOnly:true,columns:readPrepColumns(db),columnSelection:'caller_selects_defined',columnManagement:true,xMultiAccount:true,xAccounts:listXAccounts(db,config).map(({id,label,handle})=>({id,label,handle})),defaultXAccount:'default',xAccountSelection:'accountId',requiredXFill:['accountId'],xPublishAccounts:xPublishAccounts(),agentAttribution:'caller_reported',operationActors:true,finalPublishPlatforms:['x','xhs'],submit:true,manuscriptVersion:2,requiredCreate:['column','scheduledAt','actor'],requiredFill:['mode'],scheduledPublish:'recorded_only',noteLimit:500,fillModes:['draft','publish'],publishPlatforms:['x','xhs']});
   if(u.pathname==='/api/prep/columns') {
     if(!isLoopback(req.socket.remoteAddress)||!localRequestAllowed(req))return send(res,403,{code:'LOCAL_ONLY',error:'栏目管理仅允许同源本机调用'});
     if(req.method==='GET')return send(res,200,{ok:true,columns:readPrepColumns(db)});
@@ -347,7 +373,7 @@ export async function handle(req, res) {
       const block=/```text\r?\n([\s\S]*?)```/.exec(markdown);
       if(!block)throw new Error('prompt block missing');
       const columns=readPrepColumns(db);
-      const prompt=block[1].replaceAll('{{COLUMN_EXAMPLE}}',JSON.stringify(columns[0]?.name??'请先定义栏目').slice(1,-1))+'\n【平台当前栏目，按主要内容选择】\n'+columns.map(c=>'- '+c.name+'：'+c.description).join('\n');
+      const prompt=block[1].replaceAll('{{COLUMN_EXAMPLE}}',JSON.stringify(columns[0]?.name??'请先定义栏目').slice(1,-1))+'\n【平台当前栏目，按主要内容选择】\n'+columns.map(c=>'- '+c.name+'：'+c.description).join('\n')+'\n【当前X账户，null为未登录，不能交稿】\n'+JSON.stringify(listXAccounts(db,config).map(({id,label,handle})=>({id,label,handle})));
       return send(res,200,prompt,'text/plain; charset=utf-8');
     } catch { return send(res,404,{code:'NOT_FOUND',error:'接入指令尚未生成'}); }
   }
@@ -363,16 +389,18 @@ export async function handle(req, res) {
       }
       if(req.method==='POST'&&u.pathname==='/api/prep/posts') {
         let body='';for await(const chunk of req){body+=chunk;if(Buffer.byteLength(body)>prepRequestLimit)return send(res,413,{code:'TOO_LARGE',error:'请求过大'});}
-        const a=JSON.parse(body);if(!a||Object.keys(a).some(k=>!['type','id','platform','platforms','input','actor','column','scheduledAt','note','mode','assignments'].includes(k)))throw Object.assign(Error('操作字段不对；不接受 submit 或发布授权'),{code:'INVALID_INPUT'});
+        const a=JSON.parse(body);if(!a||Object.keys(a).some(k=>!['type','id','platform','platforms','input','actor','column','scheduledAt','note','mode','assignments','accountId'].includes(k)))throw Object.assign(Error('操作字段不对；不接受 submit 或发布授权'),{code:'INVALID_INPUT'});
         if(['publish','submit'].includes(a.type))return send(res,403,{code:'PUBLISH_DISABLED',error:'Liu要求最后一步由本人操作；接口只填写，不发布'});
         if(actions.some(a=>!a.done)||prep.busy()||posts.busy())return send(res,409,{code:'BUSY',error:'另一个操作正在运行，请先查状态'});
+        if(a.accountId!==undefined&&!['create','fill','select-x-account'].includes(a.type))throw Object.assign(Error('X账户只能在建稿、选择账号或执行时指定'),{code:'INVALID_INPUT'});
         if(a.type==='columns')return send(res,200,reclassifyColumns(db,a.assignments,a.actor));
-        if(a.type==='create')return send(res,200,{ok:true,post:posts.create(a.input,a.actor,{column:a.column,scheduledAt:a.scheduledAt,note:a.note})});
+        if(a.type==='create')return send(res,200,{ok:true,post:posts.create(a.input,a.actor,{column:a.column,scheduledAt:a.scheduledAt,note:a.note,accountId:a.accountId})});
         if(a.type==='meta')return send(res,200,{ok:true,post:posts.meta(a.id,{column:a.column,scheduledAt:a.scheduledAt,note:a.note},a.actor)});
         if(a.type==='update')return send(res,200,{ok:true,post:posts.update(a.id,a.platform,a.input,a.actor)});
         if(a.type==='generate')return send(res,202,{ok:true,post:posts.generate(a.id,a.platforms,a.actor)});
         if(a.type==='check')return send(res,200,{ok:true,...posts.check(a.id,a.platform,a.actor)});
-        if(a.type==='fill')return send(res,202,{ok:true,post:posts.fill(a.id,a.platform,a.actor,a.mode)});
+        if(a.type==='select-x-account')return send(res,200,{ok:true,post:posts.selectXAccount(a.id,a.accountId,a.actor)});
+        if(a.type==='fill')return send(res,202,{ok:true,post:posts.fill(a.id,a.platform,a.actor,a.mode,a.accountId)});
       }
       return send(res,404,{code:'NOT_FOUND',error:'接口或动作不存在'});
     }catch(e){return send(res,e.code==='NOT_FOUND'?404:e.code==='BUSY'?409:400,{code:e.code??'PREP_FAILED',error:redactL1(e.message,[W.key,W.widgetToken])});}
@@ -482,25 +510,27 @@ export async function handle(req, res) {
       if (tooLarge) return send(res, 413, { error: '请求过大' });
       let a; try { a = JSON.parse(body); } catch { return send(res, 400, { error: '请求格式不对' }); }
       try { planL1Action(a); } catch (error) { return send(res, 400, { error: error.message }); }
-      if (a.type === 'status') return send(res, 200, l1Status()[a.platform]);
+      try{if(a.platform==='x')xAccountConfig(config,a.accountId||'default',db);}catch(error){return send(res,400,{error:error.message});}
+      const xId=a.accountId||'default',key=xActionKey(a);
+      if (a.type === 'status') return send(res, 200, l1Status(xId)[a.platform]);
       if (['show-login', 'cancel-login'].includes(a.type)) {
-        try { controlL1(actions.find(record => record.platform === a.platform && !record.done), a.type); }
+        try { controlL1(actions.find(record => xActionKey(record) === key && !record.done), a.type); }
         catch (error) { return send(res, 409, { error: error.message }); }
         return send(res, 200, { ok: true });
       }
       if (['doctor', 'sync'].includes(a.type) && config.l1?.[a.platform]?.browserExecution === false) return send(res, 409, { error: BROWSER_BLOCK });
       if (actions.some(x => !x.done) || prep.busy()) return send(res, 409, { error: '上一个 L1 操作还在跑，等它结束' });
-      const previousIdentity = l1Status()[a.platform].identity;
-      if (previousIdentity) db.prepare('INSERT OR REPLACE INTO meta (key,value) VALUES (?,?)').run(`l1:web:identity:${a.platform}`, JSON.stringify(previousIdentity));
+      const previousIdentity = l1Status(xId)[a.platform].identity;
+      if (previousIdentity) db.prepare('INSERT OR REPLACE INTO meta (key,value) VALUES (?,?)').run(`l1:web:identity:${key}`, JSON.stringify(previousIdentity));
       const rec = launchL1(a, { root: ROOT, secrets: [W.key, W.widgetToken],
         save: record => {
-          db.prepare('INSERT OR REPLACE INTO meta (key,value) VALUES (?,?)').run(`l1:web:${a.platform}`, JSON.stringify(record));
+          db.prepare('INSERT OR REPLACE INTO meta (key,value) VALUES (?,?)').run(`l1:web:${key}`, JSON.stringify(record));
           const confirmed = record.loginState==='logged_in' && record.progress?.stage==='identity_confirmed' || record.done && record.ok && ['login','doctor','collect'].includes(record.type);
           if (confirmed || record.loginState==='logged_out') {
-            const { account, profile } = l1Status()[a.platform];
-            const current=l1Status()[a.platform].identity;
+            const { account, profile } = l1Status(xId)[a.platform];
+            const current=l1Status(xId)[a.platform].identity;
             const checkedAt=record.progress?.at || record.endedAt || record.startedAt;
-            db.prepare('INSERT OR REPLACE INTO meta (key,value) VALUES (?,?)').run(`l1:web:identity:${a.platform}`, JSON.stringify({ ...(current || {}), account, profile, status:confirmed?'logged_in':'logged_out', checkedAt, ...(confirmed?{confirmedAt:record.endedAt || checkedAt}:{}) }));
+            db.prepare('INSERT OR REPLACE INTO meta (key,value) VALUES (?,?)').run(`l1:web:identity:${key}`, JSON.stringify({ ...(current || {}), account, profile, status:confirmed?'logged_in':'logged_out', checkedAt, ...(confirmed?{confirmedAt:record.endedAt || checkedAt}:{}) }));
             if (record.done && record.ok && ['login','doctor'].includes(record.type)) choosePlatform(db,a.platform,true);
           }
         } });

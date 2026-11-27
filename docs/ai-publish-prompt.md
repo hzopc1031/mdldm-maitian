@@ -13,6 +13,8 @@
 - 地址 http://127.0.0.1:8787，必须与服务在同一台电脑（只允许本机 loopback）。
 - 先 GET /api/prep/contract，确认 version:4、fillModes 含 draft 和 publish。读不到或版本不对就停止并报告，不要改用其他入口。
 - 所有 POST 都要带头：Origin: http://127.0.0.1:8787 和 Content-Type: application/json。
+- X支持用户自行新增/登录的多个账户。读取contract.xAccounts的id、label、handle，以实际handle确定本篇目标；备注不是登录身份。建稿顶层可传accountId，旧单平台交稿则传input.accountId；只支持已登录绑定的账户。省略或default兼容原X账户，不会根据页面正在查看的账户自动换号。生成X准备记录后不能改目标，不用换ID解除unknown锁。
+- X实际存草稿/发布前，必须从contract.xPublishAccounts（仅已确认登录账户）明确选择，并在fill顶层传accountId，不能省略。尚未生成X准备记录时，可POST {type:"select-x-account",id:"原稿ID",accountId:"所选ID"}；之后check，目标冻结。已有准备记录只能选原目标；登录失效先登录，不换号/重建稿件。选择查看范围不等于发布账户授权。
 
 【交稿：建稿必填三项】
 POST /api/prep/posts，例如（Windows 用 curl.exe，JSON 存成 UTF-8 文件用 --data-binary 传，避免中文引号问题）：

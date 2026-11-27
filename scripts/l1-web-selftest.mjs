@@ -258,6 +258,7 @@ try {
     fetch() { return new Promise(() => {}); }, setInterval() {}, clearInterval() {}, setTimeout() {}, addEventListener() {}, scrollTo() {} });
   vm.runInContext(fs.readFileSync(path.join(root, 'src/web/mt.js'), 'utf8'), context);
   vm.runInContext(fs.readFileSync(path.join(root, 'src/web/health.js'), 'utf8'), context);
+  vm.runInContext(fs.readFileSync(path.join(root, 'src/web/x-accounts-ui.js'), 'utf8'), context);
   vm.runInContext(fs.readFileSync(path.join(root, 'src/web/pages.html'), 'utf8').match(/<script>([\s\S]*?)<\/script>/)[1], context);
   const pageActionClick=listeners.click[0];
   vm.runInContext(fs.readFileSync(path.join(root, 'src/web/publish-prep.js'), 'utf8'), context);

@@ -9,7 +9,7 @@ export function transaction(fn) {
   try { const result = fn(); db.exec('COMMIT'); return result; }
   catch (error) { db.exec('ROLLBACK'); throw error; }
 }
-export function saveObservation({ platform, account, captured_at, source, posts, followers, example = false, collection }) {
+export function saveObservation({ platform, account, accountId, captured_at, source, posts, followers, example = false, collection }) {
   if (collection) {
     const expected=dayWindow(collection.date,collection.until);
     if (collection.scope!=='day' || collection.start!==expected.start || collection.until!==expected.until || Date.parse(captured_at)<Date.parse(collection.until) || posts.some(p=>!inDayWindow(p.created_at,expected))) throw new Error('日期采集范围或作品时间不符；未写库');
@@ -25,6 +25,7 @@ export function saveObservation({ platform, account, captured_at, source, posts,
     }) : null;
     const eid = registered?.episode_id || `external:${platform}:${post.id}`;
     const oldSnapshot = db.prepare('SELECT * FROM snapshots WHERE episode_id=?').get(eid);
+    if(platform==='x'&&oldSnapshot&&JSON.parse(oldSnapshot.project).account&&JSON.parse(oldSnapshot.project).account.toLowerCase()!==account.toLowerCase())throw Error('X作品已经归属另一账户；回滚本次观测');
     if (platform === 'wechat' && oldSnapshot && JSON.parse(oldSnapshot.project).account !== account) throw new Error('公众号文章 ID 已属于其他账号；回滚本次观测');
     const updateSnapshot = !oldSnapshot || Date.parse(oldSnapshot.taken_at) <= Date.parse(captured_at);
     if (updateSnapshot) {
@@ -70,9 +71,12 @@ export function saveObservation({ platform, account, captured_at, source, posts,
     saved++;
   }
   if (followers != null) {
+    // Legacy table has only (day,platform); extra X accounts use the existing
+    // account-tagged observation ledger instead of overwriting the default row.
+    if(platform!=='x'||!accountId||accountId==='default')
     db.prepare(`INSERT INTO followers (day,platform,total,gain,loss,source,collected_at) VALUES (?,?,?,NULL,NULL,?,?) ON CONFLICT(day,platform) DO UPDATE SET total=excluded.total,gain=NULL,loss=NULL,source=excluded.source,collected_at=excluded.collected_at WHERE julianday(excluded.collected_at)>=julianday(followers.collected_at)`)
       .run(day, platform, followers, source, captured_at);
-    db.prepare('INSERT OR REPLACE INTO meta (key,value) VALUES (?,?)').run(`l1:followers:${platform}:${captured_at}`, JSON.stringify({ account, total: followers, captured_at, source, example }));
+    db.prepare('INSERT OR REPLACE INTO meta (key,value) VALUES (?,?)').run(`l1:followers:${platform}:${accountId?account+':':''}${captured_at}`, JSON.stringify({ account, total: followers, captured_at, source, example }));
   }
   if (collection) {
     const key=collectionKey(platform,account,collection.date);

@@ -7,6 +7,7 @@ import { loginTimeoutMs, waitForVisibleLogin } from './l1-login.mjs';
 import { reportL1Progress } from './l1-progress.mjs';
 import {dayWindow, inDayWindow} from './l1-collection-window.mjs';
 import {beijingDay} from './l1-config.mjs';
+import {bindConfiguredX} from './x-accounts.mjs';
 import { visibleXIdentity, visibleXFollowers, visibleXPosts, visibleXMetricLabel, scrollXProfile, xNumber, parseXLabel, selectXPosts } from './l1-x-dom.mjs';
 
 
@@ -22,11 +23,18 @@ export async function assertXAccount(page, account, wait = pause) {
   throw new Error(`停止：无法确认可见登录账号为 @${account}；本次 X 未写库`);
 }
 
-export async function loginX(config, { waitLogin = false } = {}) {
-  const account=l1Account(config,'x'), PROFILE=`https://x.com/${account}`;
+export async function loginX(config, { waitLogin = false, withBrowser=withL1Browser, bind=bindConfiguredX } = {}) {
+  const account=config._xAccountRoute?config._xAccountRoute.handle:l1Account(config,'x'), PROFILE=account?`https://x.com/${account}`:'https://x.com/home';
+  let verifiedHandle,reused=false;
+  const verify=identity=>{
+    const handle=identity.handle?.replace(/^@/,'');
+    if(!/^[A-Za-z0-9_]{1,15}$/.test(handle||'')||identity.url!=='https://x.com/home')return false;
+    if(account&&handle.toLowerCase()!==account.toLowerCase())throw Error(`停止：可见登录账号 @${handle} 不是 @${account}；未绑定、未写库`);
+    verifiedHandle=handle;return true;
+  };
   if (!waitLogin && !process.stdin.isTTY) throw new Error('X 登录需要交互终端');
   const timeoutMs = waitLogin ? loginTimeoutMs() : null;
-  await withL1Browser(config, async page => {
+  await withBrowser(config, async page => {
   // The signed-in home is the identity entry; a public profile preview proves no login.
     // Enter the official sign-in route only when the visible page requires login.
     reportL1Progress('checking_login');
@@ -35,30 +43,30 @@ export async function loginX(config, { waitLogin = false } = {}) {
     const current = await page.evaluate(visibleXIdentity);
     if (new URL(current.url).origin !== 'https://x.com') throw new Error('停止：X页面来源不符；未确认登录');
     if (current.handle) {
-      if (current.handle.replace(/^@/, '').toLowerCase() !== account.toLowerCase()) throw new Error(`停止：可见登录账号 ${current.handle} 不是 @${account}；未采集、未写库`);
-      reportL1Progress('identity_confirmed');
-      console.log(`X 登录校验成功：@${account}；已复用本专用窗口的登录状态，没有重新进入登录页。`);
+      if(!verify(current))throw Error('没有核实官方/home上的当前登录账号');
+      reused=true;
+
       return;
     }
     if (!current.login) throw new Error('当前X页面没有提供可确认的账号或登录入口；未确认登录，请查看专用窗口');
     if (!/^\/i\/(?:flow\/login|jf\/onboarding)(?:\/|$)/.test(new URL(current.url).pathname)) await page.goto('https://x.com/i/flow/login');
     if (waitLogin) {
       reportL1Progress('waiting_login', timeoutMs);
-      console.log(`请在专用窗口登录 @${account}；自动轮询当前账号切换器，无需回车，超时 ${timeoutMs} 毫秒。`);
+      console.log(`请在专用窗口${account?'登录 @'+account:'自行登录X账户'}；自动轮询当前账号切换器，无需回车，超时 ${timeoutMs} 毫秒。`);
       await waitForVisibleLogin(page, visibleXIdentity, identity => {
-        if (!identity.handle) return false;
-        if (identity.handle.replace(/^@/, '').toLowerCase() !== account.toLowerCase()) throw new Error(`停止：可见登录账号 ${identity.handle} 不是 @${account}；未采集、未写库`);
-        return new URL(identity.url).origin === 'https://x.com';
+        return verify(identity);
       }, timeoutMs);
     } else {
       const terminal = createInterface({ input: process.stdin, output: process.stdout });
-      try { await terminal.question(`请在该窗口登录 @${account}，不要登录其他号。完成后回车校验并关闭专用 Chrome：`); }
+      try { await terminal.question(`请在该窗口${account?'登录 @'+account:'自行登录X账户'}。完成后回车校验并关闭专用 Chrome：`); }
       finally { terminal.close(); }
-      await page.goto(PROFILE); await assertXAccount(page, account);
+      await page.goto('https://x.com/home');if(!verify(await page.evaluate(visibleXIdentity)))throw Error('未确认登录账号');
     }
-    reportL1Progress('identity_confirmed');
-    console.log(`X 登录校验成功：@${account}；随后关闭本次专用 Chrome。`);
+
   }, 'x');
+  bind(config,verifiedHandle);
+  console.log(`X 登录校验成功：@${verifiedHandle}；${reused?'已复用本专用窗口的登录状态；':''}本次专用窗口已结束。`);
+  reportL1Progress('identity_confirmed');
 }
 
 // 账号验证后才读取登记，readOnly 避免读阶段创建库或改变 schema。
@@ -141,7 +149,7 @@ export async function collectX(config, { withBrowser = withL1Browser, wait = pau
     await readMetrics(page,[...posts.values()]);
     await wait(); await page.goto(PROFILE); await assertXAccount(page, account, wait);
     console.log(`X ${account}：${window ? window.date+'（北京时间）' : '历史近30天'} ${selected.posts.length} 篇；日期未知跳过 ${selected.skipped.unknownTime}；补读 ${posts.size} 篇；粉丝 ${followers ?? 'NULL'}`);
-    return { platform: 'x', account, captured_at: now().toISOString(), source: 'chrome/page', followers, posts: [...posts.values()], ...(window ? {collection:{...window, complete:selected.skipped.unknownTime===0,unknownDates:selected.skipped.unknownTime}} : {}) };
+    return { platform: 'x', account, accountId:config._xAccountRoute?.id, captured_at: now().toISOString(), source: 'chrome/page', followers, posts: [...posts.values()], ...(window ? {collection:{...window, complete:selected.skipped.unknownTime===0,unknownDates:selected.skipped.unknownTime}} : {}) };
   }, 'x');
   // 浏览器阶段与最终账号校验全部成功、关闭本次 Chrome 后才打开可写数据库。
   reportL1Progress('saving');

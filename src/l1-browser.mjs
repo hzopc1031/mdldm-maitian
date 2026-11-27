@@ -22,9 +22,11 @@ export function browserSettings(config, platform = 'xhs') {
   if (!PLATFORM_IDS.includes(platform)) throw new Error('未知 L1 浏览器平台');
   const settings = config.l1?.[platform] || {};
   // X 绝不继承旧全局的 9340/profile；小红书保留旧配置兼容。
-  const expected = path.resolve(home, `chrome-profile-l1-${platform}`);
+  const route=platform==='x'?config._xAccountRoute:null;
+  const expected = path.resolve(home, route?`chrome-profile-l1-${route.id}`:`chrome-profile-l1-${platform}`);
   const profile = path.resolve(settings.chromeProfile || (platform === 'xhs' ? config.chromeProfile : null) || expected);
-  const expectedPort = platformById(platform).port;
+  const expectedPort = route?route.port:platformById(platform).port;
+  if(route&&(!/^x-[a-f0-9]{24}$/.test(route.id)||expectedPort<9410||expectedPort>=9500||profile!==expected))throw Error('X账户浏览器路由无效');
   const port = settings.chromePort ?? (platform === 'xhs' ? config.chromePort : null) ?? expectedPort;
   if (port !== expectedPort) throw new Error(`L1 ${platform} 仅允许端口 ${expectedPort}`);
   if (!path.isAbsolute(settings.chromeProfile || (platform === 'xhs' ? config.chromeProfile : null) || expected) || /^(?:\\\\|\/\/)/.test(profile)) throw new Error('L1 profile 必须为专用本机绝对路径');
@@ -170,7 +172,7 @@ export async function withL1Browser(config, fn, platform = 'xhs') {
         }
       },
       async goto(url) {
-        if (!allowedPage(url, platform, platform==='x'?l1Account(config,'x'):null)) throw new Error('L1 拒绝非本平台只读页面');
+        if (!allowedPage(url, platform, platform==='x'?(config._xAccountRoute?config.l1?.x?.account:l1Account(config,'x')):null)) throw new Error('L1 拒绝非本平台只读页面');
         const result = await send('Page.navigate', { url }, session);
         if (result.errorText) throw new Error(result.errorText);
         await pause(5000, 7000);
@@ -190,7 +192,8 @@ export async function withL1Browser(config, fn, platform = 'xhs') {
     };
     reveal = () => page.bringToFront();
     reportL1Progress('browser_ready');
-    return await fn(page);
+    // Publication adapter receives only this freshly started, ownership-verified browser.
+    return await fn(page, {pid:child.pid,send,close(){}});
   } catch (error) {
     if (cancelled) throw new Error('已取消登录，本次未采集数据');
     throw error;

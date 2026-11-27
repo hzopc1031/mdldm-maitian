@@ -48,6 +48,7 @@ export function writePreparationLink(db,id,result) {
     if(!row)throw new Error('准备记录不存在');
     const record=JSON.parse(row.record);
     if(record.platform!==result.platform||record.state==='running')throw new Error('准备记录平台或运行状态已变化');
+    if(record.platform==='x'&&record.account&&record.account.toLowerCase()!==result.account.toLowerCase())throw Error('核验回执与稿件绑定X账户不一致');
     if(record.episodeId)writeTask(db,record.episodeId,result.platform,result);
     const submittedHere=record.submission?.submitted===true&&record.operations?.some(op=>op.kind==='publish'&&op.state==='submitted');
     Object.assign(record,{url:result.url,state:'published',linkCheckedAt:result.checkedAt,

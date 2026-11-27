@@ -3,6 +3,7 @@ import path from 'node:path';
 import { spawn } from 'node:child_process';
 import { beijingDay, validDay } from './l1-config.mjs';
 import {PLATFORM_IDS,PLATFORM_CATALOG} from './platform-registry.mjs';
+import {accountId} from './x-accounts.mjs';
 
 export const L1_PLATFORMS = PLATFORM_IDS;
 export const L1_PORTS = Object.fromEntries(PLATFORM_CATALOG.map(p=>[p.id,p.port]));
@@ -25,6 +26,7 @@ export function planL1Action(action) {
     throw new Error('请选择 L1 平台和登录 / 采集 / 状态操作');
   }
   const keys = action.type === 'collect' ? ['type', 'platform', 'date'] : action.type === 'sync' ? ['type', 'platform', 'id','preparationId','date'] : ['type', 'platform'];
+  if(action.accountId!==undefined){if(action.platform!=='x')throw Error('账户ID仅支持X');accountId(action.accountId);keys.push('accountId');}
   if (Object.keys(action).some(key => !keys.includes(key))) throw new Error('操作包含不支持的参数');
   if (['status', 'show-login', 'cancel-login'].includes(action.type)) return null;
   if (action.type === 'sync') {
@@ -55,10 +57,12 @@ export function launchL1(action, { root, env = process.env, spawnChild = spawn, 
   const argv = action.type==='age' ? [JSON.stringify(action.plan)] : planL1Action(action);
   if (!argv) throw new Error('状态读取不应启动子进程');
   const rec = { type: action.type, platform: action.platform,
+    ...(action.accountId?{accountId:action.accountId}:{}),
     label: `${({ login: '登录', collect: '更新数据', doctor: '检查账号', sync: '按作品取链接', age:'同龄采样' })[action.type]} · ${action.platform}`,
     startedAt: new Date().toISOString(), done: false, ok: null, tail: '',
     progress: { stage: 'starting', message: progressMessages.starting } };
   if (action.type==='collect') { rec.date=argv.at(-1); rec.until=rec.startedAt; argv.push('--until', rec.until); }
+  if(action.accountId)argv.push('--account-id',action.accountId);
   let output = '', finished = false;
   const finish = (ok, error, code = null) => {
     if (finished) return;

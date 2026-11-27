@@ -187,7 +187,7 @@ try {
       },
     };
   }
-  const xEnabled = createPrepService({...opts,config:configX,runX:params=>fillXEditor(params,()=>fakeBrowser({inlineEditorBehindDialog:true}))});
+  const xEnabled = createPrepService({...opts,config:configX,runX:params=>fillXEditor(params,()=>fakeBrowser({inlineEditorBehindDialog:true}),{waitHuman:async()=>{}})});
   const xJob = JSON.parse(fs.readFileSync(xEnabled.jobFile(xp.id),'utf8'));
   fs.appendFileSync(xJob.images[0],'modified');
   assert.throws(() => xEnabled.start(xp.id,'execute'),/素材已变化/);
@@ -246,7 +246,7 @@ try {
   assert.throws(()=>planL1Action({type:'sync',platform:'x',preparationId:prepRecord.id,id:'ep',date:'2026-11-17'}));
   writePreparationLink(db,prepRecord.id,{...proof,platform:'x',account:'Example',url:xCard.url});
   assert.equal(enabled.get(prepRecord.id).url,xCard.url);assert.equal(enabled.get(prepRecord.id).state,'published');
-  assert.throws(()=>enabled.start(prepRecord.id,'execute'));
+  assert.equal(enabled.start(prepRecord.id,'execute').state,'published'); // Completed records return without another browser operation.
   assert.deepEqual(browserProxyArgs({},'x',{HTTPS_PROXY:'http://127.0.0.1:12334'}),['--proxy-server=http://127.0.0.1:12334']);
   assert.deepEqual(browserProxyArgs({},'xhs',{HTTPS_PROXY:'http://127.0.0.1:12334'}),[]);
   assert.throws(()=>browserProxyArgs({l1:{x:{proxy:'http://user:pass@proxy.invalid'}}},'x',{}));

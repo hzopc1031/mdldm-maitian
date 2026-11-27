@@ -2,7 +2,8 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { home, beijingDay, validDay, readConfig } from './l1-config.mjs';
 import { l1Account } from './l1-account.mjs';
-import { configuredSummaries } from './l1-summary.mjs';
+import { configuredSummaries,accountSummary } from './l1-summary.mjs';
+import {managedXAccounts} from './x-accounts.mjs';
 const show = value => value == null ? '暂无' : String(value);
 const cell = value => String(value ?? '暂无').replace(/\|/g, '\\|').replace(/[\r\n]+/g, ' ').replace(/</g, '&lt;');
 export async function writeLocalReport({ date = beijingDay(), reportDir = path.join(home, 'reports') } = {}) {
@@ -10,7 +11,7 @@ export async function writeLocalReport({ date = beijingDay(), reportDir = path.j
   const { db } = await import('./l1-store.mjs');
   const lines = [`# L1 本地日报 ${date}`, '', '账号按本地已核验观测记录展示；没有观测时不猜测账号。', '', '数据按北京时间日期截取；暂无表示没有观测。此日报不发送飞书。', ''];
   let example = false;
-  const summaries=configuredSummaries(db,readConfig(),l1Account,date);
+  const summaries=[...configuredSummaries(db,readConfig(),l1Account,date),...managedXAccounts(db).filter(a=>a.handle).map(a=>accountSummary(db,'x',a.handle,date))];
   for(const s of summaries) {
     example ||= s.example;
     lines.push(`## 账号今日汇总 · ${cell(s.platform)} / ${cell(s.account)}`, '', s.coverage,

@@ -7,7 +7,7 @@ import path from 'node:path';
 import http from 'node:http';
 import {once} from 'node:events';
 import {spawn} from 'node:child_process';
-const supportedTests = ['unauth','invalid','home','traffic','system','prepare','prepare-flow','enabled-system','columns','columns-resize'];
+const supportedTests = ['unauth','invalid','home','traffic','system','prepare','prepare-flow','enabled-system','columns','columns-resize','x-accounts','x-publish-accounts'];
 const tests = process.argv.length > 2 ? process.argv.slice(2) : supportedTests;
 if (tests.some(test => !supportedTests.includes(test))) throw new Error('Unknown browser acceptance scenario');
 const output=path.resolve(process.env.MAITIAN_QA_OUT || '_local-headless-accept');
@@ -32,7 +32,7 @@ const oldObservation=new Date(Date.now()-2*864e5).toISOString();
 saveObservation({platform:'xhs',account:'TwoPeanuts',captured_at:oldObservation,source:'isolated-test',example:true,
   posts:[{id:'stale-fixture',text:'旧观测（假数据）',created_at:oldObservation,views:12}]});
 const {handle}=await import('../src/web.mjs');
-let current, report, columnWrites=0, violations=[];
+let current, report, columnWrites=0, accountWrites=0, publishWrites=0, fixturePost, fixtureTarget, violations=[];
 // Added only to test responses; the production HTML and handler are unchanged.
 function browserChecks(test, image) {
   const options=JSON.stringify({test,image,width});
@@ -54,9 +54,49 @@ function browserChecks(test, image) {
       if(login) {login.value='isolated-render-fixture';document.querySelector('form').requestSubmit();return;}
       await wait(()=>test==='home'?!!document.querySelector('.hero'):!!document.querySelector('.h1'));
       check(!document.body.innerText.includes('出错了：'),'no render error');
-      const expected=test==='home'?'/':test==='traffic'?'/p#/traffic':test.endsWith('system')?'/p#/system':'/p#/prepare';
+      const expected=test==='home'?'/':test==='traffic'?'/p#/traffic':test.endsWith('system')||test==='x-accounts'?'/p#/system':'/p#/prepare';
       check(location.pathname+location.hash===expected,'POST preserved route');
       if(!sessionStorage.getItem('qa-reloaded')){sessionStorage.setItem('qa-reloaded','1');location.reload();return;}
+      if(test==='x-publish-accounts') {
+        if(!sessionStorage.getItem('qa-publish-submitted')){
+          await wait(()=>!!document.querySelector('[data-x-publish]'));
+          const form=document.querySelector('[data-x-publish]'),select=form.elements.namedItem('accountId');
+          const choices=[...select.options].filter(o=>o.value);
+          check(choices.length===2,'only the two confirmed signed-in accounts are selectable');
+          check(choices.every(o=>/@DemoWork|@DemoTrip/.test(o.textContent)),'no legacy/unbound account in choices');
+          check(select.required&&!select.value&&!form.checkValidity(),'explicit choice is required, no automatic default');
+          select.value=choices.find(o=>o.textContent.includes('@DemoTrip')).value;
+          sessionStorage.setItem('qa-publish-target',select.value);sessionStorage.setItem('qa-publish-submitted','1');
+          form.querySelector('[data-x-mode="draft"]').click();return;
+        }
+        await wait(()=>!document.querySelector('[data-x-publish]'));
+        check(document.querySelector('[data-x-account-select]').value===sessionStorage.getItem('qa-publish-target'),'view follows explicit target after execution');
+        check(document.body.innerText.includes('已存草稿'),'mock receipt displayed after reload');
+        await finish(true,'仅已登录账号可选、必选目标、选择→检查→执行及回执刷新；平台执行完全mock');return;
+      }
+      if(test==='x-accounts') {
+        await wait(()=>!!document.querySelector('[data-add-x-account]'));
+        if(!sessionStorage.getItem('qa-accounts-done')) {
+          for(const label of ['工作账户','旅行账户']) {
+            const count=document.querySelectorAll('[data-x-account]').length;
+            const form=document.querySelector('[data-add-x-account]');form.elements.namedItem('label').value=label;form.requestSubmit();
+            await wait(()=>document.querySelectorAll('[data-x-account]').length===count+1);
+          }
+          const cards=[...document.querySelectorAll('[data-x-account]')];check(cards.length===3,'two user-created slots plus legacy account');
+          for(const card of cards.slice(1))check(card.querySelector('[data-act*=collect]').disabled,'unbound account cannot collect');
+          const picker=document.querySelector('[data-x-account-select]');check(picker.options.length===3,'account selector includes user accounts');
+          sessionStorage.setItem('qa-selected-account',picker.options[2].value);sessionStorage.setItem('qa-accounts-done','1');
+          picker.value=picker.options[2].value;picker.dispatchEvent(new Event('change',{bubbles:true}));return;
+        }
+        const selected=sessionStorage.getItem('qa-selected-account');
+        check(document.querySelector('[data-x-account-select]').value===selected,'selection persisted after real reload');
+        const overview=await (await fetch('/api/overview?xAccount='+selected)).json();
+        check(overview.xAccountId===selected&&overview.xAccounts.length===3,'scoped API and slots persisted');
+        check(!overview.episodes.some(e=>e.tasks.some(t=>t.platform==='x')),'new account does not display legacy X posts');
+        check(document.querySelectorAll('[data-x-account]').length===3,'no duplicate form handlers');
+        check(document.documentElement.scrollWidth<=document.documentElement.clientWidth+1,'no overflow with account selector');
+        await finish(true,'通用账户新增两次、未登录采集阻止、真实切换刷新及旧数据隔离');return;
+      }
       if(test.startsWith('columns')) {
         await wait(()=>!!document.querySelector('[data-column-manage]'));
         if(test==='columns-resize')dispatchEvent(new Event('resize'));
@@ -161,7 +201,7 @@ const server=http.createServer(async(req,res)=>{
     try {const value=JSON.parse(body); report={ok:value.ok===true,detail:String(value.detail).slice(0,300),viewport:value.viewport};}catch{report={ok:false,detail:'invalid QA report'};}
     res.end('ok');return;
   }
-  if(req.url.startsWith('/api/action') || (req.method==='POST' && req.url!=='/auth' && req.url!=='/api/prep' && !(current.startsWith('columns')&&req.url==='/api/prep/columns'))) {
+  if(req.url.startsWith('/api/action') || (req.method==='POST' && req.url!=='/auth' && req.url!=='/api/prep' && !(current==='x-publish-accounts'&&req.url==='/api/prep/posts') && !(current==='x-accounts'&&req.url==='/api/l1/x-accounts') && !(current.startsWith('columns')&&req.url==='/api/prep/columns'))) {
     violations.push('unexpected mutation');res.writeHead(403);res.end();return;
   }
   if(req.url==='/api/prep' && req.method==='POST') {
@@ -171,6 +211,21 @@ const server=http.createServer(async(req,res)=>{
     req=Object.assign(Object.create(req),{[Symbol.asyncIterator]:async function*(){yield Buffer.from(body);}});
   }
   if(req.url==='/api/prep/columns'&&req.method==='POST')columnWrites++;
+  if(req.url==='/api/l1/x-accounts'&&req.method==='POST')accountWrites++;
+  if(current==='x-publish-accounts'&&req.url==='/api/prep/posts'&&req.method==='POST'){
+    let raw='';for await(const chunk of req)raw+=chunk;const action=JSON.parse(raw);
+    if(!['select-x-account','check','fill'].includes(action.type)||action.id!==fixturePost)throw Error('Unexpected account selection action');
+    if(action.type==='fill'){
+      if(action.mode!=='draft'||action.accountId!==fixtureTarget)throw Error('Wrong publishing target');
+      const post=JSON.parse(db.prepare('SELECT record FROM publish_posts WHERE id=?').get(fixturePost).record);
+      const row=db.prepare('SELECT record FROM publish_preparations WHERE id=?').get(post.editions.x.preparationId),record=JSON.parse(row.record);
+      if(record.accountId!==fixtureTarget)throw Error('Prepared target differs from selection');
+      record.state='draft_saved';record.note='isolated fixture: mocked draft receipt, no platform operation';
+      db.prepare('UPDATE publish_preparations SET record=? WHERE id=?').run(JSON.stringify(record),record.id);publishWrites++;
+      res.writeHead(202,{'content-type':'application/json'});res.end(JSON.stringify({ok:true}));return;
+    }
+    req=Object.assign(Object.create(req),{[Symbol.asyncIterator]:async function*(){yield Buffer.from(raw);}});
+  }
   const end=res.end.bind(res);
   res.end=(body,...args)=>{
     if((typeof body==='string'||Buffer.isBuffer(body)) && /^<!doctype html/i.test(String(body)))body=String(body).replace('</body>',browserChecks(current,fixtureImage)+'</body>');
@@ -187,15 +242,25 @@ const evidence={at:new Date().toISOString(),mode:'Chrome headless CLI; isolated 
 try {
   if(!binary)throw new Error('Chrome not found');
   for(const test of tests) {
-    current=test;report=null;columnWrites=0;
+    current=test;report=null;columnWrites=0;accountWrites=0;publishWrites=0;
     config.publishPrep.browserExecution=test==='enabled-system';
     for(const p of ['x','xhs','wechat'])config.l1[p].browserExecution=test==='enabled-system';
+    if(test==='x-publish-accounts'){
+      const {createXAccount,bindXAccount}=await import('../src/x-accounts.mjs');
+      for(const [label,handle] of [['工作登录样本','DemoWork'],['出行登录样本','DemoTrip'],['未登录样本',null]]){
+        const a=createXAccount(db,{label});if(!handle)continue;bindXAccount(db,a.id,handle,config.xHandle);
+        db.prepare('INSERT OR REPLACE INTO meta VALUES (?,?)').run('l1:web:identity:x:'+a.id,JSON.stringify({account:'@'+handle,profile:a.profile,status:'logged_in',confirmedAt:new Date().toISOString()}));
+        if(handle==='DemoTrip')fixtureTarget=a.id;
+      }
+      const {createPostService}=await import('../src/publish-posts.mjs');const service=createPostService({db,config,home:folder,prep:{get(){throw Error('No preparation should exist yet');}}});
+      fixturePost=service.create({title:'账户选择隔离验收',content:'仅临时数据库验收，不会操作任何平台。'},{runtime:'codex',sessionId:'isolated-browser-fixture'},{column:'AI工具分享',scheduledAt:new Date(Date.now()+36e5).toISOString()}).id;
+    }
     if(test==='prepare') {
       const insert=db.prepare('INSERT INTO publish_preparations VALUES (?,?)');
       insert.run('legacy-wechat-fixture',JSON.stringify({id:'legacy-wechat-fixture',platform:'wechat',title:'旧草稿回执（假数据）',state:'unknown',kind:'execute',evidence:{submitted:null,savedAsDraft:false}}));
       insert.run('project-x-fixture',JSON.stringify({id:'project-x-fixture',platform:'x',title:'已发布回执（假数据）',state:'published',source:{project:'AI 精选项目',column:'每日 AI 精选',category:'AI 工具',runId:'fixture-run'},publishedAt:'2026-11-21T01:00:05Z',url:'https://x.com/PeanutPair/status/456',publication:{postId:'456'}}));
     }
-    const target=test==='home'?'/':test==='traffic'?'/p#/traffic':test==='unauth'||test.endsWith('system')?'/p#/system':'/p#/prepare';
+    const target=test==='home'?'/':test==='traffic'?'/p#/traffic':test==='unauth'||test.endsWith('system')||test==='x-accounts'?'/p#/system':'/p#/prepare';
     const shot=path.join(output,test+'.png');
     const child=spawn(binary,['--headless=new','--incognito','--no-first-run','--no-default-browser-check','--disable-extensions','--disable-background-networking',
       `--window-size=${width},1800`,'--user-data-dir='+path.join(folder,'profile-'+test),'--screenshot='+shot,'--dump-dom','--timeout=18000',
@@ -205,7 +270,7 @@ try {
     const timer=setTimeout(()=>{timedOut=true;child.kill();},25000);
     const [code]=await once(child,'close');clearTimeout(timer);
     if(test==='prepare')db.prepare('DELETE FROM publish_preparations WHERE id IN (?,?)').run('legacy-wechat-fixture','project-x-fixture');
-    const writesOk=!test.startsWith('columns')||columnWrites===2;
+    const writesOk=(!test.startsWith('columns')||columnWrites===2)&&(test!=='x-accounts'||accountWrites===2)&&(test!=='x-publish-accounts'||publishWrites===1);
     const result={test,ok:code===0&&!timedOut&&report?.ok===true&&fs.existsSync(shot)&&writesOk,code,detail:!writesOk?'expected exactly one create and one edit':report?.detail || 'browser did not confirm assertions',...(test.startsWith('columns')?{columnWrites}:{}),viewport:report?.viewport,screenshot:shot};
     evidence.results.push(result);console.log(JSON.stringify(result));
     if(test.startsWith('columns'))db.prepare('DELETE FROM publish_columns WHERE name IN (?,?)').run('AI验收栏目','AI案例库');

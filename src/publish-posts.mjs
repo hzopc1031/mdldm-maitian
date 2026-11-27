@@ -9,6 +9,8 @@ import {normalizePrep} from './publish-prep.mjs';
 import {normalizePrepAgent} from './prep-agent.mjs';
 import {prepColumn,initPrepColumns,readPrepColumns} from './prep-columns.mjs';
 import {platforms,validateEdition,platformRules} from './platform-rules.mjs';
+import {accountId,xAccountConfig} from './x-accounts.mjs';
+import {l1Account} from './l1-account.mjs';
 const fields=['title','content','images','cover','topics','video','digest','caption','author','imagePositions','promotionReview'];
 const locked=['running','unknown','awaiting_user','draft_saved','published','submitted','already_exists','failed'];
 const fail=(code,message)=>{throw Object.assign(Error(message),{code});};
@@ -43,7 +45,7 @@ export function manuscript(input) {
   return {title:input.title??'',content:input.content??'',images,cover,topics,video:input.video??null,digest:input.digest??input.caption??'',author:input.author??'',imagePositions:positions,...(input.promotionReview?{promotionReview:input.promotionReview}:{})};
 }
 const editionSchema={type:'object',additionalProperties:false,required:['title','content','topics','digest','author'],properties:{title:{type:'string'},content:{type:'string'},topics:{type:'array',items:{type:'string'}},digest:{type:'string'},author:{type:'string'}}};
-export function createPostService({db,home,config,prep,spawnChild=spawn,env=process.env,generationTimeout=240000}) {
+export function createPostService({db,home,config,prep,canUseXAccount=()=>false,spawnChild=spawn,env=process.env,generationTimeout=240000}) {
   initPrepColumns(db);
   db.exec('CREATE TABLE IF NOT EXISTS publish_posts (id TEXT PRIMARY KEY, record TEXT NOT NULL)');
   const save=r=>db.prepare('INSERT OR REPLACE INTO publish_posts VALUES (?,?)').run(r.id,JSON.stringify(r));
@@ -60,7 +62,10 @@ export function createPostService({db,home,config,prep,spawnChild=spawn,env=proc
     if(caller===undefined)fail('INVALID_INPUT','建稿需要 AI 来源：runtime、sessionId');
     let source;
     try{source=actor(caller);}catch(error){fail('INVALID_INPUT',error.message);}
+    const target=accountId(meta.accountId??'default');
+    if(target!=='default')l1Account(xAccountConfig(config,target,db),'x');
     const record={version:2,id:crypto.randomUUID(),column:postColumn(meta.column,readPrepColumns(db)),scheduledAt:postSchedule(meta.scheduledAt),note:postNote(meta.note),master,editions:Object.fromEntries(platforms.map(p=>[p,{...master,cover:master.cover??master.images[0]??null}])),generation:{state:'idle'},createdAt:new Date().toISOString(),actor:source,actorAttribution:'caller_reported',revision:1,operations:[]};
+    if(target!=='default')record.accountId=target;
     save(record);return get(record.id);
   }
   function meta(id,patch={},caller) {
@@ -108,17 +113,26 @@ export function createPostService({db,home,config,prep,spawnChild=spawn,env=proc
       const folder=path.join(home,'data','publish-posts',id,p),{video,imagePositions,...input}=edition;
       if(p==='xhs'&&input.cover){input.images=[input.cover,...input.images.filter(f=>f!==input.cover)];}
       const rich=p==='wechat'?wechatEditionJob(edition,folder):{};
-      const record=prep.create({...input,...rich,platform:p,test:/^【测试/.test(r.master.title)});edition.preparationId=record.id;save(r);
+      const record=prep.create({...input,...rich,platform:p,...(p==='x'&&r.accountId?{accountId:r.accountId}:{}),test:/^【测试/.test(r.master.title)});edition.preparationId=record.id;save(r);
     }
     if(p!=='x')prep.start(edition.preparationId,'check',caller);
     return {post:get(id),validation};
   }
-  function fill(id,p,caller,mode) {
+  function selectXAccount(id,target,caller){
+    if(typeof target!=='string')fail('INVALID_INPUT','请选择已登录的X发布账户');accountId(target);
+    if(!canUseXAccount(target))fail('ACCOUNT_LOGIN_REQUIRED','所选X账户尚未确认登录或登录已失效，请先登录');
+    l1Account(xAccountConfig(config,target,db),'x');
+    const r=raw(id);unlocked(r,'x');
+    if(r.editions.x.preparationId&&(r.accountId||'default')!==target)fail('ACCOUNT_LOCKED','稿件已有X准备记录，目标账户已固定，不能换号');
+    if(r.accountId!==target){r.accountId=target;r.revision++;r.operations.push({kind:'x-account',accountId:target,actor:actor(caller),at:new Date().toISOString()});save(r);}
+    return get(id);
+  }
+  function fill(id,p,caller,mode,selectedAccountId) {
     if(!['draft','publish'].includes(mode))fail('INVALID_INPUT','mode 必填，只能是 draft（存草稿箱）或 publish（直接发布）');
     const r=raw(id),e=r.editions[p];if(!e)fail('NOT_FOUND','平台不存在');if(!e?.preparationId)fail('CHECK_REQUIRED','请先检查平台版本');const validation=validateEdition(p,e,config);if(!validation.ok)fail('VALIDATION_FAILED','平台版本校验未通过');
-    prep.start(e.preparationId,mode, caller);return get(id);
+    prep.start(e.preparationId,mode, caller,undefined,selectedAccountId);return get(id);
   }
-  return {create,meta,get,list:()=>all().map(view),update,generate,check,fill,busy,
+  return {create,meta,get,list:()=>all().map(view),update,generate,check,fill,selectXAccount,busy,
     asset(id,p,index){const r=raw(id),e=p==='master'?r.master:r.editions[p];if(!e)fail('NOT_FOUND','平台不存在');const file=index==='cover'?e.cover:e.images[Number(index)];if(!file)fail('NOT_FOUND','图片不存在');return file;},
     bundle(id){const r=raw(id),e=r.editions.x;if(!e.preparationId){check(id,'x');}const current=raw(id).editions.x;if(!current.preparationId)fail('VALIDATION_FAILED','X版本未通过检查');return prep.bundle(current.preparationId);}};
 }

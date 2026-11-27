@@ -3,6 +3,7 @@ import path from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
 import { promisify } from 'node:util';
 import { visibleXIdentity } from './l1-x-dom.mjs';
+import {home} from './l1-config.mjs';
 
 const port = 9336;
 const compose = 'https://x.com/compose/post';
@@ -10,7 +11,12 @@ const editorSelector = '[data-testid="tweetTextarea_0"]';
 const humanDelay = () => delay(1000 + Math.floor(Math.random() * 4000));
 const fileSelector = 'input[type="file"][data-testid="fileInput"]';
 
-export function isDedicatedXProfile(value) {
+export function isDedicatedXProfile(value, browserPort=9336) {
+  if(typeof value==='string'&&Number.isInteger(browserPort)&&browserPort>=9410&&browserPort<9500){
+    const id=path.basename(value).match(/^chrome-profile-l1-(x-[a-f0-9]{24})$/)?.[1];
+    return !!id&&path.resolve(value)===path.resolve(home,'chrome-profile-l1-'+id);
+  }
+  if(browserPort!==9336)return false;
   return typeof value === 'string' && path.isAbsolute(value) && !/^(?:\\\\|\/\/)/.test(value) &&
     /[\\/]agent-publish[\\/]x[\\/]chrome-profile$/i.test(path.normalize(value));
 }
@@ -174,8 +180,8 @@ function existingXEditor(url) {
 }
 
 // 只管理本次新建的目标。保留新编辑页及所有旧标签，断开调试连接。
-export async function fillXEditor({ account, profile, job, folder }, connect = connectDedicatedBrowser, { saveDraft = false, publish = false } = {}) {
-  if (!/^[A-Za-z0-9_]{1,15}$/.test(account) || !isDedicatedXProfile(profile) || job.submit !== false ||
+export async function fillXEditor({ account, profile, port:browserPort=9336, job, folder }, connect = connectDedicatedBrowser, { saveDraft = false, publish = false, waitHuman=humanDelay } = {}) {
+  if (!/^[A-Za-z0-9_]{1,15}$/.test(account) || !isDedicatedXProfile(profile,browserPort) || browserPort!==9336&&connect===connectDedicatedBrowser || job.submit !== false ||
       !job.content.trim() || job.content.length > 25000 || job.images.length > 4) {
     throw new Error('X 文图草稿配置或素材未通过校验');
   }
@@ -239,14 +245,14 @@ export async function fillXEditor({ account, profile, job, folder }, connect = c
     evidence.stage = 'fill-text';
     record();
     if (!await identity() || !await view('focus')) throw new Error('X 账号或空白编辑框已变化');
-    await humanDelay();
+    await waitHuman();
     await command('Input.insertText', { text });
     if (job.images.length) {
       const input = await waitFor(() => view('input', false), '未读回完整 X 正文或没有确认空附件区');
       if (!await identity()) throw new Error('设置附件前 X 身份已变化');
       evidence.stage = 'attach-images';
       record();
-      await humanDelay();
+      await waitHuman();
       await command('DOM.setFileInputFiles', { objectId: input, files: job.images });
     }
     const after = await waitFor(async () => {
@@ -264,7 +270,7 @@ export async function fillXEditor({ account, profile, job, folder }, connect = c
     evidence.existingTabsPreserved = true;
     record();
     if (publish) {
-      await humanDelay();
+      await waitHuman();
       evidence.stage = 'publish';
       record();
       const clicked = await evaluate(() => {

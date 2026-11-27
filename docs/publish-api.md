@@ -2,9 +2,11 @@
 
 2026-11-23，按 Liu 11:33 的批准方案及 11:37 补充实现。只使用本机 HTTP；不新建 skill，不改 skill 索引。监听 `127.0.0.1:8787`。沿用 Host、loopback、Origin、Fetch Metadata 和转发头校验；新接口即使在启用口令的模式也只允许本机直连。POST 必须带 `Origin: http://127.0.0.1:8787`。不要传网页口令、Cookie、token 或平台凭据。
 
-所有 JSON 是 UTF-8。POST 的顶层只接受 `type,id,platform,platforms,input,actor,column,scheduledAt,note,mode,assignments`。顶层 `publish`/`submit` 动作仍拒绝；平台动作由 `fill` 的必填 `mode` 决定：`draft` 存草稿、`publish` 直接发布（仅 X、小红书）。公众号只能存草稿，不发表、不群发。
+所有 JSON 是 UTF-8。POST 的顶层只接受 `type,id,platform,platforms,input,actor,column,scheduledAt,note,mode,assignments,accountId`。accountId用于create、select-x-account及X fill明确目标；已有准备记录不能换号。顶层 `publish`/`submit` 动作仍拒绝；平台动作由 `fill` 的必填 `mode` 决定：`draft` 存草稿、`publish` 直接发布（仅 X、小红书）。公众号只能存草稿，不发表、不群发。
 
 建稿（`type:create`）必须同时带 `column`、`scheduledAt`、`actor` 三项：栏目由平台定义，AI读取当次契约的 `columns` 后按内容主旨精确选择其中一个name，不允许未定义名称；定时时间是带时区的 ISO 时间且必须晚于当前时间；AI 来源上报 `runtime` 与会话编号。定时只记录计划发布时间，供状态页展示，**不会自动填写或发布**。`note`（备注）可选，最多 500 字、可换行，只本地保存并显示在状态页。建稿后可用 `type:meta` 单独改栏目、定时或备注。
+
+2026-11-27 X多账户：contract.xAccounts为全部账户，xPublishAccounts只含已确认登录账户。发布页每份可执行原稿提供必选下拉框及「存X草稿」「发布到X」；未登录账号不能选，空选择不能提交。原稿未创建X准备记录前，可用`type:select-x-account,id,accountId`显式选目标；已有准备记录目标固定。`type:fill,platform:x`必须额外传`accountId`，后台再次校验登录状态及目标一致性，再由浏览器核验实际可见账号；不传不默认到原账户。建稿及旧交稿缺省账户仍兼容default，本条优先于旧的X执行例子。
 
 栏目初始为AI热点新闻、AI实战详解、AI工具分享。工具分享包含GitHub项目、Skill、工具和插件介绍；完整教程及排错过程归实战。栏目保存到本地publish_columns表，页面可新建、修改名称/说明，改名同步所有相关记录，重启后保持；未来名单以接口为准，不写死三项。旧单平台交稿也读取动态名单。历史两栏目整理见[前次记录](columns-20261124.md)。
 

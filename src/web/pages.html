@@ -19,6 +19,7 @@
 <script src="/static/health.js"></script>
 <script src="/static/mt.js"></script>
 <script src="/static/publish-prep.js"></script>
+<script src="/static/x-accounts-ui.js"></script>
 <script>
 let O = null, F = {}, timer = null, pick = null, pendingAction = null, actionError = '', libraryQuery = '', libraryPlatform = '', libraryPage = 0, calendarOffset = 0, focusedPlatform = '';
 const dayStr = (d) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
@@ -165,7 +166,8 @@ function vSystem() {
   <div class="grid g2 system-summary">${tile('采集安排',O.health?.schedule?.enabled?'每天零点采集昨日作品':'手动采集', '手动更新：今天00:00至点击时发布的作品；读取时的累计指标')}${tile('当前任务',active?`${esc(PN[active.platform])} ${esc(actionName(active))}中`:'暂无进行中的任务',active?'完成后会自动显示结果':'结果会保留在对应平台下方')}</div>
   ${pendingAction?'<div class="system-notice" role="status">正在提交操作，请稍候…</div>':''}${actionError?`<div class="system-notice error" role="alert">${esc(actionError)}</div>`:''}
   ${sec('常用平台')}${!platforms.length?'<p class="note">尚未选择常用平台，请在下方自由选择，或直接打开某个平台登录。</p>':''}
-  <div class="grid g3 system-accounts">${platforms.map(platform=>{
+  ${xAccountCards(O)}
+  <div class="grid g3 system-accounts">${platforms.filter(platform=>platform!=='x').map(platform=>{
     const s=O.health?.platforms?.[platform]||{},last=s.last,running=s.state==='running',summary=(O.accountSummaries||[]).find(a=>a.platform===platform),confirmedAt=s.identity?.confirmedAt;
     const native=O.platforms?.find(p=>p.id===platform)?.native,configured=s.account&&!s.account.startsWith('尚未配置'),loggedIn=(s.loginStatus?.state || (confirmedAt?'logged_in':'unknown'))==='logged_in';
     const remaining=last?.progress?.deadline?Math.max(0,Math.ceil((Date.parse(last.progress.deadline)-Date.now())/60000)):null;
@@ -175,7 +177,7 @@ function vSystem() {
   }).join('')}</div>
   <p class="note system-intro">更新数据时会自动确认账号，无需先点登录。仅首次使用或登录失效时需要登录；刷新工作台不会退出平台账号。</p>
   ${platformPickerHTML(O)}
-  <details class="panel system-advanced"><summary>采集范围与运行说明</summary><p class="note">「更新今日作品数据」采集北京时间当天00:00至点击时发布的作品，同时采流量、采粉丝，并生成本地日报。指标是逐篇读取时的累计值，不是全账号这段时间新增的流量。缺失数据保留为「暂无」。</p><p class="note">${O.health?.schedule?.enabled?'已配置每天北京时间00:00采集昨日作品，仅处理有登录成功记录的平台。定时任务在Codex自动化中管理；电脑、Codex与工作台需保持运行。':'尚未启用零点定时采集。'}自动保活和自动发送日报未开启。</p><p class="note">登录或采集窗口在这台电脑上打开。发布用的窗口在「准备发布」中单独操作。</p><div class="btns">${platforms.map(platform=>O.publishPrep?.[platform]?.inspectEnabled?abtn({type:'doctor',platform},`检查账号 · ${PN[platform]}`):'').join('')}</div></details>
+  <details class="panel system-advanced"><summary>采集范围与运行说明</summary><p class="note">「更新今日作品数据」采集北京时间当天00:00至点击时发布的作品，同时采流量、采粉丝，并生成本地日报。指标是逐篇读取时的累计值，不是全账号这段时间新增的流量。缺失数据保留为「暂无」。</p><p class="note">${O.health?.schedule?.enabled?'已配置每天北京时间00:00采集昨日作品，仅处理有登录成功记录的平台。定时任务在Codex自动化中管理；电脑、Codex与工作台需保持运行。':'尚未启用零点定时采集。'}自动保活和自动发送日报未开启。</p><p class="note">登录或采集窗口在这台电脑上打开。发布用的窗口在「准备发布」中单独操作。</p><div class="btns">${platforms.map(platform=>O.publishPrep?.[platform]?.inspectEnabled?abtn({type:'doctor',platform,...(platform==='x'?{accountId:O.xAccountId||'default'}:{})},`检查账号 · ${PN[platform]}`):'').join('')}</div></details>
   <details class="panel system-advanced"><summary>同龄自动采样 · ${O.health?.ageSampling?.enabled?'已开启':'已关闭'}</summary>
     <p class="note">在作品满 1、3、7 天前读取指标。错过后 6 小时内补采一次，结果标为迟采。</p>
     <p class="note">处理这些平台中有准确发布时间且登录已确认的已入库作品。${(O.health?.ageSampling?.platforms||[]).map(p=>esc(PN[p])).join('、')}。</p>

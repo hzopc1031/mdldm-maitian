@@ -173,7 +173,7 @@ function render() {
   $('#screen').innerHTML = `
   <div class="top"><a class="logo" href="/">麦<i>田</i></a><div class="tag">内容工作台</div>
     ${workbenchNav('board',O.siteOn)}
-    <div class="lights">${healthLights(h)}</div>
+    ${xAccountPicker(O)}<div class="lights">${healthLights(h)}</div>
     <div class="clock" id="clock"></div></div>
 
   ${PL.length ? `<div class="r1">
@@ -212,7 +212,7 @@ function tick() {
   }
 }
 async function load() {
-  try { const r = await fetch('/api/overview'); if (!r.ok) throw new Error(r.status); O = await r.json(); if (!O.siteOn) PL = PL.filter(p => p !== 'zsz'); else { if (O.siteName) PN.zsz = O.siteName; if (O.siteLogo) LOGO.zsz = { img: '/site-logo' }; } render(); }
+  try { O = await api('/api/overview'); if (!O.siteOn) PL = PL.filter(p => p !== 'zsz'); else { if (O.siteName) PN.zsz = O.siteName; if (O.siteLogo) LOGO.zsz = { img: '/site-logo' }; } render(); }
   catch (e) { $('#screen').innerHTML = `<div class="empty" role="alert">页面加载失败，请刷新重试（${esc(e.message)}）</div>`; console.error(e); }
 }
 const tip = $('#tip');
