@@ -54,3 +54,5 @@
 - 2026-11-27 21:23 评论浏览器准备：原默认账户只有连接、无监听即失败，现精确匹配本地x-publish公开路由后launch复用/启动，再双重核PID/profile与/home账号。只清自有标签，不关共享Chrome。原失败d071adae-ee71-4323-b061-4cd2ebf7889b本轮未resume，11表及历史保持；由原AI原ID续办。证据evidence/comments-no-listener-20261127/执行记录.md。
 
 - 2026-11-27 评论回复框教训：实际X可有嵌套dialog和无status链接的预览，不能只增加等待或按外层dialog数量失败；先核真实DOM，以唯一编辑器及已验目标快照/背景精确链接核作者全文时间，提交前仍核。不因修复自动resume，真实空白框不等于实发。见evidence/comment-composer-20261127/执行记录.md。
+
+- 2026-11-27 提交后核验教训：Page.navigate超时不等于未发，也不能无事件证据认定beforeunload/代理。新评论可能早于父祖加载；保存候选并用独立自有标签等待完整关系。unknown只读type:verify可核验原ID收敛sent，绝不resume/重发；原attempts/actor保持。本条原评论已核验sent，证据evidence/comment-verification-20261127/执行记录.md。

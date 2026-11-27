@@ -12,7 +12,7 @@ import { authPage, cleanTarget, isLoopback, localRequestAllowed } from './web-au
 import { createPrepService, BROWSER_BLOCK } from './publish-prep.mjs';
 import {createPostService} from './publish-posts.mjs';
 import {createCommentService} from './comment-service.mjs';
-import {executeXComment} from './x-comment-executor.mjs';
+import {executeXComment,verifyXComment} from './x-comment-executor.mjs';
 import {createCommentsHttp} from './comments-http.mjs';
 import {readPrepStatus} from './prep-status.mjs';
 import {platformRules} from './platform-rules.mjs';
@@ -44,7 +44,7 @@ function collectionSchedule() {
 }
 const prep = createPrepService({ db, config, home, root: ROOT, secrets: [W.key, W.widgetToken],canUseXAccount });
 const posts=createPostService({db,home,config,prep,canUseXAccount});
-const comments=createCommentService({db,home,config,secrets:[W.key,W.widgetToken],canUseAccount:canUseXAccount,isExternalBusy:()=>actions.some(a=>!a.done)||prep.busy()||posts.busy(),execute:(r,ctx)=>executeXComment(r,ctx,{config,db})});
+const comments=createCommentService({db,home,config,secrets:[W.key,W.widgetToken],canUseAccount:canUseXAccount,isExternalBusy:()=>actions.some(a=>!a.done)||prep.busy()||posts.busy(),execute:(r,ctx)=>executeXComment(r,ctx,{config,db}),verify:(r,ctx)=>verifyXComment(r,ctx,{config,db})});
 const commentsHttp=createCommentsHttp({service:comments,accounts:xPublishAccounts,home,send,secrets:[W.key,W.widgetToken]});
 const videoJobs=videoPrefillJobs(db,{redact:value=>redactL1(value,[W.key,W.widgetToken])});
 const videoPublications=videoPrefillPublications(db,videoJobs);

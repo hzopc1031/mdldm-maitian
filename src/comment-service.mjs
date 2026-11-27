@@ -27,7 +27,7 @@ export function normalizeComment(input,config,db){
  if(root.id===target.id&&root.handle!==target.handle)fail('INVALID_INPUT','同一statusId的原帖与回复对象作者不一致');
  return {platform:'x',accountId:input.accountId,account,root,target,content,requestId:input.requestId};
 }
-export function createCommentService({db,config,home,canUseAccount=()=>false,isExternalBusy=()=>false,execute,secrets=[],clock=()=>new Date()}){
+export function createCommentService({db,config,home,canUseAccount=()=>false,isExternalBusy=()=>false,execute,verify,secrets=[],clock=()=>new Date()}){
  db.exec(`CREATE TABLE IF NOT EXISTS comment_jobs(id TEXT PRIMARY KEY,semantic_key TEXT UNIQUE NOT NULL,state TEXT NOT NULL,record TEXT NOT NULL);
  CREATE TABLE IF NOT EXISTS comment_requests(account_id TEXT NOT NULL,request_id TEXT NOT NULL,job_id TEXT NOT NULL,payload_hash TEXT NOT NULL,actor TEXT NOT NULL,created_at TEXT NOT NULL,PRIMARY KEY(account_id,request_id));`);
  const at=()=>clock().toISOString();
@@ -47,6 +47,14 @@ export function createCommentService({db,config,home,canUseAccount=()=>false,isE
   return scoped;
  };
  const clean=error=>redactL1(error?.message||'评论执行失败',secrets).slice(0,2400);
+ const checkedReceipt=(r,receipt)=>{
+  const url=commentUrl(receipt?.url);
+  if(!r.submissionIntentAt||receipt?.verified!==true||receipt.account?.toLowerCase()!==r.account.toLowerCase()||url.handle!==r.account.toLowerCase()||url.id===r.target.id||url.id===r.root.id||receipt.parentId!==r.target.id||receipt.rootId!==r.root.id||receipt.content!==r.content||!Number.isFinite(Date.parse(receipt.verifiedAt))||Date.parse(receipt.verifiedAt)<Date.parse(r.startedAt)||Date.parse(receipt.verifiedAt)>clock().getTime()+30000)fail('INVALID_RECEIPT','缺少账号、完整正文、父对象及原帖关系的核验回执；结果未确认');
+  return url;
+ };
+ const markSent=(r,receipt,url)=>{
+  Object.assign(r,{state:'sent',url:url.url,replyId:url.id,verifiedAt:receipt.verifiedAt,proof:{basis:'visible_conversation',rootId:receipt.rootId,parentId:receipt.parentId,replyId:url.id},updatedAt:at()});delete r.error;delete r.code;
+ };
  async function drain(){
   if(busy()||isExternalBusy())return;
   let r;db.exec('BEGIN IMMEDIATE');
@@ -66,11 +74,10 @@ export function createCommentService({db,config,home,canUseAccount=()=>false,isE
      r.context={root:cleanCard(context.root,r.root),target:cleanCard(context.target,r.target),observedAt:at()};save(r);
     },
     onStage:stage=>{if(['checking_account','checking_target','writing','submitting','verifying'].includes(stage)){r.progress=stage;r.updatedAt=at();save(r);}},
+    onCandidate:value=>{const candidate=commentUrl(value);if(!r.submissionIntentAt||candidate.handle!==r.account.toLowerCase()||[r.root.id,r.target.id].includes(candidate.id))fail('INVALID_RECEIPT','待核验链接与本账号新评论不符');r.candidateUrl=candidate.url;r.candidateObservedAt=at();save(r);},
     beforeSubmit:()=>{if(r.submissionIntentAt)fail('REPEAT_BLOCKED','同一任务只能提交一次');preflight(r);r.submissionIntentAt=at();r.mayHaveSent=true;r.progress='submitting';r.updatedAt=at();save(r);}
    });
-   const url=commentUrl(receipt?.url);
-   if(!r.submissionIntentAt||receipt?.verified!==true||receipt.account?.toLowerCase()!==r.account.toLowerCase()||url.handle!==r.account.toLowerCase()||url.id===r.target.id||url.id===r.root.id||receipt.parentId!==r.target.id||receipt.rootId!==r.root.id||receipt.content!==r.content||!Number.isFinite(Date.parse(receipt.verifiedAt))||Date.parse(receipt.verifiedAt)<Date.parse(r.startedAt)||Date.parse(receipt.verifiedAt)>clock().getTime()+30000)fail('INVALID_RECEIPT','缺少账号、完整正文、父对象及原帖关系的核验回执；结果未确认');
-   Object.assign(r,{state:'sent',url:url.url,replyId:url.id,verifiedAt:receipt.verifiedAt,proof:{basis:'visible_conversation',rootId:receipt.rootId,parentId:receipt.parentId,replyId:url.id},finishedAt:at(),updatedAt:at()});delete r.error;delete r.code;
+   const url=checkedReceipt(r,receipt);markSent(r,receipt,url);r.finishedAt=at();
   }catch(error){Object.assign(r,{state:!r.submissionIntentAt&&error.safeBeforeSubmit===true?'failed':'unknown',mayHaveSent:!!r.submissionIntentAt,code:error.code||'EXECUTION_UNCONFIRMED',error:clean(error),finishedAt:at(),updatedAt:at()});}
   finally{r.attempts=[...(r.attempts||[]),{startedAt:r.startedAt,finishedAt:at(),state:r.state,code:r.code||null,error:r.error||null,submissionIntentAt:r.submissionIntentAt||null,resumedBy:r.resumedBy||null}];try{save(r);}finally{pumping=false;}}
  }
@@ -100,11 +107,29 @@ export function createCommentService({db,config,home,canUseAccount=()=>false,isE
   preflight(r);r.state='queued';delete r.error;delete r.code;r.resumedBy=actor;r.updatedAt=at();save(r);queueMicrotask(()=>void drain());return r;
  }
  function cancel(id){const r=get(id);if(!['queued','paused'].includes(r.state))fail('REPEAT_BLOCKED','只能取消尚未开始的任务，不能撤销已发送或未知结果');r.state='cancelled';r.updatedAt=at();save(r);return r;}
+ async function verifyExisting(id,value,caller){
+  const actor=normalizePrepAgent(caller),candidate=commentUrl(value),r=get(id);
+  if(r.state==='sent'&&r.url===candidate.url)return r;
+  if(r.state!=='unknown'||!r.submissionIntentAt||!r.mayHaveSent)fail('REPEAT_BLOCKED','只读补验仅接受有提交意图的unknown原记录');
+  if(candidate.handle!==r.account.toLowerCase()||[r.root.id,r.target.id].includes(candidate.id))fail('INVALID_INPUT','核验链接须为本账号新评论');
+  if(busy()||isExternalBusy())fail('BUSY','另有平台操作正在进行，请稍后只读核验');
+  if(typeof verify!=='function')fail('VERIFY_UNAVAILABLE','只读核验未配置');
+  preflight(r);pumping=true;const startedAt=at();
+  try{
+   const folder=path.join(home,'data','comments',r.id);fs.mkdirSync(folder,{recursive:true});
+   const receipt=await verify(r,{folder,url:candidate.url}),url=checkedReceipt(r,receipt);
+   if(url.id!==candidate.id)fail('INVALID_RECEIPT','核验回执并非指定评论');
+   r.verificationChecks=[...(r.verificationChecks||[]),{startedAt,finishedAt:at(),actor,url:candidate.url,verified:true,previousError:r.error||null}];
+   markSent(r,receipt,url);r.reconciledAt=at();
+  }catch(error){r.verificationChecks=[...(r.verificationChecks||[]),{startedAt,finishedAt:at(),actor,url:candidate.url,verified:false,error:clean(error)}];r.updatedAt=at();}
+  finally{try{save(r);}finally{pumping=false;}}
+  return r;
+ }
  function list({accountId:filter,state,limit=50,offset=0}={}){
   if(filter!==undefined)accountId(filter);if(state&&!COMMENT_STATES.includes(state))fail('INVALID_INPUT','未知评论状态');
   if(!Number.isInteger(limit)||limit<1||limit>200||!Number.isInteger(offset)||offset<0||offset>100000)fail('INVALID_INPUT','分页参数无效');
   const rows=db.prepare('SELECT record FROM comment_jobs ORDER BY rowid DESC').all().map(row=>JSON.parse(row.record)).filter(r=>!filter||r.accountId===filter),filtered=rows.filter(r=>!state||r.state===state);
   return {records:filtered.slice(offset,offset+limit),total:filtered.length,limit,offset,counts:Object.fromEntries(COMMENT_STATES.map(s=>[s,rows.filter(r=>r.state===s).length]))};
  }
- return {enqueue,resume,cancel,get,list,drain,busy};
+ return {enqueue,resume,cancel,verify:verifyExisting,get,list,drain,busy};
 }

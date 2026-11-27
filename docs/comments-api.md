@@ -67,3 +67,11 @@ curl.exe -sS -H 'Content-Type: application/json' -H 'Origin: http://127.0.0.1:87
 ## 2026-11-27 回复框定位修正
 
 兼容X嵌套dialog及没有status时间链接的目标预览；沿用加载等待。无链接预览必须与已验证目标快照和背景精确status对象的作者、全文、时间一致，聚焦/读回/提交前均检查，非空草稿或多编辑器停止。真实空白框核验通过，未发送；原失败任务由调用AI沿原IDresume。证据见../../evidence/comment-composer-20261127/执行记录.md。
+
+## unknown只读补验（2026-11-27）
+
+先停止发送，找到本账号疑似公开评论链接后可POST `{type:"verify",id:"原ID",url:"https://x.com/本账号/status/新评论ID",actor:{runtime:"codex",sessionId:"本次真实会话ID"}}`（同源Origin/JSON必带）。接口只核/home身份及公开作者、全文、发布时间窗口、原帖和直接父对象，不打开回复框/输入/点击提交，不排入发送队列。忙碌返回409；HTTP200后仍须看record.state，完整证明才unknown→sent，失败仍unknown并记verificationChecks。sent相同链接再次verify幂等。不得用verify绕过unknown锁再次发。原attempts、来源和提交意图保留。
+
+新执行提交后保存candidateUrl及submitted原始截图，在独立自有标签核验，等待完整父祖关系；不会在刚提交的页面上导航。candidateUrl不代表成功，最终sent/url/proof为准。shot还支持name=submitted。
+
+原ID d071adae-ee71-4323-b061-4cd2ebf7889b现已只读补验sent，公开评论2126313854116474963，禁止resume/重发。证据../../evidence/comment-verification-20261127/执行记录.md。

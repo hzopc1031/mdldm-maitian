@@ -23,4 +23,8 @@ for(const options of [{badListener:true},{pidChange:true},{notOwned:true}]){
 const bad=driver({badRoute:true});await assert.rejects(withSharedCommentPage(task,route,async()=>assert.fail(),bad),e=>e.code==='X_BROWSER_ROUTE_MISMATCH');assert.equal(bad.events.length,0);
 await assert.rejects(withSharedCommentPage(task,{...route,port:9337},async()=>assert.fail(),driver()),e=>e.code==='X_BROWSER_ROUTE_MISMATCH');
 await assert.rejects(withSharedCommentPage(task,route,async()=>{throw Object.assign(Error('identity mismatch'),{code:'ACCOUNT_MISMATCH'});},driver()),e=>e.code==='ACCOUNT_MISMATCH');
+const isolated=driver({listening:true});let tabs=0,closed=[];
+isolated.Page.attach=async()=>{const id=++tabs;return {_owned:true,_port:9336,targetId:'owned-'+id,goto:async url=>isolated.events.push(['tab-goto',id,url]),eval:async()=>({handle:'WorkDemo'}),screenshot:async()=>{},typeText:async()=>assert.fail('Reader cannot type'),closeOwned:async()=>closed.push(id)};};
+await withSharedCommentPage(task,route,page=>page.withReadOnlyPage(async reader=>{assert.equal(reader.type,undefined);assert.equal(tabs,2);await reader.goto('https://x.com/WorkDemo/status/999');}),isolated);
+assert.deepEqual(closed,[2,1]);assert.equal(isolated.events.filter(e=>e[0]==='tab-goto')[0][1],2,'proof navigation only on separate owned reader');
 console.log('COMMENT BROWSER PASS: absent listener starts, existing listener reuses, public account/profile/port routing matches, PID changes/mismatches stop, owned tab only, no typing/submission. Injected driver; no Chrome or platform access.');

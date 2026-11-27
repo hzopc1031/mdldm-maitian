@@ -31,7 +31,8 @@ export async function withSharedCommentPage(task,{profile,port},fn,driver){
   const again=await driver.verifyBrowserProfile(port,profile);
   if(owner.pids[0]!==again.pids?.[0]||!sameProfile(again.profile,profile))throw Error('连接后浏览器归属变化');
   phase='operation';
-  return await fn({goto:url=>page.goto(url),evaluate:(fn,...args)=>page.eval(`(${fn.toString()})(...${JSON.stringify(args)})`),type:content=>page.typeText(content),screenshot:file=>page.screenshot(file)});
+  return await fn({goto:url=>page.goto(url),evaluate:(fn,...args)=>page.eval(`(${fn.toString()})(...${JSON.stringify(args)})`),type:content=>page.typeText(content),screenshot:file=>page.screenshot(file),
+   withReadOnlyPage:read=>withSharedCommentPage(task,{profile,port},p=>read({goto:p.goto,evaluate:p.evaluate,screenshot:p.screenshot}),driver)});
  }catch(error){
   if(phase==='operation')throw error;
   throw Object.assign(Error(`X专用浏览器启动或连接未就绪：${error.message}；未发送，请检查专用窗口后沿原ID恢复`),{code:'X_BROWSER_UNAVAILABLE'});
@@ -59,16 +60,20 @@ export async function withCommentPage(task,{config,db},fn){
  if(scoped._xAccountRoute){
   const {withL1Browser}=await import('./l1-browser.mjs');
   return withL1Browser(scoped,async(_,connection)=>{
+   const run=async callback=>{
    const {targetId}=await connection.send('Target.createTarget',{url:'about:blank'});
    const {sessionId}=await connection.send('Target.attachToTarget',{targetId,flatten:true});
    const send=(method,params={})=>connection.send(method,params,sessionId);
    await send('Page.enable');await send('Runtime.enable');
-   return fn({
+   try{return await callback({
     async goto(url){const r=await send('Page.navigate',{url});if(r.errorText)throw Error('X页面导航失败');await delay(1500);},
     async evaluate(fn,...args){const r=await send('Runtime.evaluate',{expression:`(${fn.toString()})(...${JSON.stringify(args)})`,returnByValue:true,awaitPromise:true});if(r.exceptionDetails)throw Error('X页面控件读取失败');return r.result.value;},
     type:content=>send('Input.insertText',{text:content}),
-    async screenshot(file){const r=await send('Page.captureScreenshot',{format:'png'});fs.writeFileSync(file,Buffer.from(r.data,'base64'));}
-   });
+    async screenshot(file){const r=await send('Page.captureScreenshot',{format:'png'});fs.writeFileSync(file,Buffer.from(r.data,'base64'));},
+    withReadOnlyPage:read=>run(p=>read({goto:p.goto,evaluate:p.evaluate,screenshot:p.screenshot}))
+   });}finally{await connection.send('Target.closeTarget',{targetId}).catch(()=>{});}
+   };
+   return run(fn);
   },'x');
  }
  const settings=scoped.publishPrep?.x,profile=settings?.browserProfile,port=settings?.browserPort??9336;
@@ -78,7 +83,37 @@ export async function withCommentPage(task,{config,db},fn){
  const {listAccounts}=await import(pathToFileURL(path.join(root,'x-publish/scripts/lib/accounts.mjs')).href);
  return withSharedCommentPage(task,{port,profile},fn,{...cdp,listAccounts});
 }
-export async function executeXComment(task,{folder,beforeSubmit,onStage=()=>{},onContext=()=>{}},{config,db,withPage=withCommentPage,wait=delay,now=()=>new Date()}={}){
+async function confirmIdentity(page,task,url,wait){
+ for(let i=0;i<20;i++){
+  const s=await page.evaluate(visibleXIdentity),handle=s.handle?.replace(/^@/,'').toLowerCase();
+  if(s.login||handle&&handle!==task.account.toLowerCase())throw Error('当前可见登录账户不符或已退出');
+  if(handle===task.account.toLowerCase()&&(!url||s.url.toLowerCase()===url.toLowerCase()))return;
+  await wait(300);
+ }
+ throw Error('未确认指定页面上的当前登录账户');
+}
+async function readCommentProof(task,page,url,folder,wait,now){
+ const candidate=commentUrl(url);
+ if(candidate.handle!==task.account.toLowerCase()||[task.root.id,task.target.id].includes(candidate.id))throw Error('核验链接并非本账号的新评论');
+ await page.goto('https://x.com/home');await confirmIdentity(page,task,'https://x.com/home',wait);
+ await page.goto(candidate.url);let focus,lastError;
+ // X may render the new reply before its conversation ancestors. Wait for the
+ // entire parent/root proof, not merely for the new reply card to appear.
+ for(let i=0;i<40;i++){
+  await confirmIdentity(page,task,candidate.url,wait);
+  try{focus=verifyCommentContext(await page.evaluate(commentPageView),task,candidate.url);break;}catch(error){lastError=error;}
+  await wait(300);
+ }
+ if(!focus)throw lastError||Error('完整评论会话未加载');
+ const upper=task.state==='unknown'?Date.parse(task.finishedAt)+30000:now().getTime()+30000;
+ if(!Number.isFinite(Date.parse(focus.createdAt))||!Number.isFinite(upper)||Date.parse(focus.createdAt)<Date.parse(task.submissionIntentAt||task.startedAt)-30000||Date.parse(focus.createdAt)>upper)throw Error('评论发布时间不属于本次执行，未确认结果');
+ await page.screenshot(path.join(folder,'after.png'));
+ return {verified:true,account:task.account,content:focus.content,url:candidate.url,rootId:task.root.id,parentId:task.target.id,verifiedAt:now().toISOString()};
+}
+export async function verifyXComment(task,{folder,url},{config,db,withPage=withCommentPage,wait=delay,now=()=>new Date()}={}){
+ return withPage(task,{config,db},page=>readCommentProof(task,page,url,folder,wait,now));
+}
+export async function executeXComment(task,{folder,beforeSubmit,onStage=()=>{},onContext=()=>{},onCandidate=()=>{}},{config,db,withPage=withCommentPage,wait=delay,now=()=>new Date()}={}){
  let intent=false;
  try{return await withPage(task,{config,db},async page=>{
   const until=async(fn,message)=>{for(let i=0;i<20;i++){const value=await fn();if(value)return value;await wait(300);}throw Error(message);};
@@ -106,6 +141,7 @@ export async function executeXComment(task,{folder,beforeSubmit,onStage=()=>{},o
   await identity();await page.screenshot(path.join(folder,'before.png'));
   await beforeSubmit();intent=true;onStage('submitting');
   if(!await page.evaluate(commentComposer,...args,'submit',target))throw Error('提交前回复对象、身份或正文变化，结果未确认');
+  await page.screenshot(path.join(folder,'submitted.png')).catch(()=>{});
   onStage('verifying');let candidate;
   for(let i=0;i<24&&!candidate;i++){
    await wait(500);await identity();const view=await page.evaluate(commentPageView);
@@ -116,12 +152,9 @@ export async function executeXComment(task,{folder,beforeSubmit,onStage=()=>{},o
    if(candidates.length>1)throw Error('出现多个可能的新评论，无法唯一核验，禁止重发');candidate=candidates[0];
   }
   if(!candidate)throw Error('未取得本次评论公开链接，发送结果未确认，禁止重发');
-  await page.goto(candidate);await identity(candidate);
-  const proof=await until(async()=>{const v=await page.evaluate(commentPageView);return v.cards.some(c=>c.id===commentUrl(candidate).id)?v:null;},'新评论页面未完成加载');
-  const focus=verifyCommentContext(proof,task,candidate);
-  if(!Number.isFinite(Date.parse(focus.createdAt))||Date.parse(focus.createdAt)<Date.parse(task.startedAt)-30000)throw Error('评论发布时间不属于本次执行，未确认结果');
-  await page.screenshot(path.join(folder,'after.png'));
-  return {verified:true,account:task.account,content:focus.content,url:candidate,rootId:task.root.id,parentId:task.target.id,verifiedAt:now().toISOString()};
+  await onCandidate(candidate);
+  if(!page.withReadOnlyPage)throw Error('缺少独立只读核验标签，禁止导航提交页');
+  return page.withReadOnlyPage(reader=>readCommentProof(task,reader,candidate,folder,wait,now));
  });}catch(error){
   if(!intent&&error.code!=='POSSIBLE_EXISTING')error.safeBeforeSubmit=true;
   throw error;

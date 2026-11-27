@@ -18,8 +18,11 @@ const {commentPage}=await import('../src/web/comment-page.js');
 const db=new DatabaseSync(path.join(home,'comments.db')),config={xHandle:'WorkDemo',publishPrep:{x:{browserExecution:true}},l1:{x:{browserExecution:true}}};
 initXAccounts(db);const extra=createXAccount(db,{label:'旅行账户'});bindXAccount(db,extra.id,'TravelDemo',config.xHandle);
 const actor={runtime:'codex',sessionId:'offline-comment-test'},other={runtime:'dsh',sessionId:'offline-second-agent'};
-let externalBusy=true,signed=true,calls=[],mode='success';
-const options={db,config,home,canUseAccount:()=>signed,isExternalBusy:()=>externalBusy,execute:async(r,ctx)=>{
+let externalBusy=true,signed=true,calls=[],mode='success',verificationMode='bad';
+const options={db,config,home,canUseAccount:()=>signed,isExternalBusy:()=>externalBusy,verify:async(r,ctx)=>{
+ assert.equal(service.busy(),true);assert.equal(ctx.url,'https://x.com/workdemo/status/9999');
+ return {verified:true,account:r.account,content:verificationMode==='bad'?'wrong':r.content,url:ctx.url,rootId:r.root.id,parentId:r.target.id,verifiedAt:new Date().toISOString()};
+},execute:async(r,ctx)=>{
  calls.push(r.id);ctx.onStage('checking_target');
  if(mode==='before')throw Object.assign(Error('target unavailable'),{safeBeforeSubmit:true});
  await ctx.beforeSubmit();if(mode==='after')throw Error('response lost');
@@ -67,14 +70,25 @@ try{
   const id=accepted.data.record.id;assert.equal((await request('/api/comments/record?id='+id)).data.record.id,id);
   assert.equal((await request('/api/comments',{type:'cancel',id})).data.record.state,'cancelled');
   assert.equal((await request('/api/comments',{type:'resume',id:unknown.id,actor})).status,409);
+  assert.equal((await request('/api/comments',{type:'verify',id:unknown.id,url:'https://x.com/Other/status/9999',actor})).status,400);
+  assert.equal((await request('/api/comments',{type:'verify',id:unknown.id,url:'https://x.com/WorkDemo/status/9999',actor})).status,409,'busy read-only proof is not launched');
   assert.equal((await request('/api/comments/shot?id='+id+'&name=../../config')).status,400);
  }finally{await new Promise(r=>server.close(r));}
+ externalBusy=false;const executionsBefore=calls.length,attemptsBefore=service.get(unknown.id).attempts;
+ await service.verify(unknown.id,'https://x.com/WorkDemo/status/9999',other);assert.equal(service.get(unknown.id).state,'unknown');assert.equal(service.get(unknown.id).verificationChecks.at(-1).verified,false);
+ verificationMode='good';const reconciled=await service.verify(unknown.id,'https://x.com/WorkDemo/status/9999',other);assert.equal(reconciled.state,'sent');assert.equal(reconciled.actor.runtime,'codex');assert.deepEqual(reconciled.attempts,attemptsBefore);assert.equal(reconciled.verificationChecks.length,2);assert.equal(calls.length,executionsBefore);assert.equal(reconciled.mayHaveSent,true);assert.throws(()=>service.resume(unknown.id,actor));
+ await service.verify(unknown.id,reconciled.url,other);assert.equal(service.get(unknown.id).verificationChecks.length,2,'same sent proof is idempotent');
  // Browser orchestration is injected: verify one submit and exact root/parent/new reply.
  const task={...normalizeComment(input('flow','浏览器流程正文'),config,db),id:'fixture',startedAt:new Date().toISOString()};
  const card=(url,content='public context')=>({...commentUrl(url),content,createdAt:new Date().toISOString()});
  const root=card(task.root.url),parent=card(task.target.url),reply=card('https://x.com/WorkDemo/status/999',task.content);
- let submits=0,intents=0,typed='',currentUrl='',opened=false,afterSubmit=false,identityHandle=task.account;
- const page={goto:async url=>{currentUrl=url;},type:async text=>{typed=text;},screenshot:async()=>{},evaluate:async(fn,...args)=>{
+ let submits=0,intents=0,typed='',currentUrl='',opened=false,afterSubmit=false,identityHandle=task.account,readers=0,readerUrl='',proofReads=0,candidateSaved=false;
+ const reader={goto:async url=>{readerUrl=url;},screenshot:async()=>{},evaluate:async fn=>{
+  if(fn.name==='visibleXIdentity')return {handle:identityHandle,url:readerUrl,login:false};
+  if(fn.name==='commentPageView'){proofReads++;return {url:readerUrl,cards:proofReads<3?[reply]:[root,parent,reply],toastUrls:[]};}
+  assert.fail('Readonly proof must not open/type/submit');
+ }};
+ const page={withReadOnlyPage:async fn=>{assert.equal(candidateSaved,true);assert.equal(reader.type,undefined);readers++;return fn(reader);},goto:async url=>{assert.equal(afterSubmit,false,'Never navigate submitted composer');currentUrl=url;},type:async text=>{typed=text;},screenshot:async()=>{},evaluate:async(fn,...args)=>{
   if(fn.name==='visibleXIdentity')return {handle:identityHandle,url:currentUrl,login:false};
   if(fn.name==='commentPageView')return {url:currentUrl,cards:[root,parent,...(afterSubmit?[reply]:[])],toastUrls:afterSubmit?[reply.url]:[]};
   if(fn.name==='openCommentTarget'){opened=true;return true;}
@@ -82,9 +96,9 @@ try{
   throw Error('Unexpected DOM function '+fn.name);
  }};
  const opts={config,db,withPage:async(r,c,fn)=>fn(page),wait:async()=>{}};
- const ctx={folder:home,beforeSubmit:()=>{intents++;},onStage:()=>{}};
- const proof=await executeXComment(task,ctx,opts);assert.equal(proof.verified,true);assert.equal(proof.parentId,'200');assert.equal(proof.rootId,'100');assert.equal(submits,1);assert.equal(intents,1);
- identityHandle='OtherAccount';await assert.rejects(executeXComment(task,ctx,opts),/账户不符/);assert.equal(submits,1);
+ const ctx={folder:home,beforeSubmit:()=>{intents++;},onStage:()=>{},onCandidate:url=>{assert.equal(url,reply.url.toLowerCase());candidateSaved=true;}};
+ const proof=await executeXComment(task,ctx,opts);assert.equal(proof.verified,true);assert.equal(proof.parentId,'200');assert.equal(proof.rootId,'100');assert.equal(submits,1);assert.equal(intents,1);assert.equal(readers,1);assert.equal(proofReads,3,'wait for complete ancestors, not just reply');
+ afterSubmit=false;identityHandle='OtherAccount';await assert.rejects(executeXComment(task,ctx,opts),/账户不符/);assert.equal(submits,1);
  assert.throws(()=>verifyCommentContext({url:reply.url,cards:[root,reply]},task,reply.url),/直接回复/);
  assert.throws(()=>verifyCommentContext({url:task.target.url,cards:[parent]},task),/原帖关系/);
  assert.throws(()=>verifyCommentContext({url:reply.url,cards:[root,parent,{...reply,content:'wrong'}]},task,reply.url),/全文/);
