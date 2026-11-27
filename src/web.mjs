@@ -23,7 +23,7 @@ import { videoPrefillPublications } from './video-prefill-publications.mjs';
 import {ageSamplingSchema,agePlatforms,dueAgeSamples,saveAgeAttempt} from './l1-age-sampling.mjs';
 import { drainProjectDrafts, prepRequestLimit } from './prep-intake.mjs';
 import { l1Account } from './l1-account.mjs';
-import {initXAccounts,listXAccounts,createXAccount,xAccountConfig,resolveXRecord,xFollowerRows} from './x-accounts.mjs';
+import {initXAccounts,listXAccounts,createXAccount,deleteUnboundXAccount,xAccountConfig,resolveXRecord,xFollowerRows} from './x-accounts.mjs';
 import { configuredSummaries,accountSummary } from './l1-summary.mjs';
 import { displayNick } from './web-text.mjs';
 import {collectionKey} from './l1-collection-window.mjs';
@@ -348,10 +348,15 @@ export async function handle(req, res) {
   if (u.pathname === '/api/l1/status' && req.method === 'GET') {
     try{return send(res,200,{platforms:l1Status(u.searchParams.get('accountId')||'default'),xAccounts:listXAccounts(db,config).map(a=>({...a,status:l1Status(a.id).x})),actions:actions.slice(-8).reverse(),comments:{running:comments.busy(),queued:comments.list({limit:1}).counts.queued}});}catch(error){return send(res,400,{error:error.message});}
   }
-  if(u.pathname==='/api/l1/x-accounts'&&req.method==='POST'){
+  if(u.pathname==='/api/l1/x-accounts'&&['POST','DELETE'].includes(req.method)){
     if(!isLoopback(req.socket.remoteAddress)||req.headers.origin!==`http://${req.headers.host}`||!req.headers['content-type']?.startsWith('application/json'))return send(res,403,{error:'只接受工作台本机页面操作'});
     let raw='';for await(const chunk of req){raw+=chunk;if(Buffer.byteLength(raw)>4096)return send(res,413,{error:'请求过大'});}
-    try{if(actions.some(a=>!a.done)||prep.busy()||comments.busy())return send(res,409,{error:'已有操作在运行，请稍候'});const input=JSON.parse(raw),account=createXAccount(db,input);return send(res,200,{ok:true,account});}catch(error){return send(res,400,{error:error.message});}
+    try {
+      if(actions.some(a=>!a.done)||prep.busy()||comments.busy())return send(res,409,{error:'已有操作在运行，请稍候'});
+      const input=JSON.parse(raw);
+      if(req.method==='DELETE')return send(res,200,{ok:true,id:deleteUnboundXAccount(db,input)});
+      return send(res,200,{ok:true,account:createXAccount(db,input)});
+    } catch(error) {return send(res,400,{error:error.message});}
   }
   if (u.pathname === '/api/prep/status') {
     if(!isLoopback(req.socket.remoteAddress)||!localRequestAllowed(req))return send(res,403,{code:'LOCAL_ONLY',error:'仅允许同源本机直连调用'});
@@ -523,6 +528,10 @@ export async function handle(req, res) {
         try { controlL1(actions.find(record => xActionKey(record) === key && !record.done), a.type); }
         catch (error) { return send(res, 409, { error: error.message }); }
         return send(res, 200, { ok: true });
+      }
+      if(a.platform==='x'&&a.type==='login'&&xId==='default'){
+        try {l1Account(config,'x');}
+        catch {return send(res,400,{error:'原 X 账户尚未配置，请点击「新增 X 账户」后登录。'});}
       }
       if (['doctor', 'sync'].includes(a.type) && config.l1?.[a.platform]?.browserExecution === false) return send(res, 409, { error: BROWSER_BLOCK });
       if (actions.some(x => !x.done) || prep.busy()||comments.busy()) return send(res, 409, { error: '上一个 L1 操作还在跑，等它结束' });

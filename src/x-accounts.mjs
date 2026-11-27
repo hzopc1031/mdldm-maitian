@@ -31,6 +31,15 @@ export function createXAccount(db,input={}){
  db.prepare('INSERT INTO x_accounts VALUES (?,?,NULL,?,?,?,NULL)').run(id,name,profile,port,new Date().toISOString());
  return managedXAccounts(db).find(a=>a.id===id);
 }
+export function deleteUnboundXAccount(db,input){
+ if(!input||typeof input!=='object'||Array.isArray(input)||typeof input.id!=='string'||Object.keys(input).length!==1)throw Error('删除账户只接受账户ID');
+ const id=accountId(input.id);
+ if(id===DEFAULT_X_ACCOUNT)throw Error('原 X 账户不能通过此入口删除');
+ const removed=db.prepare('DELETE FROM x_accounts WHERE id=? AND handle IS NULL AND confirmed_at IS NULL RETURNING id').get(id);
+ if(removed)return removed.id;
+ managedRecord(db,id);
+ throw Error('已绑定的 X 账户不能通过此入口删除');
+}
 function managedRecord(db,id){
  accountId(id);const row=managedXAccounts(db).find(a=>a.id===id);
  if(!row)throw Error('X账户不存在');

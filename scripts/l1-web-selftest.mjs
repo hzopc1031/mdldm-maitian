@@ -86,6 +86,14 @@ try {
   assert.equal((await request('/api/prep/record?id=unknown', { auth: false })).code, 401);
   assert.equal((await post({ type: 'status', platform: 'x' })).code, 200);
   assert.equal(children.length, 0);
+  const {config:liveConfig}=await import('../src/feishu.mjs');
+  const defaultHandle=liveConfig.xHandle;
+  delete liveConfig.xHandle;
+  const unconfiguredLogin=await post({type:'login',platform:'x',accountId:'default'});
+  liveConfig.xHandle=defaultHandle;
+  assert.equal(unconfiguredLogin.code,400);
+  assert.match(unconfiguredLogin.json().error,/新增 X 账户/);
+  assert.equal(children.length,0);
   const health = (await request('/api/overview')).json().health;
   assert.equal(health.mode, 'l1'); assert.equal(health.daemon, false);
   assert.equal(health.doctorDay, undefined); assert.equal(health.login, undefined);
@@ -266,8 +274,9 @@ try {
   vm.runInContext(fs.readFileSync(path.join(root, 'src/web/mt.js'), 'utf8'), context);
   vm.runInContext(fs.readFileSync(path.join(root, 'src/web/health.js'), 'utf8'), context);
   vm.runInContext(fs.readFileSync(path.join(root, 'src/web/x-accounts-ui.js'), 'utf8'), context);
+  const pageActionIndex=listeners.click.length;
   vm.runInContext(fs.readFileSync(path.join(root, 'src/web/pages.html'), 'utf8').match(/<script>([\s\S]*?)<\/script>/)[1], context);
-  const pageActionClick=listeners.click[0];
+  const pageActionClick=listeners.click[pageActionIndex];
   vm.runInContext(fs.readFileSync(path.join(root, 'src/web/publish-prep.js'), 'utf8'), context);
   context.input = (await request('/api/overview')).json();
   vm.runInContext('O = input; F = {};', context);
@@ -283,6 +292,12 @@ try {
   assert.match(html, /准备发布/); assert.match(html, /小红书填好后由你核对发布/);
   assert.match(html, /同时采流量、采粉丝/); assert.match(html, /自动保活和自动发送日报未开启/);
   assert.match(html,/当天00:00至点击时发布的作品/);
+  const normalAccounts=context.input.xAccounts;
+  context.input.xAccounts=[{id:'default',label:'原 X 账户',handle:null},{id:'x-fixture',label:'误建账户',handle:null}];
+  const unboundHtml=vm.runInContext('vSystem()',context);
+  context.input.xAccounts=normalAccounts;
+  assert.doesNotMatch(unboundHtml,/data-x-account="default"/);
+  assert.match(unboundHtml,/data-delete-x-account="x-fixture"/);
   // 每个真实可执行入口都通过 L1 白名单；未适配入口没有动作属性。
   const uiActions = [...html.matchAll(/data-act='([^']+)'/g)].map(m => JSON.parse(m[1].replaceAll('&quot;', '"')));
   assert.equal(uiActions.length, 6);

@@ -167,7 +167,7 @@ function vSystem() {
   <div class="grid g2 system-summary">${tile('采集安排',O.health?.schedule?.enabled?'每天零点采集昨日作品':'手动采集', '手动更新：今天00:00至点击时发布的作品；读取时的累计指标')}${tile('当前任务',active?`${esc(PN[active.platform])} ${esc(actionName(active))}中`:'暂无进行中的任务',active?'完成后会自动显示结果':'结果会保留在对应平台下方')}</div>
   ${pendingAction?'<div class="system-notice" role="status">正在提交操作，请稍候…</div>':''}${actionError?`<div class="system-notice error" role="alert">${esc(actionError)}</div>`:''}
   ${sec('常用平台')}${!platforms.length?'<p class="note">尚未选择常用平台，请在下方自由选择，或直接打开某个平台登录。</p>':''}
-  ${xAccountCards(O)}
+  ${xAccountCards(O, errorText)}
   <div class="grid g3 system-accounts">${platforms.filter(platform=>platform!=='x').map(platform=>{
     const s=O.health?.platforms?.[platform]||{},last=s.last,running=s.state==='running',summary=(O.accountSummaries||[]).find(a=>a.platform===platform),confirmedAt=s.identity?.confirmedAt;
     const native=O.platforms?.find(p=>p.id===platform)?.native,configured=s.account&&!s.account.startsWith('尚未配置'),loggedIn=(s.loginStatus?.state || (confirmedAt?'logged_in':'unknown'))==='logged_in';

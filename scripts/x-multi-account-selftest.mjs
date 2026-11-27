@@ -26,7 +26,7 @@ const {handle,overviewData}=await import('../src/web.mjs');
 const server=http.createServer((req,res)=>handle(req,res).catch(error=>{res.writeHead(500);res.end(JSON.stringify({error:error.message}));}));
 server.listen(0,'127.0.0.1');await once(server,'listening');
 const base='http://127.0.0.1:'+server.address().port;
-async function request(route,body,origin=base){const r=await fetch(base+route,{headers:{...(body?{'content-type':'application/json',origin}:{})},...(body?{method:'POST',body:JSON.stringify(body)}:{})});return {status:r.status,data:await r.json()};}
+async function request(route,body,origin=base,method='POST'){const r=await fetch(base+route,{headers:{...(body?{'content-type':'application/json',origin}:{})},...(body?{method,body:JSON.stringify(body)}:{})});return {status:r.status,data:await r.json()};}
 try{
  initXAccounts(db);
  assert.equal((await request('/api/l1/x-accounts',{label:'跨站测试'},'https://evil.test')).status,403);
@@ -43,6 +43,14 @@ try{
  const fakeLogin=(name,url='https://x.com/home')=>async(c,fn,p)=>{assert.equal(p,'x');return fn({goto:async()=>{},evaluate:async()=>({url,handle:name,login:false}),bringToFront:async()=>{}});};
  await loginX(xAccountConfig(config,a.id,db),{waitLogin:true,withBrowser:fakeLogin('NotebookDemo')});
  await loginX(xAccountConfig(config,b.id,db),{waitLogin:true,withBrowser:fakeLogin('TravelDemo')});
+ assert.equal(xAccountConfig(config,a.id,db)._xAccountRoute.handle,'NotebookDemo');
+ const mistaken=(await request('/api/l1/x-accounts',{label:'误建账户'})).data.account;
+ const removeAccount=(id,origin=base)=>request('/api/l1/x-accounts',{id},origin,'DELETE');
+ assert.equal((await removeAccount(mistaken.id,'https://evil.test')).status,403);
+ for(const id of [a.id,'default'])assert.equal((await removeAccount(id)).status,400);
+ assert.equal((await request('/api/l1/x-accounts',{id:mistaken.id,profile:a.profile},base,'DELETE')).status,400);
+ assert.deepEqual(await removeAccount(mistaken.id),{status:200,data:{ok:true,id:mistaken.id}});
+ assert.equal((await request('/api/l1/status')).data.xAccounts.some(account=>account.id===mistaken.id),false);
  assert.equal(xAccountConfig(config,a.id,db)._xAccountRoute.handle,'NotebookDemo');
  const c=createXAccount(db,{label:'重复账号检测'});
  await assert.rejects(loginX(xAccountConfig(config,c.id,db),{waitLogin:true,withBrowser:fakeLogin('NotebookDemo')}),/另一账户/);
