@@ -1,14 +1,24 @@
-﻿# 交接文件（HANDOFF）
+## 2026-11-27 19:06 原工作台HTTP服务恢复（X日常AI帖调用方）
+
+本栏目正常19点读contract时127.0.0.1:8787连接拒绝10061，实时无监听；停服根因未核实。既有第一方codex-tasks/migration/Start-Maitian.ps1（位于父项目，非repo子目录）经PS/Node语法及路径核验后正常启动只HTTP的l1-web-server.mjs：LauncherPID6660、Node12408、ShowWindow0，contract v4/200及AI热点新闻等当前栏目读回。未停止原进程、改配置/数据库/权限、自启或零点自动化。随后本栏目X已发及外部回执ebe26d13-44a5-4654-83d6-87dd7208b45f核验通过；不称由工作台执行X。细证见D:/Ai Infra Tools/DeepSeek Harness/X日常AI帖/publish-jobs/hot-radar/2026-11-27/1900/execution-notes.md与workbench-start.json。以下零点任务消失调查结论仍有效。
+
+# 交接文件（HANDOFF）
 
 最后更新：2026-11-27（北京时间，原评论已公开并同ID只读补验sent；零点任务仍未恢复）。任何 AI 接手前先读本文件，再按文末「必读顺序」展开。
 
 ## 一句话现状
 
+**2026-11-27 当前代码检查点（Codex，按Liu要求先提交）**：新账户显示窗口问题已定位但尚未修复：show-l1-browser.ps1的ValidateSet只含9340–9347，实际PS5调用以ParameterArgumentValidationError拒绝9410，UI误报暂未就绪。下一步扩展注册新槽端口并保留精确PID/profile验证，做真实空白独立窗口与既有回归验收。X继续已实测jf.x.com/onboarding/web/actions/finish_knowledge_check和api.x.com/1.1/flow/viewer.json均200但不推进，确切业务原因未证实。首轮14:43:40Z正常10分钟超时；第二轮14:45:54Z窗口关闭后结束，关闭者未核实；当前未绑定。没有提交/发布任何新内容。详细证据见根evidence/x-second-login-20261127/和evidence/show-account-window-20261127/。
+
+
 **2026-11-27 新增X账户登录排查中（Codex）**：生活号槽x-6c4a2458a19795d39371ac08/9410未绑定，X账号确认knowledge_check点继续仍停原页；只读归属/脱敏状态已核，尚未证实原因。待本人尝试原生使用密码入口，AI不接触密码/验证码、不更换登录态、不重启或关闭当前窗口。证据[evidence](../../evidence/x-second-login-20261127/执行记录.md)。
+
 
 **2026-11-27 22:05 原评论已公开并同ID补验sent（Codex）**：原ID d071adae-ee71-4323-b061-4cd2ebf7889b实际13:55:02Z已发，公开2126313854116474963作者/全文/root/parent核验通过；不能重发。修复提交页直接导航、候选未落盘及仅等新卡未等祖先的缺口；改独立自有标签完整核验并提供type:verify只读补验，unknown仍不能resume。五项回归/隔离Chrome通过，正式2692→6892、备份及上线前11表不变；随后通过正式verify沿原记录转sent，原3次attempts/提交意图/来源保持、其他10表不变，本轮没有发送。超时确切beforeunload/网络机制未证实。详见[执行记录](../../evidence/comment-verification-20261127/执行记录.md)。
 
+
 **2026-11-27 21:50 评论回复框已修复上线（Codex）**：真实X嵌套dialog与预览time无链接导致旧核验始终失败；改为唯一编辑器、最近dialog，并以已核目标快照比对预览/背景全文、时间、作者及精确原链接，输入读回/提交前重复核验。真实@PeanutPair空白框focus:true、五项回归和隔离延迟/错目标等DOM通过；正式4372→2692，备份及11表/原记录完全保持。原ID d071adae-ee71-4323-b061-4cd2ebf7889b仍failed、mayHaveSent:false、2次尝试，本轮未输入/resume/发送；真实发送仍待原调用AI沿原ID续办。详见[执行记录](../../evidence/comment-composer-20261127/执行记录.md)。
+
 
 **2026-11-27 21:23 评论no listener已修复上线（Codex）**：默认适配器原只连接，9336未监听即失败；现从本地x-publish公开配置精确匹配账户/profile/端口，复用或启动专用浏览器并强验PID，再用自有/home标签核账号。五项回归及真实只读@PeanutPair核验通过，自有标签关闭后9336仍200；正式19736→4372、备份及11表摘要保持，新contract.browserReadiness=reuse_or_start_dedicated。原ID d071adae-ee71-4323-b061-4cd2ebf7889b仍failed、mayHaveSent:false、无意图、1次尝试，未自动resume/发送，由原AI沿原ID继续。本轮未验证真实发送；浏览器先前为何退出未证实。详见[修复记录](../../evidence/comments-no-listener-20261127/执行记录.md)。
 
