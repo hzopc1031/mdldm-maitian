@@ -12,12 +12,12 @@ function xAccountCards(O, errorText){
   return `<section class="panel system-account" data-x-account="${esc(a.id)}">
     <h3>${logo('x')} ${esc(a.label)} ${platformLoginHTML(s)}</h3>
     <p class="system-account-name">${esc(a.handle?'@'+a.handle:'尚未登录绑定')}</p>
-    <p class="note">${a.handle?'已绑定的账号须保持一致。换账号请新增账户。':'在独立窗口完成 X 登录，等麦田确认账号后窗口会自动关闭。'}</p>
+    <p class="note">${a.handle?'已绑定的账号须保持一致。换账号请新增账户。':'在独立窗口完成 X 登录。麦田核验后会在此显示用户名。'}</p>
     <p class="note account-freshness">${esc(a.summary?.freshness?.label||'尚无采集数据')}</p>
     <p class="note system-login-state">${s.identity?.confirmedAt?`最近确认登录：${esc(when(s.identity.confirmedAt))}`:'尚未确认账号登录'}</p>
     <p class="note system-action-scope">更新今天 00:00 至点击时发布的作品数据，并读取当前粉丝数。</p>
     <div class="btns">${action('login',running?'正在登录…':'登录账号',running)}${action('collect','更新今日作品数据',!a.handle||running)}${remove}</div>
-    ${running?`<p role="status">${esc(last?.progress?.message||'操作进行中…')}</p>${last?.type==='login'?`<div class="btns">${action('show-login','显示登录窗口')}${action('cancel-login','取消登录')}</div>`:''}`:lastResult}
+    ${running?`<p role="status">${esc(last?.progress?.message||'操作进行中…')}</p>${last?.type==='login'?`<div class="btns">${last.progress?.stage==='waiting_manual_login'?action('confirm-login','我已登录，核验账号'):''}${action('show-login','显示登录窗口')}${action('cancel-login','取消登录')}</div>`:''}`:lastResult}
   </section>`;
  }).join('');
  return `<section class="panel"><h2 class="h2">X 账户</h2><p class="note">每个账户独立登录、保存数据和选择发布目标，账户数量不固定。备注仅方便区分，不是登录身份。</p><form data-add-x-account class="platform-account-form"><label>账户备注<input name="label" maxlength="60" required placeholder="例如：工作号、生活号"></label><button type="submit" class="btn pri">新增 X 账户</button><p role="status" data-x-account-message></p></form></section><div class="grid g3 system-accounts">${cards}</div>`;

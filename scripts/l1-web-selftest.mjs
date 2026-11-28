@@ -145,6 +145,19 @@ try {
   assert.deepEqual(cancelChild.sent.at(-1),{type:'l1:cancel-login'});
   cancelChild.stderr.emit('data','已取消登录');cancelChild.emit('close',1);
   assert.equal((await post({type:'show-login',platform:'x'})).code,409);
+  const {createXAccount}=await import('../src/x-accounts.mjs');
+  const manual=createXAccount(db,{label:'手动登录回执'});
+  const manualTarget={platform:'x',accountId:manual.id};
+  assert.equal((await post({type:'login',...manualTarget})).code,200);
+  const manualChild=children.at(-1).child;
+  assert.equal((await post({type:'confirm-login',...manualTarget})).code,409);
+  manualChild.emit('message',{type:'l1:progress',stage:'waiting_manual_login',timeoutMs:10000});
+  const manualStatus=(await request('/api/l1/status?accountId='+manual.id)).json().platforms.x;
+  assert.match(manualStatus.last.progress.message,/我已登录，核验账号/);
+  assert.equal((await post({type:'confirm-login',...manualTarget})).code,200);
+  assert.deepEqual(manualChild.sent.at(-1),{type:'l1:confirm-login'});
+  manualChild.emit('close',1);
+  db.prepare('DELETE FROM x_accounts WHERE id=?').run(manual.id);
   // The QR page is explicit logout evidence; a window/read failure alone is not.
   await post({type:'login',platform:'wechat'});
   const qrChild=children.at(-1).child;

@@ -524,7 +524,7 @@ export async function handle(req, res) {
       try{if(a.platform==='x')xAccountConfig(config,a.accountId||'default',db);}catch(error){return send(res,400,{error:error.message});}
       const xId=a.accountId||'default',key=xActionKey(a);
       if (a.type === 'status') return send(res, 200, l1Status(xId)[a.platform]);
-      if (['show-login', 'cancel-login'].includes(a.type)) {
+      if (['show-login', 'cancel-login','confirm-login'].includes(a.type)) {
         try { controlL1(actions.find(record => xActionKey(record) === key && !record.done), a.type); }
         catch (error) { return send(res, 409, { error: error.message }); }
         return send(res, 200, { ok: true });

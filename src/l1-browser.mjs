@@ -41,7 +41,7 @@ export function browserSettings(config, platform = 'xhs') {
   if (!binary) throw new Error('找不到 Chrome 程序，请配置 chromeBinary');
   return { profile, port, binary };
 }
-async function assertFree(port) {
+export async function assertFree(port) {
   await new Promise((resolve, reject) => {
     const server = net.createServer();
     server.once('error', () => reject(new Error(`127.0.0.1:${port} 已被占用；拒绝连接现有浏览器`)));

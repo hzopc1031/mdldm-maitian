@@ -58,6 +58,19 @@ try{
  await assert.rejects(loginX(xAccountConfig(config,a.id,db),{waitLogin:true,withBrowser:fakeLogin('TravelDemo')}),/不是/);
  await assert.rejects(loginX(xAccountConfig(config,c.id,db),{waitLogin:true,withBrowser:fakeLogin('PublicOnly','https://x.com/PublicOnly')}),/home/);
  assert.throws(()=>bindXAccount(db,c.id,'LegacyFixture',config.xHandle),/另一账户/);
+ const manual=createXAccount(db,{label:'手动登录验收'});
+ const scopedManual=xAccountConfig(config,manual.id,db);
+ const steps=[];
+ const manualSignIn=async(scoped,timeout)=>{assert.equal(scoped._xAccountRoute.id,manual.id);assert.ok(timeout>0);steps.push('manual');};
+ const verification=identity=>async(_scoped,verify)=>{
+  steps.push('verify');
+  return verify({goto:async url=>{assert.equal(url,'https://x.com/home');},evaluate:async()=>identity});
+ };
+ await assert.rejects(loginX(scopedManual,{waitLogin:true,manualSignIn,withBrowser:verification({url:'https://x.com/i/flow/login',login:true})}),/尚未确认 X 登录/);
+ assert.equal(xAccountConfig(config,manual.id,db)._xAccountRoute.handle,null);
+ await loginX(scopedManual,{waitLogin:true,manualSignIn,withBrowser:verification({url:'https://x.com/home',handle:'ManualDemo'})});
+ assert.deepEqual(steps,['manual','verify','manual','verify']);
+ assert.equal(xAccountConfig(config,manual.id,db)._xAccountRoute.handle,'ManualDemo');
  const captured=new Date().toISOString();
  const observe=(id,account,postId,total,views)=>transaction(()=>saveObservation({platform:'x',account,accountId:id,captured_at:captured,source:'offline-fixture',followers:total,posts:[{id:postId,text:account+' fixture',url:`https://x.com/${account}/status/${postId}`,created_at:captured,views,likes:1}]}));
  observe('default','LegacyFixture','100',10,1);observe(a.id,'NotebookDemo','101',20,2);observe(b.id,'TravelDemo','102',30,3);

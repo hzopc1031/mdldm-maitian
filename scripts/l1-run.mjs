@@ -23,7 +23,9 @@ try {
     } else
     if (values['login-x']) {
       const { loginX } = await import('../src/l1-x.mjs');
-      await loginX(config, { waitLogin: values['wait-login'] });
+      const isNewMacAccount=process.platform==='darwin'&&values['wait-login']&&config._xAccountRoute&&!config._xAccountRoute.handle;
+      const manualSignIn=isNewMacAccount?(await import('../src/x-manual-login.mjs')).openXManualLogin:undefined;
+      await loginX(config, { waitLogin: values['wait-login'], manualSignIn });
     } else if (values['login-wechat']) {
       const { loginWechat } = await import('../src/l1-wechat.mjs');
       await loginWechat(config, { waitLogin: values['wait-login'] });

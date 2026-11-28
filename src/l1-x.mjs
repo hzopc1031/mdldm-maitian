@@ -23,8 +23,8 @@ export async function assertXAccount(page, account, wait = pause) {
   throw new Error(`停止：无法确认可见登录账号为 @${account}；本次 X 未写库`);
 }
 
-export async function loginX(config, { waitLogin = false, withBrowser=withL1Browser, bind=bindConfiguredX } = {}) {
-  const account=config._xAccountRoute?config._xAccountRoute.handle:l1Account(config,'x'), PROFILE=account?`https://x.com/${account}`:'https://x.com/home';
+export async function loginX(config, { waitLogin = false, withBrowser=withL1Browser, bind=bindConfiguredX, manualSignIn } = {}) {
+  const account=config._xAccountRoute?config._xAccountRoute.handle:l1Account(config,'x');
   let verifiedHandle,reused=false;
   const verify=identity=>{
     const handle=identity.handle?.replace(/^@/,'');
@@ -34,6 +34,7 @@ export async function loginX(config, { waitLogin = false, withBrowser=withL1Brow
   };
   if (!waitLogin && !process.stdin.isTTY) throw new Error('X 登录需要交互终端');
   const timeoutMs = waitLogin ? loginTimeoutMs() : null;
+  if(manualSignIn) await manualSignIn(config,timeoutMs);
   await withBrowser(config, async page => {
   // The signed-in home is the identity entry; a public profile preview proves no login.
     // Enter the official sign-in route only when the visible page requires login.
@@ -48,6 +49,7 @@ export async function loginX(config, { waitLogin = false, withBrowser=withL1Brow
 
       return;
     }
+    if(manualSignIn) throw new Error('尚未确认 X 登录。请在专用窗口完成 X 验证并进入首页，再核验账号。');
     if (!current.login) throw new Error('当前X页面没有提供可确认的账号或登录入口；未确认登录，请查看专用窗口');
     if (!/^\/i\/(?:flow\/login|jf\/onboarding)(?:\/|$)/.test(new URL(current.url).pathname)) await page.goto('https://x.com/i/flow/login');
     if (waitLogin) {
