@@ -2,7 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
 import { promisify } from 'node:util';
-import { visibleXIdentity } from './l1-x-dom.mjs';
+import { visibleXIdentity, visibleXPosts } from './l1-x-dom.mjs';
 import {home} from './l1-config.mjs';
 
 const port = 9336;
@@ -179,6 +179,88 @@ function existingXEditor(url) {
   } catch { return false; }
 }
 
+function visibleXPublishNotice() {
+  const visible = el => el.getClientRects().length > 0 && getComputedStyle(el).visibility === 'visible';
+  const notices = [...document.querySelectorAll('[data-testid="toast"], [role="alert"], [role="status"]')]
+    .filter(el => visible(el) && !el.closest('article') &&
+      /your post was sent|post was sent|(?:帖子|貼文|推文)已(?:发送|發送|发布|發布)|已(?:发送|發送|发布|發布)(?:帖子|貼文|推文)/i.test(el.innerText || ''));
+  return {
+    page: location.href,
+    sent: notices.length > 0,
+    links: notices.flatMap(el => [...el.querySelectorAll('a[href]')].filter(visible).map(a => a.href)),
+  };
+}
+
+function xPostUrl(value, account) {
+  try {
+    const url = new URL(value);
+    const match = url.pathname.match(/^\/([A-Za-z0-9_]+)\/status\/([1-9]\d*)$/);
+    if (url.origin === 'https://x.com' && !url.username && !url.password &&
+        match?.[1].toLowerCase() === account.toLowerCase()) return url.origin + url.pathname;
+  } catch { /* No usable permalink. */ }
+  return null;
+}
+
+function matchingXProfilePost(cards, { account, text, imageCount, startedAt }) {
+  const comparable = value => value.replace(/\r\n?/g, '\n').replace(/\u00a0/g, ' ').replace(/\u200b/g, '');
+  const expected = comparable(text);
+  // X may display timestamps rounded to whole seconds.
+  const firstSecond = Math.floor(startedAt / 1000) * 1000;
+  const handle = account.toLowerCase();
+  const urls = new Set();
+  for (const card of cards) {
+    const publishedAt = Date.parse(card.created_at);
+    if (card.pinned || !['original', 'quote'].includes(card.kind) || card.author?.toLowerCase() !== handle ||
+        !Number.isFinite(publishedAt) || publishedAt < firstSecond || publishedAt > Date.now() ||
+        card.images !== imageCount || comparable(card.text) !== expected) continue;
+    const url = xPostUrl(card.url, account);
+    if (url) urls.add(url);
+  }
+  return urls.size === 1 ? [...urls][0] : null;
+}
+
+export async function confirmXPublish({ evaluate, openProfile, account, text, imageCount, startedAt, before, evidence, wait = delay }) {
+  const staleLinks = new Set(before.links.map(url => xPostUrl(url, account)?.toLowerCase()));
+  let profile;
+  try {
+    for (let i = 0; i < 80; i++) {
+      // A navigation can temporarily replace the editor's JS context.
+      const notice = await evaluate(visibleXPublishNotice).catch(() => null);
+      if (notice) {
+        evidence.publishPage = notice.page;
+        evidence.publishNoticeSeen ||= notice.sent;
+        const links = new Set(notice.links.map(url => xPostUrl(url, account))
+          .filter(url => url && !staleLinks.has(url.toLowerCase())));
+        if (links.size === 1) return { url: [...links][0], source: 'success-notice' };
+
+        const detailUrl = xPostUrl(notice.page, account);
+        if (detailUrl) {
+          const cards = await evaluate(visibleXPosts, [true]).catch(() => []);
+          const detail = cards.filter(card => card.url?.toLowerCase() === detailUrl.toLowerCase());
+          const url = matchingXProfilePost(detail, {account, text, imageCount, startedAt});
+          if (url) return { url, source: 'post-page' };
+        }
+      }
+
+      if (i === 6) profile = await openProfile();
+      if (profile) {
+        const identity = await profile.evaluate(visibleXIdentity).catch(() => null);
+        if (identity?.handle?.replace(/^@/, '').toLowerCase() === account.toLowerCase() &&
+            identity.url?.toLowerCase() === `https://x.com/${account.toLowerCase()}`) {
+          const cards = await profile.evaluate(visibleXPosts, [true]).catch(() => []);
+          const url = matchingXProfilePost(cards, { account, text, imageCount, startedAt });
+          if (url) return { url, source: 'account-profile' };
+          if (i === 30 || i === 54) await profile.reload();
+        }
+      }
+      await wait(500);
+    }
+    return null;
+  } finally {
+    await profile?.close();
+  }
+}
+
 // 只管理本次新建的目标。保留新编辑页及所有旧标签，断开调试连接。
 export async function fillXEditor({ account, profile, port:browserPort=9336, job, folder }, connect = connectDedicatedBrowser, { saveDraft = false, publish = false, waitHuman=humanDelay } = {}) {
   if (!/^[A-Za-z0-9_]{1,15}$/.test(account) || !isDedicatedXProfile(profile,browserPort) || browserPort!==9336&&connect===connectDedicatedBrowser || job.submit !== false ||
@@ -209,10 +291,10 @@ export async function fillXEditor({ account, profile, port:browserPort=9336, job
     const { sessionId } = await send('Target.attachToTarget', { targetId, flatten: true });
     if (!sessionId) throw new Error('没有确认独立 X 标签调试会话');
     const command = (method, params) => send(method, params, sessionId);
-    const evaluate = async (fn, args = [], byValue = true) => {
-      const result = await command('Runtime.evaluate', {
+    const evaluate = async (fn, args = [], byValue = true, session = sessionId) => {
+      const result = await send('Runtime.evaluate', {
         expression: `(${fn.toString()})(...${JSON.stringify(args)})`, returnByValue: byValue,
-      });
+      }, session);
       if (result.exceptionDetails) throw new Error('X 编辑器可见控件检查失败');
       return byValue ? result.result.value : result.result.objectId;
     };
@@ -271,7 +353,10 @@ export async function fillXEditor({ account, profile, port:browserPort=9336, job
     record();
     if (publish) {
       await waitHuman();
+      if (!await identity()) throw new Error('发布前 X 身份已变化');
+      const beforePublish = await evaluate(visibleXPublishNotice);
       evidence.stage = 'publish';
+      evidence.publishStartedAt = new Date().toISOString();
       record();
       const clicked = await evaluate(() => {
         const visible = el => el.getClientRects().length > 0;
@@ -281,24 +366,30 @@ export async function fillXEditor({ account, profile, port:browserPort=9336, job
         return true;
       });
       if (!clicked) throw new Error('没有找到 X 发布按钮，结果未确认；请本人核对页面');
-      let url = '', ok = false;
-      for (let i = 0; i < 120; i++) {
-        await delay(500);
-        const state = await evaluate(() => ({
-          url: location.href,
-          body: (document.body.innerText || '').slice(-1200),
-          editor: Boolean(document.querySelector('[data-testid="tweetTextarea_0"]')),
-        }));
-        url = state.url;
-        evidence.publishToast = state.body;
-        if (/\/status\/\d+/.test(url)) { ok = true; break; }
-        if (/your post was sent|post was sent|已发送|已发布|view post|查看帖子/i.test(state.body)) { ok = true; break; }
-        if (!state.editor && i > 4) { ok = true; break; }
+      const receipt = await confirmXPublish({
+        evaluate, account, text, imageCount: after.imageCount, evidence, before: beforePublish,
+        startedAt: Date.parse(evidence.publishStartedAt),
+        openProfile: async () => {
+          const {targetId: profileId} = await send('Target.createTarget', {url: `https://x.com/${account}`, background: true}).catch(() => ({}));
+          if (!profileId || profileId === targetId || oldTabs.some(tab => tab.targetId === profileId)) return null;
+          const close = () => send('Target.closeTarget', {targetId: profileId}).catch(() => {});
+          const {sessionId: profileSession} = await send('Target.attachToTarget', {targetId: profileId, flatten: true}).catch(() => ({}));
+          if (!profileSession) { await close(); return null; }
+          return {
+            evaluate: (fn, args) => evaluate(fn, args, true, profileSession),
+            reload: () => send('Page.reload', {}, profileSession).catch(() => {}),
+            close,
+          };
+        },
+      });
+      if (receipt) {
+        evidence.submitted = true;
+        evidence.publishUrl = receipt.url;
+        evidence.publishProof = receipt.source;
       }
-      evidence.publishUrl = url;
       record();
-      if (!ok) throw new Error('未读到 X 发布成功确认，结果未确认；请到主页核对，勿重发');
-      return { submitted: true, url, editorFilled: true, imageCount: after.imageCount, screenshot: evidence.after };
+      if (!receipt) throw new Error('未核实 X 原帖公开链接，结果未确认；请到主页核对，勿重发');
+      return { submitted: true, url: receipt.url, proof: receipt.source, editorFilled: true, imageCount: after.imageCount, screenshot: evidence.after };
     }
     if (saveDraft) {
       evidence.stage = 'save-draft';

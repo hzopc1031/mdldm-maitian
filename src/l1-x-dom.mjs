@@ -29,7 +29,7 @@ export function visibleXFollowers(account) {
     .map(a => a.innerText.trim());
 }
 
-export function visibleXPosts() {
+export function visibleXPosts(includeReceiptDetails = false) {
   const visible = el => { const r = el.getBoundingClientRect(), s = getComputedStyle(el); return r.width > 0 && r.height > 0 && s.display !== 'none' && s.visibility !== 'hidden'; };
   const result = [];
   for (const article of document.querySelectorAll('article')) {
@@ -48,12 +48,20 @@ export function visibleXPosts() {
     // 回复提示是正文外的渲染文本；正文中提到 “Replying to” 不算回复。
     const reply = [...article.querySelectorAll('[data-testid="replyingTo"], div, span')].some(el => visible(el) && owned(el) && !el.closest('[data-testid="tweetText"]') && !el.querySelector('[data-testid="tweetText"]') &&
       (el.getAttribute('data-testid') === 'replyingTo' || /^(?:Replying to\s+@|回复\s*@|返信先[:：])/i.test((el.innerText || '').trim())));
-    const text = [...article.querySelectorAll('[data-testid="tweetText"]')].find(el => owned(el))?.innerText || '';
+    const textNode = [...article.querySelectorAll('[data-testid="tweetText"]')].find(el => owned(el));
+    const text = textNode?.innerText || '';
+    const details = {};
+    if (includeReceiptDetails) {
+      const images = [...article.querySelectorAll('[data-testid="tweetPhoto"] img')].filter(el => visible(el) && owned(el));
+      const truncated = [...article.querySelectorAll('[data-testid="tweet-text-show-more-link"]')].some(el => visible(el) && owned(el));
+      details.images = images.every(image => image.complete && image.naturalWidth > 0) ? images.length : null;
+      if (truncated || !textNode || !visible(textNode)) details.text = '';
+    }
     const quote = [...article.querySelectorAll('[data-testid="quoteTweet"],div[role="link"]')].some(el => visible(el) &&
       [...el.querySelectorAll('a[href]')].some(a => visible(a) && /^\/[A-Za-z0-9_]+\/status\/\d+$/.test(new URL(a.href, location.href).pathname)));
     result.push({ id: match?.[2] || null, author, permalinkAuthor: match?.[1] || null,
       url: match ? `https://x.com/${match[1]}/status/${match[2]}` : null,
-      created_at: time?.getAttribute('datetime') || null, text, pinned:/pinned|置顶/i.test(context), kind: repost ? 'repost' : reply ? 'reply' : quote ? 'quote' : 'original' });
+      created_at: time?.getAttribute('datetime') || null, text, pinned:/pinned|置顶/i.test(context), kind: repost ? 'repost' : reply ? 'reply' : quote ? 'quote' : 'original', ...details });
   }
   return result;
 }

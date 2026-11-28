@@ -11,7 +11,7 @@ import { normalizePrep, prepCommand, acceptPrepResult, createPrepService, prepCa
 import { selectPublishedLink, inspectPlatform, publishedTarget, writePublishedLink,preparationTarget,writePreparationLink } from '../src/l1-inspect.mjs';
 import {browserProxyArgs} from '../src/l1-browser.mjs';
 import {planL1Action} from '../src/l1-web.mjs';
-import {fillXEditor} from '../src/x-draft-editor.mjs';
+import {confirmXPublish, fillXEditor} from '../src/x-draft-editor.mjs';
 
 globalThis.fetch = () => { throw new Error('offline: no network'); };
 globalThis.WebSocket = class { constructor() { throw new Error('offline: no browser'); } };
@@ -217,6 +217,35 @@ try {
   for (const cards of [[],[{id:'abc',state:'reviewing',url}],[{id:'abc',state:'published',url:null}],[{id:'abc',state:'published',url:url+'?token=not-allowed'}],[{id:'abc',state:'published',url},{id:'abc',state:'published',url}]]) assert.throws(() => selectPublishedLink('xhs',cards,{postId:'abc'}));
   assert.throws(() => selectPublishedLink('wechat',[{id:'a',state:'published',url:'https://mp.weixin.qq.com/s?mid=123'}],{postId:'a'}));
   const xCard = {id:'123',kind:'original',author:'Example',permalinkAuthor:'Example',url:'https://x.com/Example/status/123'};
+  const feedHome = 'https://x.com/home';
+  const sent = {innerText:'Your post was sent. View post', getClientRects:()=>[{}], closest:()=>null,
+    querySelectorAll:()=>[{href:xCard.url+'?s=20',getClientRects:()=>[{}]}]};
+  const evidence = {};
+  const publishStart = Date.now() - 100;
+  const receiptInput = {account:'Example',text:'完整正文',imageCount:1,startedAt:publishStart,
+    before:{links:[]},evidence,wait:async()=>{}};
+  const receipt = await confirmXPublish({...receiptInput, evaluate:async fn=>runInNewContext(
+    '('+fn.toString()+')()', {document:{querySelectorAll:()=>[sent]}, location:{href:feedHome},
+      getComputedStyle:()=>({visibility:'visible'})}),openProfile:()=>assert.fail('Already read a success link')});
+  assert.deepEqual(receipt,{url:xCard.url,source:'success-notice'});
+  assert.equal(evidence.publishPage,feedHome);
+
+  const profileCard = {...xCard,text:'完整正文',images:1,created_at:new Date(publishStart).toISOString()};
+  assert.deepEqual(await confirmXPublish({...receiptInput,
+    evaluate:async fn=>fn.name==='visibleXPosts'?[profileCard]:{page:xCard.url,links:[],sent:false},
+    openProfile:()=>assert.fail('Already verified the public post page')}),{url:xCard.url,source:'post-page'});
+  let profileCloses = 0;
+  const fallback = (cards, handle = '@Example') => confirmXPublish({...receiptInput,
+    before:{links:[xCard.url]},evaluate:async()=>({page:feedHome,sent:true,links:[xCard.url,'https://x.com/Wrong/status/123']}),
+    openProfile:async()=>({evaluate:async fn=>fn.name==='visibleXIdentity'?{handle,url:'https://x.com/Example'}:cards,
+      close:async()=>{profileCloses++;},reload:async()=>{}})});
+  assert.deepEqual(await fallback([profileCard]),{url:xCard.url,source:'account-profile'});
+  assert.equal(await fallback([profileCard],'@Wrong'),null);
+  assert.equal(await fallback([{...profileCard,images:0},{...profileCard,kind:'reply'},
+    {...profileCard,text:'完整正文…'},{...profileCard,created_at:'2026-01-01T09:00:00Z'}]),null);
+  assert.equal(await fallback([profileCard,{...profileCard,url:'https://x.com/Example/status/234'}]),null);
+  assert.equal(profileCloses,4);
+
   assert.equal(selectPublishedLink('x',[xCard],{postId:'123',account:'Example'}),xCard.url);
   assert.throws(() => selectPublishedLink('x',[{...xCard,kind:'repost'}],{postId:'123',account:'Example'}));
   assert.throws(() => selectPublishedLink('x',[{...xCard,author:'SomeoneElse'}],{postId:'123',account:'Example'}));
@@ -252,6 +281,23 @@ try {
   assert.throws(()=>browserProxyArgs({l1:{x:{proxy:'http://user:pass@proxy.invalid'}}},'x',{}));
   assert.throws(()=>writePublishedLink(db,'missing','xhs',proof));
   assert.equal(db.prepare('SELECT COUNT(*) AS n FROM logs').get().n,2);
+  const finishedAt = '2026-11-28T11:19:00.000Z';
+  const xPrevious = {id:'backfill',platform:'x',state:'unknown',kind:'publish',account:'Example',accountId:'account-1',
+    finishedAt,error:'Missing public link',operations:[{kind:'publish',state:'unknown',finishedAt}]};
+  db.prepare('INSERT INTO publish_preparations (id,record) VALUES (?,?)').run(xPrevious.id,JSON.stringify(xPrevious));
+  const xProof = {ok:true,platform:'x',account:'Example',url:xCard.url,checkedAt:'2026-11-28T11:19:03.000Z',
+    xPublishAttempt:{accountId:'account-1',finishedAt}};
+  assert.throws(()=>writePreparationLink(db,xPrevious.id,{...xProof,xPublishAttempt:{...xProof.xPublishAttempt,finishedAt:'wrong'}}),/原发布操作/);
+  writePreparationLink(db,xPrevious.id,xProof);
+  writePreparationLink(db,xPrevious.id,xProof);
+  assert.throws(()=>writePreparationLink(db,xPrevious.id,{...xProof,url:'https://x.com/Example/status/234'}),/不同的公开链接/);
+  const xRepaired = JSON.parse(db.prepare('SELECT record FROM publish_preparations WHERE id=?').get(xPrevious.id).record);
+  assert.equal(xRepaired.state,'published');
+  assert.equal(xRepaired.url,xCard.url);
+  assert.equal(xRepaired.evidence.proof,'public-post-readback');
+  assert.equal(xRepaired.error,undefined);
+  assert.deepEqual(xRepaired.operations,xPrevious.operations);
+  assert.equal(db.prepare('SELECT COUNT(*) AS n FROM logs').get().n,3);
   let reads = [], nav = [];
   const withBrowser = async (cfg,fn,platform) => { assert.equal(platform,'xhs'); return fn({goto:async u => nav.push(u),evaluate:async fn => {
     reads.push(fn.name);

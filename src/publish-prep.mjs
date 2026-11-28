@@ -285,7 +285,7 @@ export function createPrepService({ db, home, root, config, secrets = [], spawnC
             throw new Error('未读到 X 发布成功回执及公开链接，结果未确认；请到主页核对，勿重发');
           }
           r.state = 'published';
-          r.evidence = { submitted: true, url: receipt.url, screenshot: receipt.screenshot };
+          r.evidence = { submitted: true, url: receipt.url, proof: receipt.proof, screenshot: receipt.screenshot };
           r.url = receipt.url;
           r.note = '已发布到 X，已读回公开链接。';
         } else if (receipt?.submitted !== false || receipt.editorFilled !== true || receipt.imageCount !== job.images.length) {
@@ -300,8 +300,8 @@ export function createPrepService({ db, home, root, config, secrets = [], spawnC
           r.evidence = receipt;
           r.note = '完整正文和图片已在 X 新编辑页读回，留给本人核对。';
         }
-        if (r.episodeId) db.prepare('UPDATE tasks SET state=?,detail=?,updated_at=? WHERE episode_id=? AND platform=?')
-          .run(r.state, r.note, new Date().toISOString(), r.episodeId, r.platform);
+        if (r.episodeId) db.prepare('UPDATE tasks SET state=?,detail=?,url=COALESCE(?,url),updated_at=? WHERE episode_id=? AND platform=?')
+          .run(r.state, r.note, r.url??null, new Date().toISOString(), r.episodeId, r.platform);
       } catch (error) {
         r.state = 'unknown';
         r.error = redactL1(error.message, secrets);

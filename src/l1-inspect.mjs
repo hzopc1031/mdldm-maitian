@@ -48,11 +48,34 @@ export function writePreparationLink(db,id,result) {
     if(!row)throw new Error('准备记录不存在');
     const record=JSON.parse(row.record);
     if(record.platform!==result.platform||record.state==='running')throw new Error('准备记录平台或运行状态已变化');
-    if(record.platform==='x'&&record.account&&record.account.toLowerCase()!==result.account.toLowerCase())throw Error('核验回执与稿件绑定X账户不一致');
+    const isX=record.platform==='x';
+    if(isX&&record.account&&record.account.toLowerCase()!==result.account.toLowerCase())throw Error('核验回执与稿件绑定X账户不一致');
+
+    if (result.xPublishAttempt) {
+      const attempt=record.operations?.at(-1);
+      const expected=result.xPublishAttempt;
+      if (!isX || !['unknown','published'].includes(record.state) || record.kind!=='publish' ||
+          record.accountId!==expected.accountId || attempt?.kind!=='publish' ||
+          record.finishedAt!==expected.finishedAt || attempt.finishedAt!==expected.finishedAt) {
+        throw new Error('X 核验回执与原发布操作不一致');
+      }
+    }
+    if (isX && record.state==='published' && record.url) {
+      if (record.url.toLowerCase()!==result.url.toLowerCase()) throw new Error('X 原记录已有不同的公开链接');
+      db.exec('COMMIT');
+      return;
+    }
+
     if(record.episodeId)writeTask(db,record.episodeId,result.platform,result);
     const submittedHere=record.submission?.submitted===true&&record.operations?.some(op=>op.kind==='publish'&&op.state==='submitted');
-    Object.assign(record,{url:result.url,state:'published',linkCheckedAt:result.checkedAt,
-      note:submittedHere?'本系统已提交小红书，随后从可见已发布列表核对了公开链接。':'外部发布后，从可见已发布列表核对了公开链接；本系统未执行发布。'});
+    const note=isX
+      ? '已从 X 公开原帖核验链接。'
+      : submittedHere?'本系统已提交小红书，随后从可见已发布列表核对了公开链接。':'外部发布后，从可见已发布列表核对了公开链接；本系统未执行发布。';
+    Object.assign(record,{url:result.url,state:'published',linkCheckedAt:result.checkedAt,note});
+    if (result.xPublishAttempt) {
+      record.evidence={...record.evidence,submitted:true,url:result.url,proof:'public-post-readback'};
+      delete record.error;
+    }
     db.prepare('UPDATE publish_preparations SET record=? WHERE id=?').run(JSON.stringify(record),id);
     db.prepare('INSERT INTO logs (ts,episode_id,platform,action,result) VALUES (?,?,?,?,?)').run(result.checkedAt,record.episodeId||null,result.platform,'links','准备稿的可见公开链接已核对回写');
     db.exec('COMMIT');
